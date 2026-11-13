@@ -148,3 +148,7 @@ build/, resources/  ícones do app
 ```
 
 Para contribuir, leia o [AGENTS.md](AGENTS.md): regras do projeto, convenções e comandos.
+
+## Licença
+
+[MIT](LICENSE).

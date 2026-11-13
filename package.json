@@ -3,9 +3,9 @@
   "productName": "Cais",
   "version": "0.1.0",
   "description": "Cliente SQL de desktop organizado por projeto e ambiente",
-  "private": true,
   "main": "out/main/index.js",
   "author": "Cais",
+  "license": "MIT",
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build && node scripts/build-cli.mjs",
