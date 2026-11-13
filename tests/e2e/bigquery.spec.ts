@@ -1,0 +1,336 @@
+import { rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
+import { FakeBigquery } from '../support/bigquery-fake';
+import { launch, seedUserData, setSql as typeSql, setTheme, shortTempDir, shots } from './helpers';
+
+// A BigQuery environment end to end: registry (engine, project, byte limit, Google IAM credential), tree with
+// columns read when a dataset opens, query with bytes in the footer, refusal of DML, confirmation above the byte
+// limit and the trail. Against the local fake server only: the app runs with the e2e token and never calls gcloud.
+
+const GIB = 1024 ** 3;
+const E2E_TOKEN = 'cais-test-access-token';
+
+let userData: string;
+let app: ElectronApplication;
+let page: Page;
+const fake = new FakeBigquery();
+
+test.describe.configure({ mode: 'serial' });
+
+test.beforeAll(async () => {
+  await fake.start();
+  fake.validTokens = new Set([E2E_TOKEN]);
+  fake.addDataset('vendas', {
+    pedidos: {
+      schema: [
+        { name: 'id', type: 'INTEGER', mode: 'REQUIRED' },
+        { name: 'valor', type: 'NUMERIC' },
+        { name: 'cliente', type: 'RECORD', fields: [{ name: 'nome', type: 'STRING' }, { name: 'uf', type: 'STRING' }] },
+        { name: 'tags', type: 'STRING', mode: 'REPEATED' },
+      ],
+    },
+    eventos: { schema: [{ name: 'id', type: 'INTEGER' }, { name: 'tipo', type: 'STRING' }] },
+    muitos: { schema: [{ name: 'n', type: 'INTEGER' }] },
+    resumo: { type: 'VIEW', schema: [{ name: 'total', type: 'NUMERIC' }] },
+    totais_mv: { type: 'MATERIALIZED_VIEW', schema: [{ name: 'total', type: 'NUMERIC' }] },
+    parquet_externa: { type: 'EXTERNAL', schema: [{ name: 'linha', type: 'STRING' }] },
+    pedidos_snap: { type: 'SNAPSHOT', schema: [{ name: 'id', type: 'INTEGER' }] },
+  });
+  fake.addDataset('logs', { acessos: { schema: [{ name: 'ip', type: 'STRING' }] } });
+  // what a statement reads: eventos is large (3 GiB), everything else is small
+  fake.bytesFor = (sql) => (/\beventos\b/.test(sql) ? 3 * GIB : 10 * 1024 * 1024);
+  fake.resultFor = (sql) => {
+    if (/\bmuitos\b/.test(sql)) {
+      return { schema: [{ name: 'n', type: 'INTEGER' }], rows: Array.from({ length: 1200 }, (_, i) => [String(i + 1)]) };
+    }
+    if (/\beventos\b/.test(sql)) return { schema: [{ name: 'id', type: 'INTEGER' }, { name: 'tipo', type: 'STRING' }], rows: [['1', 'clique'], ['2', 'compra']] };
+    return {
+      schema: [{ name: 'id', type: 'INTEGER' }, { name: 'valor', type: 'NUMERIC' }],
+      rows: [['1', '10.50'], ['2', '99.90'], ['3', '5']],
+    };
+  };
+
+  userData = shortTempDir('cais-bq-');
+  seedUserData(userData);
+  ({ app, page } = await launch(userData, { CAIS_BIGQUERY_URL: fake.url }));
+});
+test.afterAll(async () => {
+  await app?.close().catch(() => undefined);
+  await fake.stop();
+  rmSync(userData, { recursive: true, force: true });
+});
+
+const dialog = (name: string) => page.getByRole('dialog', { name });
+const registry = () => dialog('Cadastro');
+const chip = () => page.getByTestId('conn-chip');
+
+/** Sets the editor text; the completion popup the typing opens is closed, so it never sits over a screenshot. */
+async function setSql(page: Page, sql: string): Promise<void> {
+  await typeSql(page, sql);
+  await page.keyboard.press('Escape');
+}
+
+async function runCurrent(): Promise<void> {
+  await page.getByTestId('run').click();
+}
+
+test('a Google IAM credential and a BigQuery environment are registered in the form', async () => {
+  // credential: Google IAM only (the accounts list is the e2e hook's fixed one, never gcloud)
+  await page.getByRole('button', { name: 'Credenciais' }).click();
+  const form = registry();
+  await form.getByRole('button', { name: 'Nova credencial' }).click();
+  await form.getByLabel('Nome', { exact: true }).fill('conta google');
+  await form.getByRole('radio', { name: 'Google IAM via gcloud' }).click();
+  await form.getByLabel('Conta do gcloud').fill('ana@exemplo.com');
+  await form.getByRole('button', { name: 'Salvar' }).click();
+  await expect(form.getByText('Salvo')).toBeVisible();
+
+  await form.getByRole('tab', { name: 'Ambientes' }).click();
+  await form.getByRole('button', { name: 'Novo ambiente' }).click();
+  await form.getByLabel('Nome do ambiente').fill('bq-dev');
+  // the engine choice is for a new environment; MySQL is the start
+  await expect(form.getByLabel('Host')).toBeVisible();
+  await form.getByRole('radio', { name: 'BigQuery' }).click();
+  await expect(form.getByLabel('Host')).toHaveCount(0);
+  await expect(form.getByLabel('Porta')).toHaveCount(0);
+  await expect(form.getByLabel('Limite de bytes por consulta (GiB)')).toHaveValue('100');
+  await expect(form.getByLabel('Dataset padrão (opcional)')).toBeVisible();
+  // only Google IAM credentials are offered, the password one is not
+  const credential = form.getByLabel('Credencial');
+  await expect(credential.locator('option', { hasText: 'conta google' })).toHaveCount(1);
+  await expect(credential.locator('option', { hasText: 'usuário de teste' })).toHaveCount(0);
+
+  // validation: project id and a whole number of GiB from 1
+  await form.getByLabel('Projeto do Google Cloud').fill('Projeto Errado');
+  await form.getByRole('button', { name: 'Salvar' }).click();
+  await expect(form.getByRole('alert')).toContainText('id do projeto do Google Cloud');
+  await form.getByLabel('Projeto do Google Cloud').fill('meu-projeto-123');
+  await form.getByLabel('Limite de bytes por consulta (GiB)').fill('0');
+  await form.getByRole('button', { name: 'Salvar' }).click();
+  await expect(form.getByRole('alert')).toContainText('número inteiro de GiB a partir de 1');
+  await form.getByLabel('Limite de bytes por consulta (GiB)').fill('1,5');
+  await form.getByRole('button', { name: 'Salvar' }).click();
+  await expect(form.getByRole('alert')).toContainText('número inteiro de GiB a partir de 1');
+  await form.getByLabel('Limite de bytes por consulta (GiB)').fill('1');
+  await form.getByLabel('Dataset padrão (opcional)').fill('vendas');
+
+  // Testar conexão: token, datasets.list and a dry run, all against the fake server
+  await form.getByRole('button', { name: 'Testar conexão' }).click();
+  await expect(form.getByTestId('test-result')).toContainText('Conectado ao BigQuery');
+  expect(fake.requests.every((r) => r.authorization === `Bearer ${E2E_TOKEN}`)).toBe(true);
+
+  await form.getByRole('button', { name: 'Testar conexão' }).scrollIntoViewIfNeeded();
+  await setTheme(app, page, 'light');
+  await page.screenshot({ path: join(shots, 'bigquery-registry-light.png') });
+  await setTheme(app, page, 'dark');
+  await page.screenshot({ path: join(shots, 'bigquery-registry-dark.png') });
+  await setTheme(app, page, 'light');
+
+  await form.getByRole('button', { name: 'Salvar' }).click();
+  await expect(form.getByText('Salvo')).toBeVisible();
+  // the saved environment keeps its engine: no engine choice, the limit comes back in GiB, and it can be duplicated
+  await expect(form.getByRole('radiogroup', { name: 'Motor do ambiente' })).toHaveCount(0);
+  await expect(form.getByLabel('Limite de bytes por consulta (GiB)')).toHaveValue('1');
+  await expect(form.getByRole('button', { name: 'Duplicar' })).toBeVisible();
+  await form.getByRole('button', { name: 'Duplicar' }).click();
+  await expect(form.getByLabel('Projeto do Google Cloud')).toHaveValue('meu-projeto-123');
+  await expect(form.getByLabel('Limite de bytes por consulta (GiB)')).toHaveValue('1');
+  await expect(form.getByLabel('Nome do ambiente')).toHaveValue('bq-dev (cópia)');
+  await form.getByRole('button', { name: 'Fechar' }).click();
+  await expect(registry()).toHaveCount(0);
+});
+
+test('the tab opens read-only with the dataset in the bar and the tree reads columns when a dataset opens', async () => {
+  await page.getByTestId('env-bq-dev').click();
+  await expect(chip()).toHaveAttribute('data-status', 'connected', { timeout: 20_000 });
+  // the footer says BigQuery once, not "BigQuery BigQuery"
+  await expect(page.getByTestId('statusbar')).toContainText('BigQuery');
+  await expect(page.getByTestId('statusbar')).not.toContainText('BigQuery BigQuery');
+
+  const modeGroup = page.getByRole('radiogroup', { name: 'Modo da sessão' });
+  await expect(modeGroup.getByRole('radio', { name: 'Somente leitura' })).toBeChecked();
+  await expect(modeGroup.getByRole('radio', { name: 'Transação' })).toBeDisabled();
+  await expect(modeGroup.getByRole('radio', { name: 'Auto-commit' })).toBeDisabled();
+  await expect(modeGroup.getByRole('radio', { name: 'Transação' })).toHaveAttribute('title', 'BigQuery não aceita este modo.');
+  // the bar says dataset, not database
+  const picker = page.getByLabel('Dataset atual');
+  await expect(picker).toHaveValue('vendas');
+  await expect(page.getByLabel('Banco atual')).toHaveCount(0);
+
+  // datasets are listed with no columns read yet
+  await expect(page.getByTestId('database-vendas')).toBeVisible();
+  await expect(page.getByTestId('database-logs')).toBeVisible();
+  const schemaReads = () => fake.requestsTo('/tables/', 'GET').length;
+  expect(schemaReads()).toBe(0);
+  await page.getByTestId('database-vendas').click();
+  await expect(page.getByText('pedidos', { exact: true })).toBeVisible();
+  await expect(page.getByTestId('subtype-totais_mv')).toHaveAttribute('title', 'view materializada');
+  await expect(page.getByTestId('subtype-parquet_externa')).toHaveAttribute('title', 'tabela externa');
+  await expect(page.getByTestId('subtype-pedidos_snap')).toHaveAttribute('title', 'snapshot');
+  // one tables.get per table of that dataset, none for the other one
+  await expect.poll(schemaReads).toBe(7);
+  expect(fake.requestsTo('/datasets/logs/tables/', 'GET')).toHaveLength(0);
+  // closing and opening the dataset again reads nothing: the columns are cached per dataset
+  await page.getByTestId('database-vendas').click();
+  await page.getByTestId('database-vendas').click();
+  await expect(page.getByText('pedidos', { exact: true })).toBeVisible();
+  await new Promise((r) => setTimeout(r, 300));
+  expect(schemaReads()).toBe(7);
+
+  const pedidos = page.locator('.tree-row', { hasText: /^pedidos$/ });
+  await pedidos.getByRole('button', { name: 'Expandir colunas' }).click();
+  await expect(page.locator('.tree-row', { hasText: 'cliente' })).toContainText('STRUCT<nome STRING, uf STRING>');
+  await expect(page.locator('.tree-row', { hasText: /^tags/ })).toContainText('ARRAY<STRING>');
+
+  await setTheme(app, page, 'light');
+  await page.screenshot({ path: join(shots, 'bigquery-tree-light.png') });
+  await setTheme(app, page, 'dark');
+  await page.screenshot({ path: join(shots, 'bigquery-tree-dark.png') });
+  await setTheme(app, page, 'light');
+});
+
+test('the editor completes dataset.table and the columns from the tree it has', async () => {
+  await page.locator('.cm-content').click();
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('SELECT * FROM vendas.');
+  const popup = page.locator('.cm-tooltip-autocomplete');
+  await expect(popup).toContainText('pedidos');
+  await expect(popup).toContainText('eventos');
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('SELECT vendas.pedidos.');
+  await expect(page.locator('.cm-tooltip-autocomplete')).toContainText('valor');
+  await page.keyboard.press('Escape');
+});
+
+test('a query shows rows, bytes processed and billed in the footer, and the grid does not edit', async () => {
+  await setSql(page, 'SELECT id, valor FROM vendas.pedidos');
+  await runCurrent();
+  const grid = page.getByTestId('result-grid');
+  await expect(grid).toContainText('99.90');
+  await expect(page.getByTestId('result-summary')).toContainText('3 linhas');
+  await expect(page.getByTestId('result-bytes')).toContainText('10 MiB processados');
+  await expect(page.getByTestId('result-bytes')).toContainText('10 MiB faturados');
+  // the engine does not edit in the grid: a double click opens no editor
+  await grid.getByText('99.90').dblclick();
+  await expect(page.getByTestId('cell-editor')).toHaveCount(0);
+
+  await setTheme(app, page, 'light');
+  await page.screenshot({ path: join(shots, 'bigquery-results-light.png') });
+  await setTheme(app, page, 'dark');
+  await page.screenshot({ path: join(shots, 'bigquery-results-dark.png') });
+  await setTheme(app, page, 'light');
+});
+
+test('DML is refused by the app before anything reaches the server', async () => {
+  const before = fake.requests.length;
+  await setSql(page, 'DELETE FROM vendas.pedidos WHERE id = 1');
+  await runCurrent();
+  await expect(page.locator('.error-card')).toContainText('Somente leitura');
+  expect(fake.requests.length).toBe(before);
+  expect(fake.realQueries.some((q) => /DELETE/i.test(String(q.body?.query)))).toBe(false);
+});
+
+test('a read above the byte limit asks first, Cancelar leaves nothing run, and confirming runs with the ceiling raised', async () => {
+  const realBefore = fake.realQueries.length;
+  await setSql(page, 'SELECT * FROM vendas.eventos');
+  await runCurrent();
+  const ask = dialog('Consulta acima do limite de bytes');
+  await expect(ask).toBeVisible();
+  await expect(ask.getByTestId('bytes-item')).toHaveCount(1);
+  await expect(ask.getByTestId('bytes-item')).toContainText('estimativa 3 GiB');
+  await expect(ask.getByTestId('bytes-item')).toContainText('SELECT * FROM vendas.eventos');
+  await expect(ask).toContainText('O limite do ambiente é 1 GiB');
+  await expect(ask).toContainText('sobe para 3 GiB');
+  // Cancelar has the focus: Enter never confirms by accident
+  await expect(ask.getByTestId('bytes-cancel')).toBeFocused();
+  // behind the question the tab is connected and idle, not "Executando…"
+  await expect(chip()).toHaveAttribute('data-status', 'connected');
+
+  await setTheme(app, page, 'light');
+  await page.screenshot({ path: join(shots, 'bigquery-confirm-light.png') });
+  await setTheme(app, page, 'dark');
+  await page.screenshot({ path: join(shots, 'bigquery-confirm-dark.png') });
+  await setTheme(app, page, 'light');
+
+  await ask.getByTestId('bytes-cancel').click();
+  await expect(ask).toHaveCount(0);
+  expect(fake.realQueries.length).toBe(realBefore);
+
+  await runCurrent();
+  await expect(ask).toBeVisible();
+  await ask.getByTestId('bytes-confirm').click();
+  await expect(page.getByTestId('result-grid')).toContainText('compra');
+  expect(fake.realQueries.length).toBe(realBefore + 1);
+  expect(Number(fake.realQueries.at(-1)!.body.maximumBytesBilled)).toBe(3 * GIB);
+  await expect(page.getByTestId('result-bytes')).toContainText('3 GiB processados');
+});
+
+test('Rodar todos lists every statement above the limit together', async () => {
+  const realBefore = fake.realQueries.length;
+  await setSql(page, 'SELECT 1 FROM vendas.pedidos;\nSELECT * FROM vendas.eventos;\nSELECT 2 FROM vendas.eventos;');
+  await page.keyboard.press('ControlOrMeta+Shift+Enter');
+  const ask = dialog('Consulta acima do limite de bytes');
+  await expect(ask).toBeVisible();
+  await expect(ask.getByTestId('bytes-item')).toHaveCount(2);
+  await ask.getByTestId('bytes-cancel').click();
+  expect(fake.realQueries.length).toBe(realBefore);
+});
+
+test('a double click on a table runs its preview through the same confirmation', async () => {
+  await page.locator('.tree-row', { hasText: /^eventos$/ }).dblclick();
+  const ask = dialog('Consulta acima do limite de bytes');
+  await expect(ask).toBeVisible();
+  await expect(ask.getByTestId('bytes-item')).toContainText('SELECT * FROM `vendas`.`eventos` LIMIT 100');
+  await ask.getByTestId('bytes-cancel').click();
+});
+
+test('Buscar até 50.000 reads more pages of the same job: no new dry run, no new query', async () => {
+  await page.getByTestId('tab').first().click();
+  await setSql(page, 'SELECT n FROM vendas.muitos');
+  await runCurrent();
+  await expect(page.getByTestId('truncated')).toBeVisible();
+  await expect(page.getByTestId('result-summary')).toContainText('1.000 linhas');
+  const dry = fake.dryRuns.length;
+  const real = fake.realQueries.length;
+  await page.getByRole('button', { name: 'Buscar até 50.000' }).click();
+  await expect(page.getByTestId('result-summary')).toContainText('1.200 linhas');
+  await expect(page.getByTestId('truncated')).toHaveCount(0);
+  expect(fake.dryRuns.length).toBe(dry);
+  expect(fake.realQueries.length).toBe(real);
+});
+
+test('the trail has the job id and the bytes of the person lines', async () => {
+  await page.getByTestId('trail-entry').click();
+  const trail = dialog('Trilha');
+  await expect(trail.getByTestId('trail-row').first()).toBeVisible();
+  await trail.getByTestId('trail-search').fill('muitos');
+  // the "Buscar até 50.000" line of the same query points at the job and carries no bytes: it was billed once
+  const row = trail.getByTestId('trail-row').filter({ hasText: '10 MiB faturados' }).first();
+  await expect(row).toBeVisible();
+  await expect(trail.getByTestId('trail-row').first()).not.toContainText('MiB');
+  await row.click();
+  const detail = trail.getByTestId('trail-detail');
+  await expect(detail).toContainText('Job');
+  await expect(detail).toContainText('job_');
+  await expect(detail).toContainText('Bytes estimados');
+  await expect(detail).toContainText('Bytes faturados');
+  await expect(detail).toContainText('Dataset');
+  // the confirmation above the limit is on its line (the text search reads the detail too)
+  await trail.getByTestId('trail-search').fill('Acima do limite de 1 GiB');
+  await expect(trail.getByTestId('trail-row')).toHaveCount(1);
+  await trail.getByTestId('trail-row').click();
+  await expect(trail.getByTestId('trail-detail')).toContainText('estimativa de 3 GiB');
+  await expect(trail.getByTestId('trail-detail')).toContainText('SELECT * FROM vendas.eventos');
+
+  await setTheme(app, page, 'light');
+  await page.screenshot({ path: join(shots, 'bigquery-trail-light.png') });
+  await setTheme(app, page, 'dark');
+  await page.screenshot({ path: join(shots, 'bigquery-trail-dark.png') });
+  await setTheme(app, page, 'light');
+  await trail.getByRole('button', { name: 'Fechar' }).click();
+  // after the whole run: the columns were read for one dataset only, once, and the other one never
+  expect(fake.requestsTo('/tables/', 'GET')).toHaveLength(7);
+  expect(fake.requestsTo('/datasets/logs/tables/', 'GET')).toHaveLength(0);
+});

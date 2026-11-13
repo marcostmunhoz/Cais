@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { capabilitiesOf, connectionTargetKey, GIB, initialModeFor, isBigqueryDatasetId, isGcpProjectId, sameTarget } from '@shared/engines';
+import { engineVersionLabel, getDialect } from '@shared/dialects/registry';
 
 describe('engine capabilities', () => {
   it('MySQL takes the three modes and grid editing', () => {
-    expect(capabilitiesOf('mysql')).toEqual({ modes: ['read-only', 'transaction', 'autocommit'], gridEdit: true });
+    expect(capabilitiesOf('mysql')).toEqual({ modes: ['read-only', 'transaction', 'autocommit'], gridEdit: true, lazyColumns: false });
   });
   it('the initial mode follows production and what the engine accepts', () => {
     const mysql = capabilitiesOf('mysql');
@@ -27,7 +28,7 @@ describe('connection target', () => {
 
 describe('BigQuery engine', () => {
   it('only reads: one mode, no grid editing', () => {
-    expect(capabilitiesOf('bigquery')).toEqual({ modes: ['read-only'], gridEdit: false });
+    expect(capabilitiesOf('bigquery')).toEqual({ modes: ['read-only'], gridEdit: false, lazyColumns: true });
     expect(initialModeFor(capabilitiesOf('bigquery'), false)).toBe('read-only');
     expect(initialModeFor(capabilitiesOf('bigquery'), true)).toBe('read-only');
   });
@@ -56,5 +57,19 @@ describe('BigQuery engine', () => {
   it('knows a dataset id', () => {
     expect(isBigqueryDatasetId('sales_2026')).toBe(true);
     for (const bad of ['', 'a-b', 'a.b', 'a b', 'a/b', '`x`', 'x'.repeat(1025)]) expect(isBigqueryDatasetId(bad), bad).toBe(false);
+  });
+});
+
+describe('what the interface asks the engine for', () => {
+  it('each engine has its own word for the namespace and says whether columns are read per dataset', () => {
+    expect(getDialect('mysql').databaseTerm).toBe('database');
+    expect(getDialect('bigquery').databaseTerm).toBe('dataset');
+    expect(capabilitiesOf('mysql').lazyColumns).toBe(false);
+    expect(capabilitiesOf('bigquery').lazyColumns).toBe(true);
+  });
+
+  it('the server version is shown with the engine name, and an engine without one shows its name once', () => {
+    expect(engineVersionLabel('mysql', '8.4.0')).toBe('MySQL 8.4.0');
+    expect(engineVersionLabel('bigquery', 'BigQuery')).toBe('BigQuery');
   });
 });

@@ -56,6 +56,7 @@ export const ptBR = {
     statement: (p: { n: number }) => `Comando ${p.n}`,
     environment: 'Ambiente',
     database: (p: { database: string }) => ` · banco ${p.database}`,
+    dataset: (p: { database: string }) => ` · dataset ${p.database}`,
     client: 'Cliente',
     clientNote: '(informado pelo cliente)',
     reason: 'Motivo',

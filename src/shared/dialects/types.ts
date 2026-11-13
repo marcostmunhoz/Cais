@@ -105,6 +105,8 @@ export interface Dialect {
   displayName: string;
   /** Name of the CodeMirror SQL dialect the renderer should use. */
   codemirrorDialect: 'MySQL' | 'GoogleSQL';
+  /** What the engine calls the namespace a statement runs in: a MySQL "database", a BigQuery "dataset". The catalogs have both words. */
+  databaseTerm: 'database' | 'dataset';
   keywords: string[];
   splitStatements(sql: string): SqlStatement[];
   /**

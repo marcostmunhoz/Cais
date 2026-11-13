@@ -40,6 +40,7 @@ export const ptBR = {
     unexpectedResponse: 'O BigQuery respondeu em um formato que o Cais não reconhece.',
     modeNotSupported: 'O BigQuery só lê nesta versão: a sessão é sempre Somente leitura.',
     refusedType: (p: { type: string }) => `Somente leitura: o BigQuery leu este comando como ${p.type}, e não como consulta (SELECT).`,
+    resultExpired: 'O resultado dessa consulta não está mais disponível. Rode a consulta de novo.',
     refusedUnknown: 'Somente leitura: o BigQuery não disse que tipo de comando é este.',
     datasetNotFound: (p: { name: string }) => `O dataset ${p.name} não existe neste projeto, ou a conta não o enxerga.`,
     datasetInvalid: 'Nome de dataset inválido: só letras, números e sublinhado.',

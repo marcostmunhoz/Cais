@@ -46,6 +46,10 @@ export interface TrailEntry {
   affectedRows?: number;
   errorCode?: string;
   errno?: number;
+  /** BigQuery, person lines: the job's id, the bytes the dry run estimated and the bytes billed. Never result data. */
+  jobId?: string;
+  bytesEstimated?: number;
+  bytesBilled?: number;
   /** Person, Transação: the server still holds a transaction after the statement. */
   inTransaction?: boolean;
   /**

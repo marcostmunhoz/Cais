@@ -4,7 +4,7 @@ export const ptBR = {
   /** Autocomplete details next to a schema name. */
   tableDetail: 'tabela',
   viewDetail: 'view',
-  databaseDetail: 'banco',
+  databaseDetail: { database: 'banco', dataset: 'dataset' },
   /** CodeMirror's own phrases that reach the person (tooltip of a control character, screen reader text). */
   codemirror: {
     controlCharacter: 'Caractere de controle',

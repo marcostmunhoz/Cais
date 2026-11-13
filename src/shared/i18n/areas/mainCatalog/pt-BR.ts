@@ -24,7 +24,7 @@ export const ptBR = {
     'O projeto do Google Cloud não é um id válido: de 6 a 30 caracteres, com letras minúsculas, números e hífens, começando por uma letra (um projeto de domínio se escreve dominio.com:projeto).',
   bigqueryNeedsIam: 'O BigQuery entra pela credencial "Google IAM via gcloud": usuário e senha não servem.',
   datasetInvalid: 'O dataset padrão só pode ter letras, números e sublinhado.',
-  maxBytesInvalid: 'O limite de bytes por consulta é um número inteiro de bytes, de 1 GiB para cima.',
+  maxBytesInvalid: 'O limite de bytes por consulta é um número inteiro de GiB, de 1 para cima.',
   credentialRequired: 'Escolha uma credencial.',
   credentialNameRequired: 'Informe o nome da credencial.',
   credentialExists: (p: { name: string }) => `Já existe uma credencial chamada "${p.name}".`,

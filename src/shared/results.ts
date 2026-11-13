@@ -50,6 +50,8 @@ export interface StatementStats {
   bytesEstimated?: number;
   cacheHit?: boolean;
   jobId?: string;
+  /** The result was read again from a job that had already run (and been billed): no new cost. */
+  reread?: boolean;
 }
 
 export interface StatementResult {

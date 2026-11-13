@@ -15,6 +15,14 @@ export const en: Shape<typeof ptBR> = {
     duplicateHint: (p) => `Copies every environment of ${p.source}, with the same credential. Scripts are not copied.`,
     renameHint: 'Agent grants for this project are revoked and pending requests expire, because the project/environment address changes.',
   },
+  bytesConfirm: {
+    title: 'Query above the byte limit',
+    heading: 'This run goes over the environment’s byte limit',
+    body: (p) =>
+      `Nothing ran yet. The environment’s limit is ${p.limit}. If you run it anyway, the billed-bytes ceiling goes up to ${p.cap} for this run only.`,
+    estimate: (p) => `estimate ${p.bytes}`,
+    confirm: 'Run anyway',
+  },
   cancel: 'Cancel',
   commit: 'Commit',
   rollback: 'Rollback',

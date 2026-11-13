@@ -173,10 +173,15 @@ export class BigquerySession implements DbSession {
     const active: Active = { controller: new AbortController(), cancelRequested: false };
     this.active = active;
     try {
-      if (opts.refetch && this.last && this.last.sql === sql && this.last.dataset === this.dataset) {
-        const again = await this.refetch(this.last, opts, active).catch(() => undefined);
-        if (again) return { ...base, durationMs: elapsed(), ...again };
-        // the result of the job expired (or cannot be read): the normal path below runs it again
+      if (opts.refetch) {
+        // never a new job: it would bill again with no estimate and no question in main
+        const again = this.last && this.last.sql === sql && this.last.dataset === this.dataset ? await this.refetch(this.last, opts, active).catch(() => undefined) : undefined;
+        if (active.cancelRequested) return { ...base, durationMs: elapsed(), error: cancelledError() };
+        if (!again) {
+          const message = m().mainMisc.bigquery.resultExpired;
+          return { ...base, durationMs: elapsed(), error: { message, ref: ref('mainMisc.bigquery.resultExpired'), code: 'RESULT_EXPIRED' } };
+        }
+        return { ...base, durationMs: elapsed(), ...again };
       }
       const dry = await this.dryRun(sql, active.controller.signal);
       if (active.cancelRequested) return { ...base, durationMs: elapsed(), error: cancelledError() };
@@ -321,7 +326,8 @@ export class BigquerySession implements DbSession {
     const pageSize = Math.min(opts.maxRows + 1, MAX_PAGE_ROWS);
     const first = await this.pollResults(last.job, { maxResults: pageSize, startIndex: 0 }, active);
     if (first.jobComplete === false) return undefined;
-    return this.collect(last.sql, first, last.job, opts, active, last.stats);
+    const read = await this.collect(last.sql, first, last.job, opts, active, last.stats);
+    return { ...read, ...(read.stats ? { stats: { ...read.stats, reread: true } } : {}) };
   }
 
   /** jobs.cancel, bounded. A token that expired is exchanged by the client on the 401, not before every cancel. */

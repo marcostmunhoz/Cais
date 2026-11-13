@@ -8,6 +8,10 @@ export const ptBR = {
   affectedRows: (p: { n: number }) => f.count(p.n, { one: 'linha afetada', other: 'linhas afetadas' }),
   truncated: (p: { n: number }) => `Truncado em ${f.formatNumber(p.n)} linhas`,
   fetchMore: (p: { n: number }) => `Buscar até ${f.formatNumber(p.n)}`,
+  /** BigQuery footer: what the job read and what it billed. */
+  bytesProcessed: (p: { bytes: number }) => `${f.formatBytes(p.bytes)} processados`,
+  bytesBilled: (p: { bytes: number }) => `${f.formatBytes(p.bytes)} faturados`,
+  cacheHit: 'do cache',
   agentsTitle: 'Abrir o painel Agentes',
   agentsOn: 'Agentes ligado',
   requests: (p: { n: number }) => f.count(p.n, { one: 'pedido', other: 'pedidos' }),

@@ -13,6 +13,12 @@ export function getDialect(engine: Engine): Dialect {
   return dialects[engine];
 }
 
+/** "MySQL 8.4.0"; engines whose server has no version of its own report their name ("BigQuery"), which is shown once. */
+export function engineVersionLabel(engine: Engine, version: string): string {
+  const name = dialects[engine].displayName;
+  return version === name ? name : `${name} ${version}`;
+}
+
 /** "Nenhum comando sob o cursor.", in the current locale. Call it where the text is produced. */
 export function noStatementMessage(): string {
   return m().dialect.noStatement;

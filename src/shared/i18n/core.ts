@@ -38,6 +38,8 @@ export interface Format {
    * ("0 linhas", "0 rows"), as Cais always wrote it. A `#` in the chosen form becomes the formatted number.
    */
   plural(n: number, forms: PluralForms): string;
+  /** A size in bytes in binary units (1 GiB = 2^30 bytes): "512 B", "1,5 GiB", "2 TiB". */
+  formatBytes(bytes: number): string;
   /** The formatted number followed by the plural form: "1 linha", "1.234 linhas", "2 rows". */
   count(n: number, forms: PluralForms): string;
 }
@@ -65,9 +67,25 @@ export function createFormat(locale: Locale): Format {
     const form = n !== 0 && rules.select(n) === 'one' ? forms.one : forms.other;
     return form.includes('#') ? form.replaceAll('#', formatNumber(n)) : form;
   };
+  const formatBytes = (bytes: number): string => {
+    const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB'];
+    let unit = 0;
+    let value = Math.max(0, bytes);
+    while (unit < units.length - 1 && value >= 1024) {
+      value /= 1024;
+      unit++;
+    }
+    // two decimals can round 1023.999 up to 1024: that is the next unit
+    if (unit < units.length - 1 && Math.round(value * 100) / 100 >= 1024) {
+      value /= 1024;
+      unit++;
+    }
+    return `${formatNumber(value, { maximumFractionDigits: unit === 0 ? 0 : 2 })} ${units[unit]}`;
+  };
   const format: Format = {
     locale,
     formatNumber,
+    formatBytes,
     formatDate: (value) => dates.format(value),
     formatTime: (value) => times.format(value),
     formatDateTime: (value) => dateTimes.format(value),

@@ -120,7 +120,8 @@ describe('BigQuery through the SessionManager', () => {
     current = env({ maxBytesBilled: 5 * GIB, defaultDatabase: 'sales' });
     await manager.open('t1', current.id);
     await run('SELECT 1');
-    expect(fake.dryRuns).toHaveLength(1);
+    // the SessionManager's prepare, then the driver's own look before the job (the second layer of read-only)
+    expect(fake.dryRuns).toHaveLength(2);
     expect(fake.realQueries).toHaveLength(1);
     const dry = fake.dryRuns[0]!.body;
     expect(dry).toMatchObject({ query: 'SELECT 1', dryRun: true, useLegacySql: false, defaultDataset: { projectId: 'my-project-1', datasetId: 'sales' } });
@@ -197,7 +198,7 @@ describe('BigQuery through the SessionManager', () => {
     expect(first.truncated).toBe(true);
     expect(first.rows![999]).toEqual(['999', 's999']);
     expect(fake.realQueries).toHaveLength(1);
-    expect(fake.dryRuns).toHaveLength(1);
+    expect(fake.dryRuns).toHaveLength(2);
 
     const again = (await run('SELECT n, s FROM big', { maxRows: 50_000, refetch: true })).results[0]!;
     expect(again.rows).toHaveLength(2500);
@@ -205,7 +206,7 @@ describe('BigQuery through the SessionManager', () => {
     expect(again.rows![2499]).toEqual(['2499', 's2499']);
     expect(again.stats?.jobId).toBe(first.stats?.jobId);
     expect(fake.realQueries).toHaveLength(1);
-    expect(fake.dryRuns).toHaveLength(1);
+    expect(fake.dryRuns).toHaveLength(2);
     expect(fake.jobs.size).toBe(1);
   });
 
@@ -227,24 +228,37 @@ describe('BigQuery through the SessionManager', () => {
     expect(r.truncated).toBeUndefined();
   });
 
-  it('a refetch of a different statement runs it normally', async () => {
+  it('a refetch of a different statement is not a re-read: it is refused, nothing runs', async () => {
     await manager.open('t1', current.id);
     await run('SELECT 1');
-    await run('SELECT 2', { refetch: true });
-    expect(fake.realQueries).toHaveLength(2);
+    const r = (await run('SELECT 2', { refetch: true })).results[0]!;
+    expect(r.error).toMatchObject({ code: 'RESULT_EXPIRED' });
+    expect(fake.realQueries).toHaveLength(1);
   });
 
-  it('when the result of the job expired the refetch runs the statement again', async () => {
+  it('when the result of the job expired the refetch does not run the statement again: it says the result is gone', async () => {
     const rows = Array.from({ length: 1500 }, (_, i) => [String(i)]);
     fake.resultFor = () => ({ schema: [{ name: 'n', type: 'INTEGER' }], rows });
     await manager.open('t1', current.id);
     await run('SELECT n FROM big');
     fake.expireJobs = true;
     const again = (await run('SELECT n FROM big', { maxRows: 50_000, refetch: true })).results[0]!;
-    expect(again.error).toBeUndefined();
-    expect(again.rows).toHaveLength(1500);
-    expect(fake.realQueries).toHaveLength(2);
+    expect(again.error).toMatchObject({ code: 'RESULT_EXPIRED' });
+    expect(again.rows).toBeUndefined();
+    // no new job and no new dry run (2 are the first run's: main's and the driver's): nothing was billed again
+    expect(fake.realQueries).toHaveLength(1);
     expect(fake.dryRuns).toHaveLength(2);
+  });
+
+  it('a refetch after the session was recycled (no job in memory) does not run the statement again either', async () => {
+    fake.resultFor = () => ({ schema: [{ name: 'n', type: 'INTEGER' }], rows: [['1']] });
+    await manager.open('t1', current.id);
+    await run('SELECT n FROM big');
+    await manager.disconnect('t1');
+    await manager.open('t1', current.id);
+    const again = (await run('SELECT n FROM big', { maxRows: 50_000, refetch: true })).results[0]!;
+    expect(again.error).toMatchObject({ code: 'RESULT_EXPIRED' });
+    expect(fake.realQueries).toHaveLength(1);
   });
 
   it('Cancelar stops the job with jobs.cancel, with no gcloud round before it', async () => {
@@ -393,12 +407,60 @@ describe('BigQuery through the SessionManager', () => {
 
   it('the server limit of bytes billed is an error with a message, and the job never ran', async () => {
     current = env({ maxBytesBilled: GIB });
-    fake.bytesFor = () => 5 * GIB;
+    // the estimate fits when the app asks, then the table grows before the job: the server's limit is the last word
+    let asked = 0;
+    fake.bytesFor = () => (asked++ < 1 ? GIB : 5 * GIB);
     await manager.open('t1', current.id);
     const r = (await run('SELECT * FROM big')).results[0]!;
     expect(r.error?.code).toBe('bytesBilledLimitExceeded');
     expect(r.error!.message).toContain('nada foi cobrado');
     expect(fake.jobs.size).toBe(0);
+  });
+
+  it('asks before running when the estimate is over the limit, and the confirmed run sends maximumBytesBilled', async () => {
+    current = env({ maxBytesBilled: 100 * GIB });
+    fake.bytesFor = () => 150 * GIB;
+    await manager.open('t1', current.id);
+    const first = await run('SELECT * FROM big');
+    expect(first.results).toEqual([]);
+    expect(first.needsConfirmation).toEqual({ reason: 'bytes', limit: 100 * GIB, statements: [{ index: 0, sql: 'SELECT * FROM big', bytesEstimated: 150 * GIB }] });
+    expect(fake.realQueries).toHaveLength(0);
+    expect(fake.dryRuns).toHaveLength(1);
+
+    const second = await run('SELECT * FROM big', { confirmedBytes: [{ sql: 'SELECT * FROM big', bytes: 150 * GIB }] });
+    expect(second.needsConfirmation).toBeUndefined();
+    expect(second.results[0]!.error).toBeUndefined();
+    expect(fake.realQueries).toHaveLength(1);
+    expect(fake.realQueries[0]!.body.maximumBytesBilled).toBe(String(150 * GIB));
+    const line = trail.at(-1)!;
+    expect(line).toMatchObject({ state: 'ok', jobId: 'job_1', bytesEstimated: 150 * GIB });
+    expect(line.detail).toContain('150 GiB');
+    expect(line.detail).toContain('100 GiB');
+  });
+
+  it('"Buscar até 50.000" neither dry-runs nor asks again, even when the estimate is over the limit', async () => {
+    current = env({ maxBytesBilled: GIB });
+    fake.bytesFor = () => 3 * GIB;
+    fake.resultFor = () => ({ schema: [{ name: 'n', type: 'INTEGER' }], rows: Array.from({ length: 1500 }, (_, i) => [String(i)]) });
+    await manager.open('t1', current.id);
+    await run('SELECT n FROM big', { confirmedBytes: [{ sql: 'SELECT n FROM big', bytes: 3 * GIB }] });
+    const dryRunsBefore = fake.dryRuns.length;
+    const again = await run('SELECT n FROM big', { maxRows: 50_000, refetch: true });
+    expect(again.needsConfirmation).toBeUndefined();
+    expect(again.results[0]!.rows).toHaveLength(1500);
+    expect(fake.dryRuns).toHaveLength(dryRunsBefore);
+    expect(fake.realQueries).toHaveLength(1);
+  });
+
+  it('under the limit it runs with the limit as maximumBytesBilled and puts the job and bytes on the trail', async () => {
+    current = env({ maxBytesBilled: 100 * GIB });
+    fake.bytesFor = () => 3 * GIB;
+    await manager.open('t1', current.id);
+    const r = await run('SELECT 1');
+    expect(r.needsConfirmation).toBeUndefined();
+    expect(fake.realQueries[0]!.body.maximumBytesBilled).toBe(String(100 * GIB));
+    expect(trail.at(-1)).toMatchObject({ state: 'ok', jobId: expect.any(String), bytesEstimated: 3 * GIB });
+    expect(trail.at(-1)!.detail).toBeUndefined();
   });
 
   it('with no limit set a large estimate still runs', async () => {

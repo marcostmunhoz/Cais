@@ -16,15 +16,19 @@ export const ptBR = {
   connect: 'Conectar',
   reconnect: 'Reconectar',
   disconnect: 'Desconectar',
-  disconnectTitle: 'Fecha a conexão desta aba; o texto, o modo e o banco ficam',
+  disconnectTitle: {
+    database: 'Fecha a conexão desta aba; o texto, o modo e o banco ficam',
+    dataset: 'Fecha a conexão desta aba; o texto, o modo e o dataset ficam',
+  },
   disconnectBlockedTransaction: 'Faça commit ou rollback antes',
   disconnectBlockedRunning: 'Aguarde o comando terminar',
   connectionLost: 'A conexão foi perdida.',
   save: 'Salvar',
   saveTitle: (p: { save: string; saveAs: string }) => `Salvar script (${p.save}) · Salvar como (${p.saveAs})`,
   production: 'Produção',
-  currentDatabase: 'Banco atual',
-  noDatabase: '(nenhum banco)',
+  /** Both words of the engine's namespace (the dialect's `databaseTerm` picks one). */
+  currentDatabase: { database: 'Banco atual', dataset: 'Dataset atual' },
+  noDatabase: { database: '(nenhum banco)', dataset: '(nenhum dataset)' },
   modeGroup: 'Modo da sessão',
   /** Session modes, as the segmented control shows them. */
   mode: {

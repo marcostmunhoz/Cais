@@ -35,6 +35,7 @@ export const en: Shape<typeof ptBR> = {
     unexpectedResponse: 'BigQuery answered in a format Cais does not recognize.',
     modeNotSupported: 'BigQuery only reads in this version: the session is always Read-only.',
     refusedType: (p) => `Read-only: BigQuery read this statement as ${p.type}, not as a query (SELECT).`,
+    resultExpired: 'The result of this query is no longer available. Run the query again.',
     refusedUnknown: 'Read-only: BigQuery did not say what kind of statement this is.',
     datasetNotFound: (p) => `The dataset ${p.name} does not exist in this project, or the account cannot see it.`,
     datasetInvalid: 'Invalid dataset name: letters, digits and underscores only.',

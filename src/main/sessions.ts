@@ -4,12 +4,12 @@ import type { Dialect } from '@shared/dialects/types';
 import type { Classification } from '@shared/dialects/types';
 import { noStatementMessage, statementAtCursor } from '@shared/dialects/registry';
 import type { PendingTransaction, RunRequest, RunResponse, SetModeResponse } from '@shared/ipc';
-import type { SessionState, StatementResult } from '@shared/results';
-import { capabilitiesOf, initialModeFor, type EngineCapabilities } from '@shared/engines';
-import { m } from '@shared/i18n';
+import type { SessionState, StatementError, StatementResult, StatementStats } from '@shared/results';
+import { GIB, capabilitiesOf, initialModeFor, type EngineCapabilities } from '@shared/engines';
+import { fmt, m } from '@shared/i18n';
 import { CaisError } from './errors';
 import { realScheduler, type Scheduler } from './scheduler';
-import type { ConnectParams, DbSession, DbSessionError, Driver } from './drivers/types';
+import type { ConnectParams, DbSession, DbSessionError, Driver, PrepareResult } from './drivers/types';
 import { DriverError } from './drivers/types';
 
 /** One line of the person's side of the trail. The trail adds who, when and the environment's name. */
@@ -31,7 +31,14 @@ export interface PersonTrailLine {
   errno?: number;
   inTransaction?: boolean;
   detail?: string;
+  /** BigQuery: the job and what it cost. Never result data. */
+  jobId?: string;
+  bytesEstimated?: number;
+  bytesBilled?: number;
 }
+
+/** Bytes rounded up to a whole GiB: what a confirmed estimate is allowed to bill. */
+const ceilGib = (bytes: number): number => Math.ceil(bytes / GIB) * GIB;
 
 /** The mode's name for trail details, in the app locale of the moment the line is written. */
 function modeLabel(mode: SessionMode): string {
@@ -140,6 +147,10 @@ export class SessionManager {
       ...(result.error?.code ? { errorCode: result.error.code } : {}),
       ...(result.error?.errno !== undefined ? { errno: result.error.errno } : {}),
       ...(result.inTransaction !== undefined ? { inTransaction: result.inTransaction } : {}),
+      ...(result.stats?.jobId ? { jobId: result.stats.jobId } : {}),
+      // a re-read of a job that already ran points at the job, with no bytes: it was billed once
+      ...(result.stats?.bytesEstimated !== undefined && !result.stats.reread ? { bytesEstimated: result.stats.bytesEstimated } : {}),
+      ...(result.stats?.bytesBilled !== undefined && !result.stats.reread ? { bytesBilled: result.stats.bytesBilled } : {}),
       ...(result.error?.code === 'REFUSED'
         ? { detail: result.error.message }
         : result.notice || extra.detail
@@ -413,6 +424,15 @@ export class SessionManager {
     return { session: this.publish(entry) };
   }
 
+  /** The engine's dry run failed, or read the statement as something other than a query: the error to show, or null. */
+  private prepareFailure(prep: PrepareResult): StatementError | null {
+    if (prep.error) return prep.error;
+    const t = m().mainSessions;
+    if (!prep.serverKind) return { message: t.serverRefusedUnknown, code: 'REFUSED' };
+    if (prep.serverKind !== 'SELECT') return { message: t.serverRefusedType({ type: prep.serverKind }), code: 'REFUSED' };
+    return null;
+  }
+
   /** Why the statement cannot run in the current mode, or null. */
   private refusal(mode: SessionMode, c: Classification): string | null {
     if (c.alwaysRefuse) return c.alwaysRefuse;
@@ -470,6 +490,80 @@ export class SessionManager {
         };
         this.recordResult(entry, refused, entry.state.database);
         return { results: [refused], session: structuredClone(entry.state) };
+      }
+    }
+
+    // 1b. the engine's own look (BigQuery dry run): second layer of read-only, and the cost of each statement
+    const session = entry.session;
+    const prepared: (PrepareResult | undefined)[] = [];
+    const limit = entry.environment.engine === 'bigquery' ? entry.environment.maxBytesBilled : undefined;
+    /** Per statement: the most bytes the job may bill, and the confirmation text for the trail. */
+    const bounds: ({ maxBytesBilled: number; detail?: string } | undefined)[] = [];
+    if (session.prepare && !req.refetch) {
+      entry.state.status = 'running';
+      entry.cancelRequested = false;
+      this.publish(entry);
+      try {
+        for (let i = 0; i < plan.length; i++) {
+          const item = plan[i]!;
+          let prep: PrepareResult;
+          try {
+            prep = await session.prepare(item.text);
+          } catch (error) {
+            prep = { error: error instanceof DriverError ? error.info : { message: toCaisError(error).message } };
+          }
+          prepared.push(prep);
+          const failure = this.prepareFailure(prep);
+          if (failure || entry.cancelRequested) {
+            const result: StatementResult = {
+              index: i,
+              sql: item.text,
+              kind: item.c.kind,
+              verb: item.c.verb,
+              durationMs: 0,
+              error: failure ?? { message: m().mainMisc.driver.cancelled, code: 'CANCELLED' },
+            };
+            this.recordResult(entry, result, entry.state.database);
+            // the dry-run phase is over: the state the reply and the event carry is the idle one, not "running"
+            entry.state.status = 'idle';
+            await this.recycleIfStale(entry);
+            this.touch(entry);
+            return { results: [result], session: this.publish(entry) };
+          }
+        }
+        if (entry.stale && !entry.state.transaction.open) {
+          // the limit (or anything else) was edited during the dry run: nothing runs under the old settings
+          entry.state.status = 'idle';
+          await this.recycleIfStale(entry);
+          this.publish(entry);
+          throw new CaisError(m().mainSessions.changedWhilePreparing, 'not-connected');
+        }
+        if (limit !== undefined) {
+          const over: { index: number; sql: string; bytesEstimated: number }[] = [];
+          for (let i = 0; i < plan.length; i++) {
+            const estimate = prepared[i]?.bytesEstimated ?? 0;
+            // a confirmation counts only for the very text it was asked about
+            const accepted = req.confirmedBytes?.filter((c) => c.sql === plan[i]!.text).map((c) => c.bytes) ?? [];
+            const confirmed = accepted.length > 0 ? Math.max(...accepted) : undefined;
+            if (estimate > limit && (confirmed === undefined || estimate > confirmed)) {
+              over.push({ index: i, sql: plan[i]!.text, bytesEstimated: estimate });
+            } else {
+              bounds[i] = {
+                maxBytesBilled: Math.max(limit, confirmed === undefined ? 0 : ceilGib(confirmed)),
+                ...(estimate > limit ? { detail: m().mainSessions.trail.overLimitConfirmed({ limit: fmt().formatBytes(limit), bytes: fmt().formatBytes(estimate) }) } : {}),
+              };
+            }
+          }
+          if (over.length > 0) {
+            // nothing runs: every statement over the limit is asked about together
+            entry.state.status = 'idle';
+            this.touch(entry);
+            this.publish(entry);
+            return { results: [], session: structuredClone(entry.state), needsConfirmation: { reason: 'bytes', statements: over, limit } };
+          }
+        }
+      } finally {
+        if (entry.state.status === 'running') entry.state.status = 'idle';
       }
     }
 
@@ -531,12 +625,21 @@ export class SessionManager {
         }
         let result: StatementResult;
         try {
-          result = await entry.session.execute(text, { maxRows: req.maxRows, stopAtCap: c.kind === 'read', ...(req.refetch ? { refetch: true } : {}) });
+          result = await entry.session.execute(text, {
+            maxRows: req.maxRows,
+            stopAtCap: c.kind === 'read',
+            ...(req.refetch ? { refetch: true } : {}),
+            ...(bounds[i] ? { maxBytesBilled: bounds[i]!.maxBytesBilled } : {}),
+          });
         } catch (error) {
           const info = error instanceof DriverError ? error.info : { message: toCaisError(error).message };
           result = { index: i, sql: text, kind: c.kind, verb: c.verb, durationMs: 0, error: info };
         }
         result = { ...result, index: i, sql: text, kind: c.kind, verb: c.verb };
+        const estimated = prepared[i]?.bytesEstimated;
+        if (estimated !== undefined && result.stats?.bytesEstimated === undefined && (result.stats || !result.error)) {
+          result.stats = { ...result.stats, bytesEstimated: estimated } satisfies StatementStats;
+        }
         if (result.error?.fatal && transactionWasOpen) {
           // the driver's ref (if any) described the old message: drop it with the rewrite
           const { ref: _ref, ...rest } = result.error as typeof result.error & { ref?: unknown };
@@ -545,7 +648,13 @@ export class SessionManager {
         results.push(result);
         this.recordResult(entry, result, databaseBefore, {
           ...(lineId ? { id: lineId } : {}),
-          ...(req.refetch ? { detail: m().mainSessions.trail.refetch({ n: 50_000 }) } : req.origin === 'grid' ? { detail: m().mainSessions.gridEdit } : {}),
+          ...(req.refetch
+            ? { detail: m().mainSessions.trail.refetch({ n: 50_000 }) }
+            : req.origin === 'grid'
+              ? { detail: m().mainSessions.gridEdit }
+              : bounds[i]?.detail
+                ? { detail: bounds[i]!.detail }
+                : {}),
         });
         if (!result.error?.fatal) this.applyTransactionState(entry, c, result);
         if (result.error) {

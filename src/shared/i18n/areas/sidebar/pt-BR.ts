@@ -23,8 +23,11 @@ export const ptBR = {
   newTab: 'Nova aba',
   editEnvironment: 'Editar',
   refreshSchema: 'Atualizar schema',
-  collapseDatabases: 'Recolher bancos',
-  expandDatabases: 'Expandir bancos',
+  collapseDatabases: { database: 'Recolher bancos', dataset: 'Recolher datasets' },
+  expandDatabases: { database: 'Expandir bancos', dataset: 'Expandir datasets' },
+  loadingColumns: 'Carregando colunas…',
+  /** What kind of BigQuery table or view a row is, next to its name. */
+  subtype: { 'materialized-view': 'view materializada', external: 'tabela externa', snapshot: 'snapshot' },
   environmentMenu: (p: { name: string }) => `Menu do ambiente ${p.name}`,
   loadingSchema: 'Carregando schema…',
   newEnvironmentIn: (p: { name: string }) => `Novo ambiente em ${p.name}`,

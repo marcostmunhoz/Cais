@@ -150,9 +150,9 @@ describe('catalog: BigQuery environments', () => {
       expect(store.getCredential(iam.id)?.kind).toBe('gcloud-iam');
     });
 
-    it('checks the byte limit: whole bytes, 1 GiB or more', async () => {
+    it('checks the byte limit: whole GiB, 1 or more', async () => {
       const { store, input } = await seeded();
-      for (const bad of [0, -1, 1, GIB - 1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 2 ** 60]) {
+      for (const bad of [0, -1, 1, GIB - 1, 1.5, 1.5 * GIB, GIB + 1, Number.NaN, Number.POSITIVE_INFINITY, 2 ** 60]) {
         await expect(store.saveEnvironment(input({ maxBytesBilled: bad })), String(bad)).rejects.toThrow('limite de bytes');
       }
       expect(await store.saveEnvironment(input({ maxBytesBilled: GIB }))).toMatchObject({ maxBytesBilled: GIB });

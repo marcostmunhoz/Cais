@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { AlertTriangle, Clock, Play, PlugZap, Save, Square, Unplug } from 'lucide-react';
 import { connectionView } from '@shared/connection';
-import { getDialect } from '@shared/dialects/registry';
+import { engineVersionLabel, getDialect } from '@shared/dialects/registry';
 import { capabilitiesOf } from '@shared/engines';
 import type { SessionMode } from '@shared/model';
 import { isScriptDirty } from '@shared/scripts';
@@ -46,7 +46,9 @@ export function SessionBar({ tabId, platform }: { tabId: string; platform: strin
   const txOpen = !!session?.transaction.open;
   const t = m().sessionBar;
   const view = connectionView(session, run);
-  const chipDetail = view.status === 'connected' && view.detail ? `${getDialect(env.engine).displayName} ${view.detail}` : view.detail;
+  const chipDetail = view.status === 'connected' && view.detail ? engineVersionLabel(env.engine, view.detail) : view.detail;
+  // "banco" or "dataset": the engine's own word
+  const term = getDialect(env.engine).databaseTerm;
   const dirty = !!script && isScriptDirty(tab.sql, script);
 
   return (
@@ -81,7 +83,7 @@ export function SessionBar({ tabId, platform }: { tabId: string; platform: strin
             className="btn small ghost"
             data-testid="btn-disconnect"
             disabled={!!view.disconnectBlocked}
-            title={view.disconnectBlocked ?? t.disconnectTitle}
+            title={view.disconnectBlocked ?? t.disconnectTitle[term]}
             onClick={() => void disconnectTab(tabId)}
           >
             <Unplug size={12} /> {t.disconnect}
@@ -89,12 +91,12 @@ export function SessionBar({ tabId, platform }: { tabId: string; platform: strin
         )}
         <select
           className="select"
-          aria-label={t.currentDatabase}
+          aria-label={t.currentDatabase[term]}
           value={database ?? ''}
           disabled={busy || options.length === 0}
           onChange={(e) => void chooseDatabase(tabId, e.target.value)}
         >
-          {!database && <option value="">{t.noDatabase}</option>}
+          {!database && <option value="">{t.noDatabase[term]}</option>}
           {options.map((name) => (
             <option key={name} value={name}>
               {name}

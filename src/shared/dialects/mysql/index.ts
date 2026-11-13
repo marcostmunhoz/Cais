@@ -26,6 +26,7 @@ export const mysqlDialect: Dialect = {
   engine: 'mysql',
   displayName: 'MySQL',
   codemirrorDialect: 'MySQL',
+  databaseTerm: 'database',
   keywords: MYSQL_KEYWORDS,
   splitStatements,
   appendStatements,

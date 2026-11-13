@@ -6,7 +6,7 @@ export const en: Shape<typeof ptBR> = {
   ariaLabel: 'SQL editor',
   tableDetail: 'table',
   viewDetail: 'view',
-  databaseDetail: 'database',
+  databaseDetail: { database: 'database', dataset: 'dataset' },
   codemirror: {
     controlCharacter: 'Control character',
     completions: 'Completions',

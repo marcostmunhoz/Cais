@@ -7,12 +7,14 @@ export interface EngineCapabilities {
   modes: readonly SessionMode[];
   /** The result grid may edit rows (UPDATE by primary key). */
   gridEdit: boolean;
+  /** The schema tree lists names first and reads the columns of one database (dataset) when it is opened. */
+  lazyColumns?: boolean;
 }
 
 const CAPABILITIES: Record<Engine, EngineCapabilities> = {
-  mysql: { modes: ['read-only', 'transaction', 'autocommit'], gridEdit: true },
+  mysql: { modes: ['read-only', 'transaction', 'autocommit'], gridEdit: true, lazyColumns: false },
   // BigQuery only reads in this version: no transactions, no auto-commit, no editing in the grid
-  bigquery: { modes: ['read-only'], gridEdit: false },
+  bigquery: { modes: ['read-only'], gridEdit: false, lazyColumns: true },
 };
 
 export function capabilitiesOf(engine: Engine): EngineCapabilities {

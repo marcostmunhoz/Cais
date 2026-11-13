@@ -32,6 +32,7 @@ export const bigqueryDialect: Dialect = {
   engine: 'bigquery',
   displayName: 'BigQuery',
   codemirrorDialect: 'GoogleSQL',
+  databaseTerm: 'dataset',
   keywords: GOOGLESQL_KEYWORDS,
   splitStatements,
   appendStatements,

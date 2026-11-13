@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { m, ref } from '@shared/i18n';
-import { isBigqueryDatasetId, isGcpProjectId, MIN_MAX_BYTES_BILLED, sameTarget } from '@shared/engines';
+import { GIB, isBigqueryDatasetId, isGcpProjectId, MIN_MAX_BYTES_BILLED, sameTarget } from '@shared/engines';
 import { cleanName, sameName, slashAllowed } from '@shared/names';
 import {
   AGENT_LEVEL_LABEL,
@@ -420,7 +420,7 @@ export class CatalogStore {
     if (credential.kind !== 'gcloud-iam') throw new CaisError(t.bigqueryNeedsIam, 'invalid-credential');
     if (defaultDatabase && !isBigqueryDatasetId(defaultDatabase)) throw new CaisError(t.datasetInvalid);
     const limit = input.maxBytesBilled;
-    if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < MIN_MAX_BYTES_BILLED)) {
+    if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < MIN_MAX_BYTES_BILLED || limit % GIB !== 0)) {
       throw new CaisError(t.maxBytesInvalid);
     }
     return { engine: 'bigquery', gcpProject, ...(limit !== undefined ? { maxBytesBilled: limit } : {}) };

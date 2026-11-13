@@ -420,6 +420,8 @@ async function bootstrap(): Promise<void> {
     scripts,
     agents: { access, broker },
     gcloud,
+    // the e2e never runs gcloud: the registry offers a fixed account
+    ...(e2e ? { listGcloudAccounts: async () => [{ account: 'ana@exemplo.com', status: 'ACTIVE' }] } : {}),
     getAccessToken: sources.getAccessToken,
     sessions,
     isMainWindow: (contents) => mainWindow !== null && contents === mainWindow.webContents,

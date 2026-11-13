@@ -65,7 +65,7 @@ function activeStatementPlugin(dialect: Dialect) {
   );
 }
 
-function buildNamespace(tree: SchemaTree | undefined): SQLNamespace {
+function buildNamespace(tree: SchemaTree | undefined, term: Dialect['databaseTerm']): SQLNamespace {
   const t = m().editor;
   const ns: Record<string, SQLNamespace> = {};
   for (const db of tree?.databases ?? []) {
@@ -80,7 +80,7 @@ function buildNamespace(tree: SchemaTree | undefined): SQLNamespace {
         })),
       };
     }
-    ns[db.name] = { self: { label: db.name, type: 'namespace', detail: t.databaseDetail }, children: tables };
+    ns[db.name] = { self: { label: db.name, type: 'namespace', detail: t.databaseDetail[term] }, children: tables };
   }
   return ns;
 }
@@ -94,7 +94,7 @@ function sqlExtension(dialect: Dialect, tree: SchemaTree | undefined, database: 
   });
   return sql({
     dialect: withKeywords,
-    schema: buildNamespace(tree),
+    schema: buildNamespace(tree, dialect.databaseTerm),
     ...(database ? { defaultSchema: database } : {}),
     upperCaseKeywords: true,
   });

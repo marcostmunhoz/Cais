@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, ShieldCheck } from 'lucide-react';
 import type { TrailActor, TrailEntry, TrailPage } from '@shared/trail';
 import { displaySql } from '@shared/text';
+import { getDialect } from '@shared/dialects/registry';
 import { setState, useStore } from '../lib/store';
 import { fmt, m } from '../lib/i18n';
 import { SqlView } from './SqlView';
@@ -59,18 +60,25 @@ function counts(e: TrailEntry): string {
     if (e.mode === 'write') parts.push(t.affected({ count: affected }));
     else if (rows > 0) parts.push(t.rows({ count: rows }));
   }
+  if (e.bytesBilled !== undefined) parts.push(t.bytes({ count: e.bytesBilled }));
   if (e.durationMs !== undefined) parts.push(t.duration({ count: e.durationMs }));
   return parts.join(' · ');
 }
 
 function Detail({ entry }: { entry: TrailEntry }) {
+  const env = useStore((s) => s.catalog.environments.find((e) => e.id === entry.environmentId));
   const t = m().trail;
   const d = t.detail;
   const rows: [string, string][] = [];
   rows.push([d.when, fmt().formatDateTime(entry.ts)]);
   rows.push([d.who, who(entry)]);
   if (entry.environment) rows.push([d.environment, `${place(entry.environment)}${entry.production ? ` ${d.productionSuffix}` : ''}`]);
-  if (entry.database) rows.push([d.database, entry.database]);
+  // a line of an environment that is gone: the BigQuery-only fields still say which engine it was
+  const term = env ? getDialect(env.engine).databaseTerm : entry.jobId || entry.bytesEstimated !== undefined || entry.bytesBilled !== undefined ? 'dataset' : 'database';
+  if (entry.database) rows.push([d.database[term], entry.database]);
+  if (entry.jobId) rows.push([d.jobId, entry.jobId]);
+  if (entry.bytesEstimated !== undefined) rows.push([d.bytesEstimated, fmt().formatBytes(entry.bytesEstimated)]);
+  if (entry.bytesBilled !== undefined) rows.push([d.bytesBilled, fmt().formatBytes(entry.bytesBilled)]);
   if (entry.reason) rows.push([d.reason, entry.reason]);
   if (entry.decidedBy) rows.push([d.decidedBy, label(t.decidedBy, entry.decidedBy)]);
   if (entry.secondDecidedBy) rows.push([d.secondDecidedBy, label(t.secondDecidedBy, entry.secondDecidedBy)]);
