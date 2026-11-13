@@ -1,0 +1,172 @@
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Environment } from '@shared/model';
+import type { SchemaTree, SessionState, StatementResult } from '@shared/results';
+import { setLocale } from '@shared/i18n';
+
+// The renderer's grid actions against a fake `window.cais`: what Gerar UPDATE, Aplicar and
+// closing a tab do with pending edits. The paths are not literals so the node typecheck (no DOM types) does
+// not follow them into renderer code; the shapes below are the few this test touches.
+
+interface Run {
+  running: boolean;
+  connecting: boolean;
+  results: StatementResult[];
+  active: number;
+  edits?: { result: StatementResult; cells: Record<number, Record<number, unknown>> };
+  editNotice?: string[];
+}
+interface State {
+  tabs: { id: string; environmentId: string; sql: string }[];
+  activeTabId: string | null;
+  catalog: { environments: Environment[] } & Record<string, unknown>;
+  sessions: Record<string, SessionState>;
+  runs: Record<string, Run>;
+  schemas: Record<string, { status: 'ready'; tree: SchemaTree }>;
+  confirm: { title: string; body: string; onConfirm: () => void } | null;
+  toast: { message: string } | null;
+}
+interface Actions {
+  applyEdits(tabId: string): Promise<void>;
+  requestCloseTab(tabId: string): Promise<void>;
+}
+interface Store {
+  getState(): State;
+  setState(patch: Partial<State>): void;
+}
+
+const ACTIONS = '../../src/renderer/lib/actions';
+const STORE = '../../src/renderer/lib/store';
+
+const dev: Environment = { id: 'dev', projectId: 'p', name: 'dev', engine: 'mysql', host: 'h', port: 3306, credentialId: 'c', production: false };
+
+const tree = (key: string[]): SchemaTree => ({
+  databases: [
+    {
+      name: 'shop',
+      tables: [
+        {
+          name: 'items',
+          type: 'table',
+          columns: [
+            { name: 'id', type: 'int', nullable: false, key: 'PRI' },
+            { name: 'tenant_id', type: 'int', nullable: false, ...(key.includes('tenant_id') ? { key: 'PRI' as const } : {}) },
+            { name: 'name', type: 'varchar(40)', nullable: true },
+          ],
+        },
+      ],
+    },
+  ],
+});
+
+const read = (database = 'shop', rows: unknown[][] = [[1, 'a'], [2, 'b']]): StatementResult => ({
+  index: 0,
+  sql: 'SELECT id, name FROM items',
+  kind: 'read',
+  verb: 'SELECT',
+  durationMs: 1,
+  columns: [
+    { name: 'id', type: 'int', source: { database, table: 'items', column: 'id' }, primaryKeyPart: true, nullable: false },
+    { name: 'name', type: 'varchar', source: { database, table: 'items', column: 'name' }, primaryKeyPart: false, nullable: true },
+  ],
+  rows: rows as StatementResult['rows'],
+});
+
+const session: SessionState = {
+  tabId: 't', environmentId: 'dev', status: 'idle', mode: 'autocommit', database: 'shop', transaction: { open: false, statements: 0 },
+};
+
+let actions: Actions;
+let store: Store;
+const api = {
+  locale: 'pt-BR',
+  schema: { get: vi.fn() },
+  session: { run: vi.fn(), close: vi.fn(async () => undefined), state: vi.fn(async () => session), open: vi.fn(async () => session) },
+  tabs: { save: vi.fn(async () => undefined) },
+};
+
+beforeAll(async () => {
+  vi.stubGlobal('window', { cais: api });
+  vi.stubGlobal('document', { documentElement: {} });
+  store = (await import(/* @vite-ignore */ STORE)) as Store;
+  actions = (await import(/* @vite-ignore */ ACTIONS)) as Actions;
+  setLocale('pt-BR');
+});
+afterAll(() => vi.unstubAllGlobals());
+
+let result: StatementResult;
+beforeEach(() => {
+  vi.clearAllMocks();
+  result = read();
+  store.setState({
+    tabs: [{ id: 't', environmentId: 'dev', sql: result.sql }],
+    activeTabId: 't',
+    catalog: { ...store.getState().catalog, environments: [dev] },
+    sessions: { t: session },
+    schemas: { dev: { status: 'ready', tree: tree(['id']) } },
+    runs: { t: { running: false, connecting: false, results: [result], active: 0, edits: { result, cells: { 0: { 1: 'x' } } } } },
+    confirm: null,
+    toast: null,
+  });
+});
+
+describe('grid edits in the renderer', () => {
+  it('Aplicar reads the schema again: a key that grew by a column the query did not select is refused, nothing runs', async () => {
+    api.schema.get.mockResolvedValueOnce(tree(['id', 'tenant_id']));
+    await actions.applyEdits('t');
+    expect(api.schema.get).toHaveBeenCalledWith('dev', { refresh: true });
+    expect(api.session.run).not.toHaveBeenCalled();
+    expect(store.getState().toast?.message).toBe('Edição na grade só para resultado de uma tabela com a chave primária inteira (falta: tenant_id).');
+    // the edits stay for the person to decide
+    expect(store.getState().runs.t!.edits?.cells).toEqual({ 0: { 1: 'x' } });
+  });
+
+  it('Aplicar with the same key runs the UPDATE by the whole key', async () => {
+    api.schema.get.mockResolvedValueOnce(tree(['id']));
+    api.session.run
+      .mockResolvedValueOnce({ session, results: [{ index: 0, sql: 'u', kind: 'write', verb: 'UPDATE', durationMs: 1, affectedRows: 1 }] })
+      .mockResolvedValueOnce({ session, results: [read('shop', [[1, 'x'], [2, 'b']])] });
+    await actions.applyEdits('t');
+    await vi.waitFor(() => expect(api.session.run).toHaveBeenCalledTimes(2));
+    expect(api.session.run.mock.calls[0]![1].sql).toBe("UPDATE `shop`.`items` SET `name` = 'x' WHERE `id` = 1;");
+    await vi.waitFor(() => expect(store.getState().runs.t!.running).toBe(false));
+    expect(store.getState().runs.t!.results[0]!.rows).toEqual([[1, 'x'], [2, 'b']]);
+  });
+
+  it('after Aplicar, a re-read that lands on another database keeps the old result and its remaining edits', async () => {
+    store.setState({
+      runs: { t: { running: false, connecting: false, results: [result], active: 0, edits: { result, cells: { 0: { 1: 'x' }, 1: { 1: 'y' } } } } },
+    });
+    api.schema.get.mockResolvedValueOnce(tree(['id']));
+    api.session.run
+      // the first UPDATE ran, the second failed: its edit is kept
+      .mockResolvedValueOnce({
+        session,
+        results: [
+          { index: 0, sql: 'u1', kind: 'write', verb: 'UPDATE', durationMs: 1, affectedRows: 1 },
+          { index: 1, sql: 'u2', kind: 'write', verb: 'UPDATE', durationMs: 1, error: { message: 'Lock wait timeout', code: 'ER_LOCK_WAIT_TIMEOUT' } },
+        ],
+      })
+      // the session is in another database now (a USE, or the database picker): the same SQL reads another table
+      .mockResolvedValueOnce({ session: { ...session, database: 'shop_archive' }, results: [read('shop_archive', [[2, 'other'], [1, 'other']])] });
+    await actions.applyEdits('t');
+    await vi.waitFor(() => expect(store.getState().runs.t!.running).toBe(false));
+    const run = store.getState().runs.t!;
+    expect(run.results[0]).toBe(result);
+    expect(run.edits?.result).toBe(result);
+    expect(run.edits?.cells).toEqual({ 1: { 1: 'y' } });
+    expect(run.editNotice).toContain('A consulta não pôde ser rodada de novo: ela leu outra tabela (o banco da sessão mudou). O resultado anterior foi mantido.');
+  });
+
+  it('closing a tab with pending edits asks first; nothing closes until the person agrees', async () => {
+    await actions.requestCloseTab('t');
+    const confirm = store.getState().confirm;
+    expect(confirm?.title).toBe('Descartar as edições da grade');
+    expect(confirm?.body).toContain('1 alteração pendente');
+    expect(api.session.close).not.toHaveBeenCalled();
+    expect(store.getState().tabs).toHaveLength(1);
+
+    confirm!.onConfirm();
+    await vi.waitFor(() => expect(store.getState().tabs).toHaveLength(0));
+    expect(api.session.close).toHaveBeenCalledWith('t', undefined);
+  });
+});
