@@ -160,7 +160,9 @@ function buildMenu(): void {
   if (!app.isPackaged) view.push({ role: 'reload', label: t.reload }, { role: 'toggleDevTools', label: t.toggleDevTools });
   template.push({ label: t.view, submenu: view });
   // Cmd+W and Cmd+T belong to the renderer (tabs), so no "Close Window" item here.
-  template.push({ label: t.window, submenu: [{ role: 'minimize', label: t.minimize }, { role: 'zoom', label: t.zoom }] });
+  const windowMenu: MenuItemConstructorOptions[] = [{ role: 'minimize', label: t.minimize }];
+  if (isMac) windowMenu.push({ role: 'zoom', label: t.zoom });
+  template.push({ label: t.window, submenu: windowMenu });
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
@@ -214,6 +216,7 @@ function createWindow(): BrowserWindow {
       app.quit();
     }
   });
+  win.on('focus', () => win.flashFrame(false));
   win.on('closed', () => {
     mainWindow = null;
   });
@@ -380,7 +383,8 @@ async function bootstrap(): Promise<void> {
         mainWindow.focus();
       });
       note.show();
-      app.dock?.bounce('informational');
+      if (isMac) app.dock?.bounce('informational');
+      else if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isFocused()) mainWindow.flashFrame(true);
     },
     onScriptsChanged: () => {
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(CHANNELS.eventScriptsChanged);
@@ -394,6 +398,7 @@ async function bootstrap(): Promise<void> {
       uid: process.getuid?.() ?? 0,
       username: userInfo().username,
       tmpdir: tmpdir(),
+      runtimeDir: process.env.XDG_RUNTIME_DIR,
       // CAIS_SOCKET only counts in an unpackaged app (the test hook); the packaged app ignores it
       ...(!app.isPackaged && process.env.CAIS_SOCKET ? { override: process.env.CAIS_SOCKET } : {}),
     }),

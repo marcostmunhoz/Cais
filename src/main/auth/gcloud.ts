@@ -138,6 +138,9 @@ export class GcloudTokenProvider {
       '/opt/homebrew/bin/gcloud',
       join(homedir, 'google-cloud-sdk/bin/gcloud'),
       '/opt/homebrew/share/google-cloud-sdk/bin/gcloud',
+      '/usr/bin/gcloud',
+      '/snap/bin/gcloud',
+      '/usr/lib/google-cloud-sdk/bin/gcloud',
     ];
     return candidates.find((c) => exists(c)) ?? null;
   }

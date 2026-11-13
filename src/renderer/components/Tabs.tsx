@@ -1,6 +1,7 @@
 import { Plus, X } from 'lucide-react';
 import { connectionTitle, connectionView } from '@shared/connection';
 import { isScriptDirty } from '@shared/scripts';
+import { shortcutText } from '@shared/shortcuts';
 import { requestCloseTab, selectTab } from '../lib/actions';
 import { m } from '../lib/i18n';
 import { setState, useStore } from '../lib/store';
@@ -62,7 +63,7 @@ export function TabBar() {
           </div>
         );
       })}
-      <button className="tab-add no-drag" aria-label={t.newTab} title={t.newTabTitle} onClick={() => setState({ picker: true })}>
+      <button className="tab-add no-drag" aria-label={t.newTab} title={t.newTabTitle({ shortcut: shortcutText('newTab', window.cais.platform) })} onClick={() => setState({ picker: true })}>
         <Plus size={14} />
       </button>
     </div>

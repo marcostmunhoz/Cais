@@ -26,6 +26,7 @@ Antes de mudar comportamento, leia [docs/comportamento.md](docs/comportamento.md
 - **O app nunca altera o `gcloud`:** só `gcloud auth list` e `gcloud sql generate-login-token`.
 - **Toda requisição de agente é reclassificada no main** (`src/main/agents/policy.ts`). Agente não aprova, não liga o acesso, não muda o nível de um ambiente e não edita nem apaga script. O socket só existe com o acesso ligado (`settings.json`, desligado por padrão). Em produção, escrita de agente sempre pede aprovação. Nada de agente roda sem a Trilha.
 - **Somente leitura em duas camadas** (lista do app e `READ ONLY` no servidor). No classificador, na dúvida, recusa.
+- **Linux:** o cofre só vale com chaveiro de verdade (Secret Service; `basic_text` e `unknown` são recusados em `SafeStorageVault`). Os textos de atalho mostrados na interface saem de `src/shared/shortcuts.ts` (símbolos no macOS, Ctrl+… nos outros), nunca fixos no componente; o tratamento das teclas fica em `App.tsx` (`useGlobalShortcuts`) e deve bater com esses textos. O socket dos agentes cai em `$XDG_RUNTIME_DIR` quando o caminho padrão passa de 100 bytes. O deb instala o executável `cais-app` em `/opt/Cais`.
 - **Poucas opções:** nada de opção de configuração sem o motivo registrado em `docs/comportamento.md`.
 - **Idioma:** a interface segue o idioma do sistema, em pt-BR ou inglês. Todo texto que a pessoa vê sai dos catálogos de `src/shared/i18n/areas` (os dois idiomas, mesma chave), nunca escrito direto no componente. O que vai para agentes (saída do CLI, `guide`, respostas do broker) fica em português, fixo. Sem exclamação; termos do ofício como se fala (commit, rollback, schema, query).
 - **O Cais roda uma instância por usuário** (`requestSingleInstanceLock`) e recusa abrir com opções de depuração remota (`--inspect*`, `--remote-debugging-*`), menos no gancho de e2e. O DevTools só existe fora do pacote.
@@ -34,6 +35,7 @@ Antes de mudar comportamento, leia [docs/comportamento.md](docs/comportamento.md
 
 - TypeScript `strict`; código, identificadores e comentários em inglês. A documentação em `docs/` e o README ficam em português.
 - Dependências com versão exata (sem `^`), `package-lock.json` versionado.
+- O lockfile muda conforme a versão do npm: usar npm 11.x nas duas máquinas. Scripts de instalação de dependências precisam estar no `allowScripts` do `package.json` (`npm install-scripts ls` tem de ficar sem pendências).
 - `src/shared` é TypeScript puro: sem Node, sem DOM.
 - `vitest` fica na 4.x (a 5.x exige Node 22). O `typescript` está na 7.x: sem `baseUrl`, os aliases usam `paths` com `./`.
 - A CSP mantém `style-src 'unsafe-inline'` porque o CodeMirror injeta estilos.
@@ -53,7 +55,7 @@ Todos rodam na raiz do projeto, com Node 20.19 ou mais novo e npm.
 | `npm run e2e` | Playwright `_electron`: abre janelas de verdade com `userData` e socket temporários, sobe o próprio container `cais-test-*`, roda o CLI real como processo filho e regrava as capturas em `tests/e2e/screenshots/`. Precisa de `npm run build` antes e do Docker. |
 | `npm run check` | `typecheck && unit && integration && build && e2e`. É o que precisa estar verde para commitar. |
 | `npm run cli -- llm envs` | Recompila o CLI e roda `cais llm …`. Precisa do Cais aberto (`npm run dev`) com o acesso de agentes ligado. |
-| `npm run dist` | `build` + electron-builder: `dist/Cais-<versão>-arm64.dmg` e `dist/mac-arm64/Cais.app`, com Electron fuses endurecidos (`electronFuses`) e assinatura ad-hoc local (`scripts/adhoc-sign.cjs`, hook `afterSign`). O CLI vai em `Cais.app/Contents/Resources/cli/cais.mjs` (`extraResources`: o Node do sistema não lê dentro do asar) e roda no Node do sistema, não pelo Electron (o fuse `runAsNode` fica desligado). |
+| `npm run dist` | `build` + electron-builder, que gera os alvos do sistema em que roda. macOS: `dist/Cais-<versão>-arm64.dmg` e `dist/mac-arm64/Cais.app`. Linux: `dist/cais_<versão>_amd64.deb` (x64, executável `cais-app`, CLI em `/opt/Cais/resources/cli/cais.mjs`). Nos dois, com Electron fuses endurecidos (`electronFuses`) e `umask 022`; no macOS, também assinatura ad-hoc local (`scripts/adhoc-sign.cjs`, hook `afterSign`). O CLI vai em `Cais.app/Contents/Resources/cli/cais.mjs` (`extraResources`: o Node do sistema não lê dentro do asar) e roda no Node do sistema, não pelo Electron (o fuse `runAsNode` fica desligado). |
 
 ## Testes
 

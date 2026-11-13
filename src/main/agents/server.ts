@@ -298,11 +298,17 @@ export function socketPathFor(opts: {
   uid: number;
   username: string;
   tmpdir: string;
+  /** `$XDG_RUNTIME_DIR` (a per-user 0700 folder): preferred over the shared tmp on Linux. */
+  runtimeDir?: string | undefined;
   override?: string;
 }): string {
   if (opts.override) return opts.override;
   if (opts.platform === 'win32') return `\\\\.\\pipe\\cais-${opts.username}`;
   const preferred = `${opts.userData}/agent.sock`;
   if (Buffer.byteLength(preferred, 'utf8') <= 100) return preferred;
+  if (opts.platform === 'linux' && opts.runtimeDir && opts.runtimeDir.startsWith('/')) {
+    const inRuntime = `${opts.runtimeDir.replace(/\/+$/, '')}/cais.sock`;
+    if (Buffer.byteLength(inRuntime, 'utf8') <= 100) return inRuntime;
+  }
   return `${opts.tmpdir}/cais-${opts.uid}.sock`;
 }

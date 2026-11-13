@@ -1,7 +1,7 @@
 /** Area "sidebar", pt-BR (the reference catalog: `en.ts` must follow its shape). */
 export const ptBR = {
   envTitle: 'Clique foca uma aba deste ambiente · duplo clique abre outra',
-  scriptsEmpty: 'Nenhum script. Salve uma aba com Salvar (⌘S).',
+  scriptsEmpty: (p: { save: string }) => `Nenhum script. Salve uma aba com Salvar (${p.save}).`,
   duplicateEnvironment: 'Duplicar',
   projectMenu: (p: { name: string }) => `Menu do projeto ${p.name}`,
   newEnvironment: 'Novo ambiente',

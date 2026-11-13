@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { Bot, ChevronDown, ChevronRight, Database, Eye, FileCode, History, Key, MoreHorizontal, Plus, Table2 } from 'lucide-react';
 import type { Environment, Project, SavedScript } from '@shared/model';
 import { lastRunText, sortByRecency } from '@shared/scripts';
+import { shortcutText } from '@shared/shortcuts';
 import type { SchemaTable } from '@shared/results';
 import {
   deleteScript,
@@ -161,7 +162,7 @@ function ScriptsGroup({ env }: { env: Environment }) {
       {open && scripts.map((script) => <ScriptNode key={script.id} env={env} script={script} />)}
       {open && scripts.length === 0 && (
         <div className="tree-loading" style={{ paddingLeft: 6 + 3 * 12 + 14 }}>
-          {m().sidebar.scriptsEmpty}
+          {m().sidebar.scriptsEmpty({ save: shortcutText('save', window.cais.platform) })}
         </div>
       )}
     </>

@@ -55,7 +55,7 @@ Um motor novo é um dialeto e um driver registrados; a interface e as políticas
 
 ## Arquivos na pasta de dados
 
-Tudo fica em `app.getPath('userData')` (no macOS, `~/Library/Application Support/Cais`), gravado de forma atômica com permissão 0600. Um arquivo JSON inválido é guardado ao lado como `<nome>.corrupt-<data>.json` e o app abre vazio naquele ponto, com aviso.
+Tudo fica em `app.getPath('userData')` (no macOS, `~/Library/Application Support/Cais`; no Linux, `${XDG_CONFIG_HOME:-~/.config}/Cais`), gravado de forma atômica com permissão 0600. Um arquivo JSON inválido é guardado ao lado como `<nome>.corrupt-<data>.json` e o app abre vazio naquele ponto, com aviso.
 
 | Arquivo | Conteúdo |
 |---|---|
@@ -86,7 +86,7 @@ Tudo fica em `app.getPath('userData')` (no macOS, `~/Library/Application Support
 - `core.ts` tem números, datas e plural com `Intl`; `locale.ts` tem `resolveLocale`, `LOCALES` e `AGENT_LOCALE` (`pt-BR`, fixo).
 - **Resolução:** o main chama `app.getPreferredSystemLanguages()` no `whenReady`, antes do menu, e passa o resultado ao renderer por `additionalArguments` (`--cais-locale=`). O preload confere contra a lista; o renderer nunca escolhe o idioma do main.
 - **Duas audiências:** texto que serve à pessoa e ao agente (alertas do modal, `approval_reason`, `commit_reason`, erros de comando) circula como `MessageRef` (`{ key, params }`). A tela renderiza no idioma do app; a resposta ao agente renderiza em `AGENT_LOCALE`. O que só o agente lê (saída do CLI, `guide`, recusas da política) é escrito direto em português.
-- O pacote declara `en` e `pt-BR` (`CFBundleLocalizations` e as pastas `.lproj` de `electronLanguages`), para o idioma por app do macOS funcionar.
+- O pacote declara `en` e `pt-BR` (`CFBundleLocalizations` e as pastas `.lproj` de `electronLanguages`), para o idioma por app do macOS funcionar. No Linux, `getPreferredSystemLanguages()` lê o ambiente da sessão (`LANGUAGE`, `LANG`).
 
 ## Acesso de agentes
 
@@ -105,11 +105,11 @@ Tudo fica em `app.getPath('userData')` (no macOS, `~/Library/Application Support
 ## Empacotamento
 
 - `npm run build`: `electron-vite build` (saída em `out/main`, `out/preload`, `out/renderer`) e o CLI em `out/cli/cais.mjs`. A CSP do build é a restritiva; a do servidor de desenvolvimento libera o necessário para a recarga.
-- `npm run dist`: electron-builder para macOS arm64 (`dmg` e `dir`), com:
-  - `electronFuses`: `runAsNode` desligado, `enableCookieEncryption`, sem `NODE_OPTIONS`, sem argumentos de inspeção, `enableEmbeddedAsarIntegrityValidation` e `onlyLoadAppFromAsar`;
+- `npm run dist`: `build` e `electron-builder --publish never`, que gera os alvos do sistema em que roda: macOS arm64 (`dmg` e `dir`) ou Linux x64 (`deb`). Nos dois, com `electronFuses`: `runAsNode` desligado, `enableCookieEncryption`, sem `NODE_OPTIONS`, sem argumentos de inspeção, `enableEmbeddedAsarIntegrityValidation` e `onlyLoadAppFromAsar`. O script `dist` roda com `umask 022` para o pacote não herdar permissão de escrita de grupo. No macOS, ainda:
   - `afterSign: scripts/adhoc-sign.cjs`, que assina o `.app` ad-hoc (`codesign --sign -`) depois dos fuses, porque o Apple Silicon recusa binário com assinatura quebrada;
   - `extraResources`: o CLI vai em `Cais.app/Contents/Resources/cli/cais.mjs`, fora do asar, porque o Node do sistema não lê dentro dele;
   - `electronLanguages: en, pt_BR` e `CFBundleLocalizations: en, pt-BR`.
+- **Linux (`build.linux`, deb x64):** executável `cais-app` (instalado em `/opt/Cais`, com link em `/usr/bin` pelo `postinst`), entrada `cais-app.desktop` (categorias `Development;Database;`) e ícone `build/icon.png`. As dependências padrão do electron-builder já incluem `libsecret-1-0`, que o cofre pede. O CLI vai em `/opt/Cais/resources/cli/cais.mjs` (`extraResources`); o comando `cais` não vem no pacote e é instalado pelo app em `~/.local/bin`. O `postinst` ajusta o `chrome-sandbox` (setuid 4755 só quando user namespaces não estão disponíveis, senão 0755) e, com o AppArmor ligado, instala o perfil `cais-app` se o `apparmor_parser` o aceitar. Os fuses valem também no Linux (conferidos com `@electron/fuses read`); só a assinatura ad-hoc (`afterSign`) é do macOS.
 - Ícones: `build/icon.icns` e `build/icon.png` para o pacote; `resources/icon.png` para o Dock em desenvolvimento e o ícone da janela em Linux e Windows; `resources/logo-mark.png` para a marca no topo da barra lateral e no estado vazio.
 
 ## Testes

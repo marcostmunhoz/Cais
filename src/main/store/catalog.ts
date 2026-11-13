@@ -428,7 +428,8 @@ export class CatalogStore {
         if (!password && !hasCurrent) throw new CaisError(m().mainCatalog.passwordRequired);
         if (password) {
           if (!this.vault.isAvailable()) {
-            throw new CaisError(m().mainCatalog.vaultUnavailable, 'vault-unavailable');
+            const hint = this.vault.platform === 'linux' ? ` ${m().mainCatalog.vaultUnavailableLinuxHint}` : '';
+            throw new CaisError(`${m().mainCatalog.vaultUnavailable}${hint}`, 'vault-unavailable');
           }
           this.secrets[id] = this.vault.encrypt(password);
           await this.persistSecrets();

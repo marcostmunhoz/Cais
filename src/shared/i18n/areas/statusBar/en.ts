@@ -12,5 +12,5 @@ export const en: Shape<typeof ptBR> = {
   agentsTitle: 'Open the Agents panel',
   agentsOn: 'Agents on',
   requests: (p) => f.count(p.n, { one: 'request', other: 'requests' }),
-  runHint: (p) => `${p.mod}+Enter runs the statement under the cursor`,
+  runHint: (p) => `${p.shortcut} runs the statement under the cursor`,
 };

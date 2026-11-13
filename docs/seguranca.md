@@ -12,7 +12,7 @@ Um processo sem sandbox rodando como o mesmo usuário do sistema não é contido
 
 ## Segredos
 
-- **Senhas cifradas pelo cofre do sistema** (`safeStorage` do Electron, Keychain no macOS) em `secrets.json`. Sem o cofre, o Cais recusa salvar a senha: nunca grava senha em texto puro.
+- **Senhas cifradas pelo cofre do sistema** (`safeStorage` do Electron, Keychain no macOS, Secret Service no Linux) em `secrets.json`. Sem o cofre, o Cais recusa salvar a senha: nunca grava senha em texto puro. No Linux, sem chaveiro (GNOME Keyring, KWallet) o Chromium usaria uma chave fixa no código, o que não é cofre; por isso o Cais também recusa quando o backend escolhido é `basic_text` ou `unknown`.
 - **A senha não volta ao renderer.** Ela entra pelo IPC só ao salvar a credencial (vazia mantém a atual). Tokens IAM ficam em memória no processo principal por 50 minutos. Nada de senha ou token em log.
 - **Agentes nunca recebem credencial**: nem senha, nem token, nem host, nem id de credencial. `cais llm envs` devolve só id, slug, projeto, nome, produção, motor, nível e banco padrão. Erros de conexão chegam ao agente genéricos (sem host, IP, usuário do banco nem texto do `gcloud`), e o erro de cada comando passa pela mesma redação.
 - Os arquivos da pasta de dados são gravados de forma atômica (arquivo temporário e `rename`) com permissão 0600; a pasta da Trilha é 0700.
@@ -24,7 +24,8 @@ Um processo sem sandbox rodando como o mesmo usuário do sistema não é contido
 - **O processo principal nunca confia no renderer:** todo canal de IPC valida a entrada com zod, só aceita chamadas da janela principal, e o SQL é reclassificado pelo dialeto antes de executar. As decisões sobre pedidos de agentes (aprovar, recusar, liberar, Commit, Rollback) só valem vindas da janela principal e para pedidos no estado certo.
 - **O Cais recusa abrir com opções de depuração remota** (`--remote-debugging-port`, `--remote-debugging-pipe`, `--remote-debugging-address`, `--remote-allow-origins`, `--inspect`, `--inspect-brk`, `--inspect-port`, `--inspect-publish-uid`), empacotado ou em desenvolvimento; só o gancho de e2e (`CAIS_E2E=1`, app não empacotado) as aceita. O DevTools só existe fora do pacote. Um depurador ligado à janela faz tudo o que a pessoa faz (aprovar, dar Commit, ligar o acesso de agentes), e um agente com shell poderia reabrir o app com ele.
 - **Ganchos de teste** (`CAIS_E2E`, `CAIS_USER_DATA`, `CAIS_SOCKET`, `CAIS_LOCALE`, `CAIS_IDLE_MS`) só valem com o app não empacotado. O app empacotado os ignora.
-- **Electron fuses** no pacote: `runAsNode` desligado, cookies cifrados, `NODE_OPTIONS` e argumentos de inspeção ignorados, integridade do asar validada e o app carregado só de dentro do asar. O CLI roda no Node do sistema, não pelo Electron.
+- **Electron fuses** em todos os pacotes (macOS e Linux): `runAsNode` desligado, cookies cifrados, `NODE_OPTIONS` e argumentos de inspeção ignorados, integridade do asar declarada (o Electron só a confere no macOS e no Windows) e o app carregado só de dentro do asar. O CLI roda no Node do sistema, não pelo Electron.
+- **Integridade do `app.asar`:** o Electron só confere a integridade do asar no macOS e no Windows. No Linux essa checagem não existe; quem protege o `app.asar` é a pasta `/opt/Cais` pertencer ao root, o que impede um processo do usuário de trocá-lo.
 - **Uma instância por usuário** (`requestSingleInstanceLock`): uma segunda abertura foca a janela que já existe.
 
 ## Somente leitura
@@ -75,7 +76,7 @@ O que a pessoa aprova no modal precisa ser o que o servidor roda. Por isso o SQL
 
 ## Isolamento do canal dos agentes
 
-- **O socket só existe com o acesso ligado**, e só a pessoa liga, no app. Fica em `<pasta de dados>/agent.sock` (ou `<tmp>/cais-<uid>.sock` quando o caminho passa de 100 bytes) e, no Windows, num named pipe `\\.\pipe\cais-<usuário>`. Permissão 0600: só o próprio usuário.
+- **O socket só existe com o acesso ligado**, e só a pessoa liga, no app. No Windows, fica num named pipe `\\.\pipe\cais-<usuário>`. Nos outros sistemas, em `<pasta de dados>/agent.sock`; quando esse caminho passa de 100 bytes, no Linux vai para `$XDG_RUNTIME_DIR/cais.sock` (pasta 0700 do usuário, se existir, for absoluta e couber em 100 bytes) e, senão, para `<tmp>/cais-<uid>.sock`. Nos sockets, permissão 0600: só o próprio usuário.
 - O Cais apaga um socket antigo só se ninguém responde nele, e ao fechar apaga só o socket e o `agent-endpoint.json` que ele mesmo criou.
 - **Protocolo:** uma linha JSON por mensagem, até 1 MB por mensagem e 100 KB de SQL, tudo validado com zod. O CLI confere a versão do protocolo.
 - **O agente não aprova, não liga o acesso, não muda níveis e não edita nem apaga scripts.** O app nunca se abre nem liga o acesso por pedido do CLI.
@@ -89,7 +90,7 @@ O que a pessoa aprova no modal precisa ser o que o servidor roda. Por isso o SQL
 ## Limites conhecidos
 
 - **Credencial de usuário e senha conecta sem TLS.** A senha não vai em claro no handshake, mas as consultas e os resultados vão: use rede privada ou VPN. O IAM exige TLS, sem verificar o certificado (o Cloud SQL usa uma CA própria), então quem controla a rota até a instância pode interceptar o token, que vale 1 hora.
-- **Um agente sem sandbox, rodando como o mesmo usuário, não é contido pelo app.** Ele pode ler a pasta de dados do Cais (`catalog.json` revela hosts e usuários; as senhas em `secrets.json` são cifradas pelo cofre, cujo acesso o macOS protege com um aviso, mas isso não é barreira contra um processo determinado), usar o `gcloud` da conta da pessoa (`gcloud sql generate-login-token`) com o cliente `mysql`, editar `catalog.json`, `settings.json`, `scripts.json` e a Trilha, reiniciar o Cais ou clicar na interface por automação do sistema. A aprovação protege contra o agente que **usa o comando**, não contra um agente que ignora o comando.
+- **Um agente sem sandbox, rodando como o mesmo usuário, não é contido pelo app.** Ele pode ler a pasta de dados do Cais (`catalog.json` revela hosts e usuários; as senhas em `secrets.json` são cifradas pelo cofre, cujo acesso o macOS protege com um aviso, mas isso não é barreira contra um processo determinado; no Linux o chaveiro entrega o segredo a qualquer processo do mesmo usuário pelo D-Bus, sem aviso nenhum, então o sandbox do agente pesa ainda mais), usar o `gcloud` da conta da pessoa (`gcloud sql generate-login-token`) com o cliente `mysql`, editar `catalog.json`, `settings.json`, `scripts.json` e a Trilha, reiniciar o Cais ou clicar na interface por automação do sistema. A aprovação protege contra o agente que **usa o comando**, não contra um agente que ignora o comando.
 - **O que a proteção do cadastro e o encadeamento não pegam:** apagar o arquivo de um dia inteiro da Trilha, cortar o fim de um arquivo, editar um script (o efeito só vale quando a pessoa o roda) e voltar uma cópia antiga de `seal.json` junto com o cadastro e o `settings.json` da mesma época (exige ter lido a pasta do Cais antes; um contador à prova disso precisaria de um lugar que o agente não escreve).
 - **Função `SQL SECURITY DEFINER` que já existe no banco** e faz administração roda dentro de uma leitura: o servidor não bloqueia. Use no Cais um usuário de banco sem privilégios de administração e revise as rotinas DEFINER.
 - **Trigger num esquema que o usuário do banco não enxerga**, escrevendo numa tabela não transacional também invisível, escapa do aviso.
@@ -112,6 +113,22 @@ O que a pessoa aprova no modal precisa ser o que o servidor roda. Por isso o SQL
         "Bash(gcloud:*)", "Bash(mysql:*)", "Bash(mycli:*)", "Bash(security:*)", "Bash(osascript:*)",
         "Bash(open:*)", "Bash(pkill:*)", "Bash(killall:*)", "Bash(nc:*)", "Bash(socat:*)",
         "Read(~/Library/Application Support/Cais/**)", "Edit(~/Library/Application Support/Cais/**)"
+      ]
+    }
+  }
+  ```
+
+  No Linux, troque as regras específicas do macOS (`security`, `osascript`, `open` e a pasta `~/Library/Application Support/Cais`) por estas, mantendo as demais:
+
+  ```json
+  {
+    "permissions": {
+      "allow": ["Bash(cais llm:*)"],
+      "deny": [
+        "Bash(gcloud:*)", "Bash(mysql:*)", "Bash(mycli:*)", "Bash(secret-tool:*)", "Bash(busctl:*)",
+        "Bash(gdbus:*)", "Bash(dbus-send:*)", "Bash(xdotool:*)", "Bash(ydotool:*)", "Bash(xdg-open:*)",
+        "Bash(pkill:*)", "Bash(killall:*)", "Bash(nc:*)", "Bash(socat:*)",
+        "Read(~/.config/Cais/**)", "Edit(~/.config/Cais/**)"
       ]
     }
   }

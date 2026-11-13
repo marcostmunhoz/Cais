@@ -4,7 +4,7 @@ import type { ptBR } from './pt-BR';
 /** Area "sidebar", English. */
 export const en: Shape<typeof ptBR> = {
   envTitle: 'Click focuses a tab of this environment · double click opens another',
-  scriptsEmpty: 'No scripts. Save a tab with Save (⌘S).',
+  scriptsEmpty: (p) => `No scripts. Save a tab with Save (${p.save}).`,
   duplicateEnvironment: 'Duplicate',
   projectMenu: (p) => `Menu of project ${p.name}`,
   newEnvironment: 'New environment',

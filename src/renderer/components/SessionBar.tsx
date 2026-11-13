@@ -4,6 +4,7 @@ import { connectionView } from '@shared/connection';
 import { getDialect } from '@shared/dialects/registry';
 import type { SessionMode } from '@shared/model';
 import { isScriptDirty } from '@shared/scripts';
+import { shortcutText } from '@shared/shortcuts';
 import {
   cancelTab,
   changeMode,
@@ -22,7 +23,7 @@ import { useStore } from '../lib/store';
 
 const MODES: SessionMode[] = ['read-only', 'transaction', 'autocommit'];
 
-export function SessionBar({ tabId }: { tabId: string }) {
+export function SessionBar({ tabId, platform }: { tabId: string; platform: string }) {
   const tab = useStore((s) => s.tabs.find((t) => t.id === tabId));
   const env = useStore((s) => s.catalog.environments.find((e) => e.id === tab?.environmentId));
   const project = useStore((s) => s.catalog.projects.find((p) => p.id === env?.projectId));
@@ -118,7 +119,7 @@ export function SessionBar({ tabId }: { tabId: string }) {
           data-testid="btn-save"
           data-dirty={dirty ? 'true' : 'false'}
           aria-label={t.save}
-          title={t.saveTitle}
+          title={t.saveTitle({ save: shortcutText('save', platform), saveAs: shortcutText('saveAs', platform) })}
           onClick={() => void saveTab(tabId)}
         >
           <Save size={12} /> {t.save}
@@ -126,7 +127,7 @@ export function SessionBar({ tabId }: { tabId: string }) {
         </button>
         {run?.running ? (
           <button className="btn danger" onClick={() => void cancelTab(tabId)} aria-label={t.cancel}>
-            <Square size={12} fill="currentColor" /> {t.cancel} <kbd>⌘.</kbd>
+            <Square size={12} fill="currentColor" /> {t.cancel} <kbd>{shortcutText('cancel', platform)}</kbd>
           </button>
         ) : (
           <button
@@ -136,7 +137,7 @@ export function SessionBar({ tabId }: { tabId: string }) {
             aria-label={t.run}
             data-testid="run"
           >
-            <Play size={12} fill="currentColor" /> {t.run} <kbd>⌘↵</kbd>
+            <Play size={12} fill="currentColor" /> {t.run} <kbd>{shortcutText('run', platform)}</kbd>
           </button>
         )}
       </div>

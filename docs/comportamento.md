@@ -26,7 +26,7 @@ A interface segue o tema claro ou escuro do sistema e usa as fontes do sistema. 
 - **Projeto › ambientes.** Um ambiente tem nome, host, porta, banco padrão opcional, credencial, marcação de produção e o nível de acesso de agentes. **Produção** vem marcado quando o nome é `pro`, `prod` ou `production`, e pode ser trocado.
 - **Credencial é um cadastro próprio**, usado por quantos ambientes precisar, para não repetir usuário e senha ambiente a ambiente. O cadastro mostra em quantos ambientes ela é usada. Apagar uma credencial em uso é recusado, com a lista de ambientes; apagar um projeto que ainda tem ambientes ou scripts também é recusado.
 - **Dois tipos de credencial:**
-  - *Usuário e senha.* A senha é cifrada pelo cofre do sistema (`safeStorage`, Keychain no macOS). Sem o cofre disponível, o Cais recusa salvar a senha: nunca grava senha em texto puro. No formulário, senha vazia mantém a atual.
+  - *Usuário e senha.* A senha é cifrada pelo cofre do sistema (`safeStorage`, Keychain no macOS, Secret Service no Linux). Sem o cofre disponível, o Cais recusa salvar a senha: nunca grava senha em texto puro. No Linux o cofre só vale com um chaveiro de verdade (GNOME Keyring, KWallet): se o Chromium cair no armazenamento sem chaveiro (`basic_text`, que usa uma chave fixa no código) ou não souber qual usou (`unknown`), o Cais trata como indisponível e a recusa acrescenta como instalar ou desbloquear o chaveiro e a opção `--password-store=gnome-libsecret`. Credencial Google IAM não usa o cofre e segue funcionando. No formulário, senha vazia mantém a atual.
   - *Google IAM via gcloud.* Conta escolhida entre as logadas no `gcloud` (ou digitada), impersonação de service account opcional e usuário do banco derivado do e-mail e editável: conta de usuário vira a parte antes do `@`; service account vira o e-mail sem `.gserviceaccount.com`.
 - **Testar conexão** confere host, porta e credencial antes de salvar.
 - **Nomes de projeto e de ambiente** são aparados, normalizados em NFC e sem caracteres invisíveis, únicos sem diferenciar maiúsculas, e não têm `/`, porque o endereço `projeto/ambiente` usado pelos agentes ficaria ambíguo.
@@ -42,7 +42,7 @@ A interface segue o tema claro ou escuro do sistema e usa as fontes do sistema. 
 - O TLS cifra sem verificar o certificado (`ssl-mode=REQUIRED`), porque o Cloud SQL usa uma CA própria.
 - **O que a instância precisa:** a flag `cloudsql_iam_authentication=on`; a conta (ou a service account) cadastrada na instância como usuário IAM do banco, com os privilégios do MySQL de que o trabalho precisa; o papel Cloud SQL Instance User (`roles/cloudsql.instanceUser`) ou equivalente para a conta que gera o token (a impersonada, quando há impersonação); e uma rota de rede até o IP e a porta da instância.
 - O token fica em memória por 50 minutos por conta e service account, e nunca vai para log.
-- **Achar o `gcloud`:** um app aberto pelo Finder não herda o PATH do shell. O Cais procura no PATH atual, depois pelo shell de login (`$SHELL -lc 'command -v gcloud'`, uma vez) e depois em `/usr/local/bin/gcloud`, `/opt/homebrew/bin/gcloud`, `~/google-cloud-sdk/bin/gcloud` e `/opt/homebrew/share/google-cloud-sdk/bin/gcloud`.
+- **Achar o `gcloud`:** um app aberto pelo Finder (macOS) ou pelo menu de aplicativos (Linux) não herda o PATH do shell. O Cais procura no PATH atual, depois pelo shell de login (`$SHELL -lc 'command -v gcloud'`, uma vez) e depois em `/usr/local/bin/gcloud`, `/opt/homebrew/bin/gcloud`, `~/google-cloud-sdk/bin/gcloud` e `/opt/homebrew/share/google-cloud-sdk/bin/gcloud` (macOS), e `/usr/bin/gcloud`, `/snap/bin/gcloud` e `/usr/lib/google-cloud-sdk/bin/gcloud` (Linux).
 - Quando a conta precisa entrar de novo, o erro diz o comando: `gcloud auth login <conta>`.
 - O app só roda `gcloud auth list` e `gcloud sql generate-login-token`. Nenhum comando que altera o `gcloud`.
 
@@ -103,6 +103,7 @@ Duas camadas: uma lista do que é permitido no app, que recusa o resto antes de 
 
 - CodeMirror 6 com o dialeto MySQL, autocomplete de palavras-chave, bancos, tabelas, colunas e apelidos, a partir do schema do ambiente (o banco atual é o padrão).
 - Cmd+Enter roda o comando sob o cursor (ou a seleção), que fica levemente destacado; Cmd+Shift+Enter roda todos.
+- **Atalhos por sistema:** os atalhos deste documento estão escritos como no macOS (Cmd). No Linux e no Windows, Ctrl faz o papel de Cmd (Ctrl+Enter, Ctrl+Shift+Enter, Ctrl+., Ctrl+T, Ctrl+W, Ctrl+S, Ctrl+Shift+S, Ctrl+O), e a interface mostra o atalho do sistema em que está rodando. O Cancelar manteve o atalho (Ctrl+.); no GNOME com IBus o emoji usa Super+. e Super+;, então não colide.
 - O separador de comandos entende strings, crases, comentários (`-- `, `#`, `/* */`) e linhas `DELIMITER`, que são do cliente e não vão ao servidor.
 
 ## Resultados
@@ -150,7 +151,7 @@ Duas camadas: uma lista do que é permitido no app, que recusa o resto antes de 
 
 ## Idioma
 
-- **A interface segue o idioma do sistema, em pt-BR ou inglês.** O primeiro idioma preferido do sistema que começa com `pt` dá pt-BR, com `en` dá inglês; nenhum dos dois dá inglês. Não há opção no app: no macOS, **Ajustes › Geral › Idioma e Região › Aplicativos** troca o idioma só do Cais (o pacote declara as duas localizações).
+- **A interface segue o idioma do sistema, em pt-BR ou inglês.** O primeiro idioma preferido do sistema que começa com `pt` dá pt-BR, com `en` dá inglês; nenhum dos dois dá inglês. Não há opção no app: no macOS, **Ajustes › Geral › Idioma e Região › Aplicativos** troca o idioma só do Cais (o pacote declara as duas localizações). No Linux a lista vem do ambiente da sessão (`LANGUAGE` e `LANG`) e não há escolha por app; para abrir o Cais em outro idioma, inicie-o com `LANGUAGE` ou `LANG` diferente.
 - O idioma vale para a interface inteira: menu do app, diálogos, notificações do sistema, erros e recusas mostrados à pessoa e formatos de número e data. A interface fica num idioma só, o do sistema, sem menus do Electron em outro.
 - **O que vai para agentes é sempre em português** (saída do `cais llm`, `guide`, mensagens das respostas): os códigos são o contrato, e um texto estável não quebra quem já lê a saída.
 - **Não se traduzem:** mensagem crua do servidor, texto do agente (motivo, cliente, nome de script), nomes cadastrados, palavras-chave SQL e marcadores como `⟨U+202E⟩`.

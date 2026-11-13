@@ -7,7 +7,7 @@ O modelo de segurança por trás disso, com os limites conhecidos, está em [seg
 ## Ligar e instalar
 
 1. No Cais, abra **Agentes** (rodapé da barra lateral) e ligue **Acesso de agentes**. O acesso começa desligado e só a pessoa liga, no app; desligado, o socket nem existe. A barra de status mostra "Agentes ligado".
-2. Menu **Cais › Instalar comando cais no terminal** (no Linux e no Windows, menu **Arquivo**). O Cais cria um link `cais` para o `cais.mjs` do app em `/usr/local/bin` se der para escrever lá, senão em `~/.local/bin`, e avisa se a pasta não está no PATH. Nunca sobrescreve um arquivo ou link que não seja do próprio Cais. No Windows o item fica desabilitado: use `node <caminho>/cais.mjs`. O comando roda no Node do sistema, 20 ou mais novo.
+2. Menu **Cais › Instalar comando cais no terminal** (no Linux e no Windows, menu **Arquivo**). O Cais cria um link `cais` para o `cais.mjs` do app em `/usr/local/bin` se der para escrever lá, senão em `~/.local/bin`, e avisa se a pasta não está no PATH. No deb do Linux o comando não vem no pacote: este menu é o jeito de instalá-lo, e na prática cria o link em `~/.local/bin` (o `/usr/local/bin` costuma ser do root). Nunca sobrescreve um arquivo ou link que não seja do próprio Cais. No Windows o item fica desabilitado: use `node <caminho>/cais.mjs`. O comando roda no Node do sistema, 20 ou mais novo.
 3. Em desenvolvimento, sem instalar: `npm run cli -- llm envs` (recompila o CLI e roda; precisa do Cais aberto com `npm run dev` e o acesso ligado).
 4. Dê ao agente a skill [skills/cais/SKILL.md](../skills/cais/SKILL.md). No Claude Code, a permissão sugerida é `Bash(cais llm:*)`.
 
@@ -179,7 +179,7 @@ Um script criado por agente segue as mesmas regras de um pedido com `--write` e 
 - **"O agente pode ver o resultado"** vem marcado; desmarcado, a resposta traz `result_withheld: true` e só contagens.
 - **Nada decide por tecla solta:** Recusar e Rollback têm o foco, Aprovar e Commit ficam desabilitados por 600 ms depois que o modal aparece, Enter não aprova e Esc deixa o pedido pendente (ele volta por "Revisar" no painel). Os modais esperam qualquer outro diálogo aberto fechar.
 - **Modal do Commit:** cada comando inteiro, com as linhas afetadas, o contador do rollback automático, Rollback e Commit.
-- **Notificação do sistema** e, no macOS, o ícone pulando no Dock, no máximo uma vez a cada 30 segundos, dizendo quantos pedidos esperam. Também avisa quando uma escrita automática ficou esperando o Commit.
+- **Notificação do sistema** e, com a janela sem foco, o aviso de atenção (no macOS o ícone pulando no Dock; no Linux e no Windows a janela pisca, `flashFrame`, até ganhar o foco), no máximo uma vez a cada 30 segundos, dizendo quantos pedidos esperam. Também avisa quando uma escrita automática ficou esperando o Commit.
 - O painel Agentes e a Trilha mostram o commit automático como "commit feito (automático)".
 
 ## Limites

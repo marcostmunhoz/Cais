@@ -141,7 +141,7 @@ export function App({ platform }: { platform: string }) {
     main = (
       <>
         <TabBar />
-        <SessionBar tabId={activeTab.id} />
+        <SessionBar tabId={activeTab.id} platform={platform} />
         <div className="workspace" ref={workspace}>
           <div className="editor-wrap" style={{ height: editorH, flex: 'none' }}>
             <Editor

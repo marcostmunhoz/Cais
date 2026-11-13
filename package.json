@@ -1,6 +1,7 @@
 {
   "name": "cais",
   "productName": "Cais",
+  "desktopName": "cais-app.desktop",
   "version": "0.1.0",
   "description": "Cliente SQL de desktop organizado por projeto e ambiente",
   "main": "out/main/index.js",
@@ -14,7 +15,7 @@
     "integration": "vitest run --config vitest.integration.config.mts",
     "e2e": "playwright test --config tests/e2e/playwright.config.ts",
     "check": "npm run typecheck && npm run unit && npm run integration && npm run build && npm run e2e",
-    "dist": "npm run build && electron-builder --mac dmg dir --arm64 --publish never",
+    "dist": "umask 022 && npm run build && electron-builder --publish never",
     "cli": "node scripts/build-cli.mjs && node out/cli/cais.mjs"
   },
   "dependencies": {
@@ -88,6 +89,23 @@
         ]
       }
     },
+    "linux": {
+      "syncDesktopName": true,
+      "target": [
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "executableName": "cais-app",
+      "icon": "build/icon.png",
+      "category": "Development;Database",
+      "synopsis": "Cliente SQL de desktop",
+      "description": "Cliente SQL de desktop organizado por projeto e ambiente, com acesso de agentes de IA pelo CLI cais llm.",
+      "maintainer": "Cais <cais@localhost>"
+    },
     "dmg": {
       "sign": false
     },
@@ -106,5 +124,9 @@
         "to": "cli/cais.mjs"
       }
     ]
+  },
+  "allowScripts": {
+    "electron-winstaller": false,
+    "fsevents": false
   }
 }

@@ -138,7 +138,12 @@ test('single click on an environment focuses its tab; double click opens another
 
 test('Salvar in the session bar asks for a name on a loose tab and lights up on changes', async () => {
   const save = page.getByTestId('btn-save');
-  await expect(save).toHaveAttribute('title', 'Salvar script (⌘S) · Salvar como (⇧⌘S)');
+  await expect(save).toHaveAttribute(
+    'title',
+    process.platform === 'darwin'
+      ? 'Salvar script (⌘S) · Salvar como (⇧⌘S)'
+      : 'Salvar script (Ctrl+S) · Salvar como (Ctrl+Shift+S)',
+  );
   await setSql(page, 'SELECT id, name FROM people ORDER BY id;');
   await save.click();
   const dialog = page.getByRole('dialog', { name: 'Salvar script' });

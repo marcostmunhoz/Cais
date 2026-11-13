@@ -26,6 +26,8 @@ export const ptBR = {
   passwordRequired: 'Informe a senha.',
   vaultUnavailable:
     'O cofre de senhas do sistema não está disponível. A senha não foi salva (o Cais nunca grava senha em texto puro).',
+  vaultUnavailableLinuxHint:
+    'Instale ou desbloqueie um chaveiro (GNOME Keyring ou KWallet). Se o seu ambiente gráfico não for reconhecido, abra o Cais com --password-store=gnome-libsecret.',
   gcloudAccountRequired: 'Informe a conta do gcloud.',
   dbUsernameRequired: 'Informe o usuário no banco.',
   credentialInUse: (p: { names: string }) => `A credencial está em uso por: ${p.names}.`,

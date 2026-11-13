@@ -21,7 +21,7 @@ export const en: Shape<typeof ptBR> = {
   disconnectBlockedRunning: 'Wait for the statement to finish',
   connectionLost: 'The connection was lost.',
   save: 'Save',
-  saveTitle: 'Save script (⌘S) · Save as (⇧⌘S)',
+  saveTitle: (p) => `Save script (${p.save}) · Save as (${p.saveAs})`,
   production: 'Production',
   currentDatabase: 'Current database',
   noDatabase: '(no database)',

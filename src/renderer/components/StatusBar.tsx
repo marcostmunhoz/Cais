@@ -1,4 +1,5 @@
 import { connectionView } from '@shared/connection';
+import { shortcutText } from '@shared/shortcuts';
 import { getDialect } from '@shared/dialects/registry';
 import { EXTENDED_MAX_ROWS } from '@shared/model';
 import { fetchMore } from '../lib/actions';
@@ -15,7 +16,7 @@ export function StatusBar({ tabId, platform }: { tabId: string; platform: string
   const { result, resultIndex } = useActiveResult(tabId);
   const agents = useStore((s) => s.agents);
   const waiting = agents.pending.length + agents.awaitingCommit.length;
-  const mod = platform === 'darwin' ? 'Cmd' : 'Ctrl';
+  const shortcut = shortcutText('run', platform);
 
   const conn = connectionView(session, run);
   const connected = conn.status === 'connected' || conn.status === 'running';
@@ -70,7 +71,7 @@ export function StatusBar({ tabId, platform }: { tabId: string; platform: string
           {engineName} {session.serverVersion}
         </span>
       )}
-      <span className="item">{t.runHint({ mod })}</span>
+      <span className="item">{t.runHint({ shortcut })}</span>
     </footer>
   );
 }

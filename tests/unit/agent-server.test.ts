@@ -94,6 +94,16 @@ describe('AgentServer: where it exists', () => {
     expect(socketPathFor({ ...base, userData: long, override: '/tmp/t.sock' })).toBe('/tmp/t.sock');
   });
 
+  it('prefers $XDG_RUNTIME_DIR/cais.sock on Linux when the preferred path is too long', () => {
+    const base = { platform: 'linux' as const, uid: 1000, username: 'ana', tmpdir: '/tmp' };
+    const long = '/home/ana/' + 'pasta-muito-longa/'.repeat(6) + 'Cais';
+    expect(socketPathFor({ ...base, userData: long, runtimeDir: '/run/user/1000' })).toBe('/run/user/1000/cais.sock');
+    expect(socketPathFor({ ...base, userData: long, runtimeDir: 'relative/dir' })).toBe('/tmp/cais-1000.sock');
+    expect(socketPathFor({ ...base, userData: long })).toBe('/tmp/cais-1000.sock');
+    expect(socketPathFor({ ...base, platform: 'darwin', userData: long, runtimeDir: '/run/user/1000' })).toBe('/tmp/cais-1000.sock');
+    expect(socketPathFor({ ...base, userData: '/home/ana/.config/Cais', runtimeDir: '/run/user/1000' })).toBe('/home/ana/.config/Cais/agent.sock');
+  });
+
   it('really works on the tmp fallback path (length > 100 for the preferred one)', async () => {
     const longDir = join(dir, 'a'.repeat(60), 'b'.repeat(40));
     const preferred = join(longDir, 'agent.sock');

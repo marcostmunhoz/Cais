@@ -29,11 +29,12 @@ Cais é um cliente SQL de desktop para MySQL, feito com Electron, React e TypeSc
 
 ## Requisitos
 
-- Node 20.19 ou mais novo e npm.
+- Node 20.19 ou mais novo e npm 11.x (o lockfile muda conforme a versão do npm).
 - Docker, só para `npm run integration` e `npm run e2e`: eles sobem e removem sozinhos um container `mysql:8.4` chamado `cais-test-*`, em porta aleatória.
 - Para entrar no Cloud SQL por IAM: o Google Cloud SDK (`gcloud`) instalado e com a conta logada, e a instância preparada (veja [Login IAM no Cloud SQL](docs/comportamento.md#login-iam-no-cloud-sql)).
+- No Linux, para guardar senhas: um chaveiro com Secret Service ativo (GNOME Keyring ou KWallet). Sem ele, o Cais recusa salvar senha (veja [Instalar no Linux](#instalar-no-linux)).
 
-O empacotamento configurado gera o app para macOS em Apple Silicon (arm64). O código tem caminhos próprios para Windows e Linux (o socket dos agentes vira named pipe no Windows e o menu tem variante para esses sistemas), mas não há alvo de empacotamento para eles: rode pelo código-fonte (`npm run dev`).
+O empacotamento gera o app para macOS em Apple Silicon (arm64) e um `.deb` para Linux x64 (Ubuntu e derivados), cada um no sistema correspondente. Para Windows não há alvo de empacotamento (o socket dos agentes vira named pipe e o menu tem variante, mas rode pelo código-fonte com `npm run dev`).
 
 ## Instalar e rodar em desenvolvimento
 
@@ -60,10 +61,16 @@ O e2e grava capturas de tela em `tests/e2e/screenshots/` (fora do controle de ve
 npm run dist
 ```
 
-Gera, para macOS em Apple Silicon:
+Gera os alvos do sistema em que roda.
+
+No macOS (Apple Silicon):
 
 - `dist/Cais-<versão>-arm64.dmg`
 - `dist/mac-arm64/Cais.app`
+
+No Linux (x64):
+
+- `dist/cais_<versão>_amd64.deb`
 
 ### Abrir o app sem assinatura no macOS
 
@@ -74,6 +81,18 @@ O `.app` tem só uma assinatura ad-hoc local, sem Apple Developer ID e sem notar
 3. Pelo terminal: `xattr -dr com.apple.quarantine /Applications/Cais.app`.
 
 Na primeira vez que você salvar uma senha, o macOS pode pedir acesso ao Keychain: é o cofre onde o Cais guarda as senhas cifradas e a chave de assinatura do cadastro.
+
+### Instalar no Linux
+
+```bash
+sudo apt install ./dist/cais_<versão>_amd64.deb
+```
+
+O pacote instala o app em `/opt/Cais`, o executável `cais-app` (em `/usr/bin`) e a entrada **Cais** no menu de aplicativos. O comando `cais` não vem no pacote: instale-o pelo menu **Arquivo › Instalar comando cais no terminal**, que cria o link em `~/.local/bin`.
+
+- **Senhas:** o cofre é o Secret Service (GNOME Keyring, KWallet). Sem chaveiro disponível, o Cais recusa salvar senha e a mensagem diz o que fazer. Se o ambiente gráfico não for reconhecido, abra o app com `cais-app --password-store=gnome-libsecret`.
+- **`gcloud`:** o Cais acha o `gcloud` no PATH, pelo shell de login ou em `/usr/bin`, `/snap/bin` e `/usr/lib/google-cloud-sdk/bin`.
+- **Sandbox do Chromium:** o instalador ajusta o `chrome-sandbox` e, onde o AppArmor está ligado, instala o perfil `cais-app` para liberar os user namespaces. O perfil no Ubuntu 24.04 ainda não foi conferido.
 
 ## Uso
 
@@ -93,7 +112,7 @@ Na barra da aba ficam o ambiente, o estado da conexão, o banco atual, o modo (S
 | Cmd+S / Cmd+Shift+S | Salva o script / salva como outro script |
 | Cmd+O | Abre um script salvo |
 
-Fora do macOS, Ctrl faz o papel de Cmd. O comportamento completo de cada tela, com os motivos, está em [docs/comportamento.md](docs/comportamento.md).
+No Linux e no Windows, Ctrl faz o papel de Cmd (a interface mostra o atalho do seu sistema). O comportamento completo de cada tela, com os motivos, está em [docs/comportamento.md](docs/comportamento.md).
 
 ## Para agentes
 
@@ -114,7 +133,7 @@ Cada ambiente define o que um agente roda sem pedir (Tudo com aprovação; Leitu
 
 ## Segurança
 
-- Senhas e tokens não saem do processo principal: a interface envia a senha uma vez, ao salvar, e nunca a recebe de volta. Senhas ficam cifradas pelo cofre do sistema (Keychain no macOS).
+- Senhas e tokens não saem do processo principal: a interface envia a senha uma vez, ao salvar, e nunca a recebe de volta. Senhas ficam cifradas pelo cofre do sistema (Keychain no macOS, Secret Service no Linux).
 - O renderer roda isolado (`contextIsolation`, `sandbox`, CSP restritiva, nenhum recurso remoto). O processo principal valida tudo o que chega com zod e reclassifica o SQL antes de executar.
 - O Cais recusa abrir com opções de depuração remota (só o gancho de testes de ponta a ponta as aceita), e o app empacotado não tem DevTools.
 - Agentes falam com o Cais por um socket local só do usuário (modo 0600), nunca recebem credencial, e cada pedido é reclassificado e registrado na Trilha antes de rodar.

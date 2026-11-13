@@ -27,6 +27,8 @@ export const en: Shape<typeof ptBR> = {
   passwordRequired: 'Enter the password.',
   vaultUnavailable:
     'The system password vault is not available. The password was not saved (Cais never stores a password in plain text).',
+  vaultUnavailableLinuxHint:
+    'Install or unlock a keyring (GNOME Keyring or KWallet). If your desktop is not recognized, open Cais with --password-store=gnome-libsecret.',
   gcloudAccountRequired: 'Enter the gcloud account.',
   dbUsernameRequired: 'Enter the database user.',
   credentialInUse: (p) => `The credential is in use by: ${p.names}.`,

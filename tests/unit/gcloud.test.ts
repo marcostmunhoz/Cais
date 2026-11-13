@@ -42,15 +42,15 @@ function fakeSpawn(handler: (call: Call) => Reply): { spawn: SpawnFn; calls: Cal
 
 function provider(
   handler: (call: Call) => Reply,
-  opts: { existing?: string[]; env?: NodeJS.ProcessEnv; now?: () => number } = {},
+  opts: { existing?: string[]; env?: NodeJS.ProcessEnv; now?: () => number; platform?: NodeJS.Platform } = {},
 ) {
   const { spawn, calls } = fakeSpawn(handler);
   const existing = new Set(opts.existing ?? ['/usr/local/bin/gcloud']);
   const p = new GcloudTokenProvider({
     spawn,
     env: opts.env ?? { PATH: '/usr/local/bin:/usr/bin' },
-    platform: 'darwin',
-    homedir: '/Users/x',
+    platform: opts.platform ?? 'darwin',
+    homedir: opts.platform === 'linux' ? '/home/x' : '/Users/x',
     exists: (path) => existing.has(path),
     now: opts.now ?? (() => 0),
   });
@@ -196,6 +196,30 @@ describe('GcloudTokenProvider: binary discovery', () => {
       env: { PATH: '' },
     });
     expect(await p.locate()).toBe('/Users/x/google-cloud-sdk/bin/gcloud');
+  });
+
+  it.each(['/usr/bin/gcloud', '/snap/bin/gcloud', '/usr/lib/google-cloud-sdk/bin/gcloud'])(
+    'finds %s on Linux when the PATH and the login shell miss it',
+    async (path) => {
+      const { p } = provider(() => ({ code: 1 }), {
+        platform: 'linux',
+        existing: [path],
+        env: { PATH: '/opt/none', SHELL: '/bin/bash' },
+      });
+      expect(await p.locate()).toBe(path);
+    },
+  );
+
+  it('prefers the login shell over the Linux well-known paths', async () => {
+    const { p } = provider(
+      (call) => (call.command === '/bin/bash' ? { stdout: '/home/x/sdk/bin/gcloud\n' } : { stdout: '[]' }),
+      {
+        platform: 'linux',
+        existing: ['/home/x/sdk/bin/gcloud', '/usr/bin/gcloud'],
+        env: { PATH: '/opt/none', SHELL: '/bin/bash' },
+      },
+    );
+    expect(await p.locate()).toBe('/home/x/sdk/bin/gcloud');
   });
 
   it('reports a missing gcloud with the documented message', async () => {

@@ -21,7 +21,7 @@ export const ptBR = {
   disconnectBlockedRunning: 'Aguarde o comando terminar',
   connectionLost: 'A conexão foi perdida.',
   save: 'Salvar',
-  saveTitle: 'Salvar script (⌘S) · Salvar como (⇧⌘S)',
+  saveTitle: (p: { save: string; saveAs: string }) => `Salvar script (${p.save}) · Salvar como (${p.saveAs})`,
   production: 'Produção',
   currentDatabase: 'Banco atual',
   noDatabase: '(nenhum banco)',

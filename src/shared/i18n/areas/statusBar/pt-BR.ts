@@ -11,5 +11,5 @@ export const ptBR = {
   agentsTitle: 'Abrir o painel Agentes',
   agentsOn: 'Agentes ligado',
   requests: (p: { n: number }) => f.count(p.n, { one: 'pedido', other: 'pedidos' }),
-  runHint: (p: { mod: string }) => `${p.mod}+Enter roda o comando sob o cursor`,
+  runHint: (p: { shortcut: string }) => `${p.shortcut} roda o comando sob o cursor`,
 };
