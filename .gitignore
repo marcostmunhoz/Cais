@@ -1,0 +1,16 @@
+# dependencies
+node_modules/
+
+# build output
+out/
+dist/
+
+# test output (e2e screenshots are regenerated on every run; curated copies live in docs/images)
+test-results/
+tests/e2e/.tmp/
+tests/e2e/screenshots/
+coverage/
+
+# logs and OS files
+*.log
+.DS_Store

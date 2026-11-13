@@ -1,0 +1,110 @@
+{
+  "name": "cais",
+  "productName": "Cais",
+  "version": "0.1.0",
+  "description": "Cliente SQL de desktop organizado por projeto e ambiente",
+  "private": true,
+  "main": "out/main/index.js",
+  "author": "Cais",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build && node scripts/build-cli.mjs",
+    "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit",
+    "unit": "vitest run --config vitest.unit.config.mts",
+    "integration": "vitest run --config vitest.integration.config.mts",
+    "e2e": "playwright test --config tests/e2e/playwright.config.ts",
+    "check": "npm run typecheck && npm run unit && npm run integration && npm run build && npm run e2e",
+    "dist": "npm run build && electron-builder --mac dmg dir --arm64 --publish never",
+    "cli": "node scripts/build-cli.mjs && node out/cli/cais.mjs"
+  },
+  "dependencies": {
+    "mysql2": "3.24.6"
+  },
+  "devDependencies": {
+    "@codemirror/autocomplete": "6.20.4",
+    "@codemirror/commands": "6.11.1",
+    "@codemirror/lang-sql": "6.10.0",
+    "@codemirror/language": "6.13.1",
+    "@codemirror/state": "6.7.6",
+    "@codemirror/view": "6.43.15",
+    "@lezer/highlight": "1.2.5",
+    "@playwright/test": "1.65.0",
+    "@tanstack/react-virtual": "3.14.26",
+    "@types/node": "20.19.43",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.3.0",
+    "electron": "45.3.0",
+    "electron-builder": "26.18.0",
+    "electron-vite": "6.0.0",
+    "lucide-react": "1.72.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "typescript": "7.0.2",
+    "vite": "8.3.8",
+    "vitest": "4.1.12",
+    "zod": "4.6.7"
+  },
+  "build": {
+    "appId": "dev.cais.app",
+    "productName": "Cais",
+    "copyright": "Cais",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "out/**/*",
+      "!out/cli/**",
+      "package.json"
+    ],
+    "npmRebuild": false,
+    "electronLanguages": [
+      "en",
+      "pt_BR"
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "icon": "build/icon.icns",
+      "identity": null,
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        },
+        {
+          "target": "dir",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "extendInfo": {
+        "CFBundleDevelopmentRegion": "en",
+        "CFBundleLocalizations": [
+          "en",
+          "pt-BR"
+        ]
+      }
+    },
+    "dmg": {
+      "sign": false
+    },
+    "electronFuses": {
+      "runAsNode": false,
+      "enableCookieEncryption": true,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "enableEmbeddedAsarIntegrityValidation": true,
+      "onlyLoadAppFromAsar": true
+    },
+    "afterSign": "scripts/adhoc-sign.cjs",
+    "extraResources": [
+      {
+        "from": "out/cli/cais.mjs",
+        "to": "cli/cais.mjs"
+      }
+    ]
+  }
+}
