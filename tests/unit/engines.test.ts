@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { capabilitiesOf, connectionTargetKey, initialModeFor, sameTarget } from '@shared/engines';
+import { capabilitiesOf, connectionTargetKey, GIB, initialModeFor, isBigqueryDatasetId, isGcpProjectId, sameTarget } from '@shared/engines';
 
 describe('engine capabilities', () => {
   it('MySQL takes the three modes and grid editing', () => {
@@ -22,5 +22,39 @@ describe('connection target', () => {
     expect(sameTarget(a, { ...a, port: 3307 })).toBe(false);
     expect(sameTarget(a, { ...a, credentialId: 'd' })).toBe(false);
     expect(connectionTargetKey(a)).not.toBe(connectionTargetKey({ host: 'h3306', port: 0, credentialId: 'c' }));
+  });
+});
+
+describe('BigQuery engine', () => {
+  it('only reads: one mode, no grid editing', () => {
+    expect(capabilitiesOf('bigquery')).toEqual({ modes: ['read-only'], gridEdit: false });
+    expect(initialModeFor(capabilitiesOf('bigquery'), false)).toBe('read-only');
+    expect(initialModeFor(capabilitiesOf('bigquery'), true)).toBe('read-only');
+  });
+
+  const bq = { engine: 'bigquery' as const, gcpProject: 'my-project-1', credentialId: 'c', maxBytesBilled: 100 * GIB };
+  it('compares the project, the byte limit and the credential', () => {
+    expect(sameTarget(bq, { ...bq })).toBe(true);
+    expect(sameTarget(bq, { ...bq, gcpProject: 'other-project' })).toBe(false);
+    expect(sameTarget(bq, { ...bq, maxBytesBilled: 10 * GIB })).toBe(false);
+    expect(sameTarget(bq, { ...bq, maxBytesBilled: undefined })).toBe(false);
+    expect(sameTarget(bq, { ...bq, credentialId: 'd' })).toBe(false);
+    expect(connectionTargetKey({ ...bq, maxBytesBilled: undefined })).toBe(connectionTargetKey({ engine: 'bigquery', gcpProject: 'my-project-1', credentialId: 'c' }));
+  });
+
+  it('a MySQL target is never the same as a BigQuery one', () => {
+    expect(sameTarget(bq, { host: 'my-project-1', port: 0, credentialId: 'c' })).toBe(false);
+  });
+
+  it('knows a Google Cloud project id', () => {
+    for (const ok of ['my-project-1', 'abcdef', 'a'.repeat(30), 'example.com:my-project', 'sub.example.com:proj-123']) expect(isGcpProjectId(ok), ok).toBe(true);
+    for (const bad of ['', 'short', 'a'.repeat(31), 'My-Project', '1project', 'project-', 'my_project', 'my project', 'ex ample.com:proj1', ':project', 'example:project1', 'a/b-project', '../x-project', 'proj\n-1']) {
+      expect(isGcpProjectId(bad), bad).toBe(false);
+    }
+  });
+
+  it('knows a dataset id', () => {
+    expect(isBigqueryDatasetId('sales_2026')).toBe(true);
+    for (const bad of ['', 'a-b', 'a.b', 'a b', 'a/b', '`x`', 'x'.repeat(1025)]) expect(isBigqueryDatasetId(bad), bad).toBe(false);
   });
 });

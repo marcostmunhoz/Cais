@@ -74,6 +74,14 @@ O que a pessoa aprova no modal precisa ser o que o servidor roda. Por isso o SQL
 - **Resultado retido:** com "O agente pode ver o resultado" desmarcado, a resposta traz só contagens, e erros do servidor só com o código (a mensagem pode citar valores).
 - **O commit automático só acontece no que o Cais consegue contar e desfazer** (regras em [agentes.md](agentes.md#commit-automático-em-leitura-e-escrita-liberadas)): sem trigger, sem cascata, sem view, sem função, com metadados frescos e com tetos de linhas.
 
+### BigQuery (só leitura)
+
+- **Duas camadas:** o classificador do app recusa o que não é consulta antes de sair, e o driver faz um dry run de cada comando e só segue se o servidor o lê como `SELECT` (sem `statementType`, recusa). A segunda camada está dentro do driver, então vale também para quem o chama sem passar pelo `SessionManager`.
+- **Agentes não escrevem:** `--write` num ambiente BigQuery é recusado com `engine_read_only` no broker, e `AgentSessions.runWrite` recusa de novo; nenhum modo de escrita chega ao driver.
+- **Token:** o token de acesso vem de `gcloud auth print-access-token`, fica em memória (50 minutos), vai só no cabeçalho `Authorization` das chamadas ao `bigquery.googleapis.com` feitas pelo processo principal e nunca entra em log, em mensagem de erro nem na resposta a agentes. Com 401, o driver pede outro uma vez e repete.
+- **Redação para agentes:** erros do BigQuery chegam ao agente sem o id do projeto e sem e-mails de conta.
+- **O que ainda depende de verificação no servidor de verdade** (suíte ao vivo, `npm run live:bigquery`): se o dry run de `jobs.query` traz sempre `statementType` para todas as classes de comando, e o efeito de `maximumBytesBilled` em projeto com reserva de slots.
+
 ## Isolamento do canal dos agentes
 
 - **O socket só existe com o acesso ligado**, e só a pessoa liga, no app. No Windows, fica num named pipe `\\.\pipe\cais-<usuário>`. Nos outros sistemas, em `<pasta de dados>/agent.sock`; quando esse caminho passa de 100 bytes, no Linux vai para `$XDG_RUNTIME_DIR/cais.sock` (pasta 0700 do usuário, se existir, for absoluta e couber em 100 bytes) e, senão, para `<tmp>/cais-<uid>.sock`. Nos sockets, permissão 0600: só o próprio usuário.

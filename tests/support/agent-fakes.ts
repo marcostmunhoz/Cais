@@ -1,5 +1,5 @@
 import { getDialect } from '@shared/dialects/registry';
-import type { Environment, Project, SavedScript } from '@shared/model';
+import type { MysqlEnvironment as Environment, Project, SavedScript } from '@shared/model';
 import type { SchemaTree, StatementResult } from '@shared/results';
 import { AgentBroker } from '@main/agents/broker';
 import type { AuditEntry } from '@main/agents/audit';

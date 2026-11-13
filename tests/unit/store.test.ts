@@ -176,7 +176,7 @@ describe('projects: rename and duplicate', () => {
     writeFileSync(join(dir, 'catalog.json'), JSON.stringify(c));
     const again = new CatalogStore(dir, new FakeVault());
     await again.load();
-    expect((await again.saveEnvironment({ ...env, name: 'old/dev', host: 'h2' })).name).toBe('old/dev');
+    expect((await again.saveEnvironment({ ...env, name: 'old/dev', host: 'h2' } as typeof env & { host: string })).name).toBe('old/dev');
     expect((await again.renameProject(project.id, 'legacy/api')).project.name).toBe('legacy/api');
     expect(await codeOf(again.renameProject(project.id, 'legacy/core'))).toBe('invalid-name');
     expect((await again.renameProject(project.id, 'core')).project.name).toBe('core');
@@ -230,6 +230,7 @@ describe('credential resolution', () => {
     const r = await resolveCredential(
       { id: 'c', name: 'n', kind: 'password', username: 'root' },
       { getPassword: () => 'pw', getToken: async () => 'unused' },
+      'mysql',
     );
     expect(r).toEqual({ user: 'root', password: 'pw', tls: 'off' });
   });
@@ -238,6 +239,7 @@ describe('credential resolution', () => {
     const r = await resolveCredential(
       { id: 'c', name: 'n', kind: 'gcloud-iam', account: 'a@x.com', dbUsername: 'a', impersonateServiceAccount: 'sa@p.iam.gserviceaccount.com' },
       { getPassword: () => undefined, getToken: async (...a) => (calls.push(a), 'TOKEN') },
+      'mysql',
     );
     expect(r).toEqual({ user: 'a', password: 'TOKEN', authPlugin: 'mysql_clear_password', tls: 'required' });
     expect(calls).toEqual([['a@x.com', 'sa@p.iam.gserviceaccount.com']]);
@@ -318,6 +320,7 @@ describe('main store messages in English', () => {
     const error = (await resolveCredential(
       { id: 'c', name: 'root', kind: 'password', username: 'root' },
       { getPassword: () => undefined, getToken: async () => 'x' },
+      'mysql',
     ).catch((e: unknown) => e)) as CaisError;
     expect(error.message).toBe('The credential "root" has no saved password.');
     expect(error.ref).toEqual({ key: 'mainMisc.credentialNoPassword', params: { name: 'root' } });

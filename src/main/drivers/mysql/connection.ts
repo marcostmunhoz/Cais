@@ -1,7 +1,13 @@
 import mysql from 'mysql2';
-import type { ConnectParams } from '../types';
+import type { ConnectParams, MysqlConnectParams } from '../types';
 
-export function buildConnectionOptions(params: ConnectParams): mysql.ConnectionOptions {
+/** The driver is picked by engine; parameters of another engine never get here. */
+export function mysqlParams(params: ConnectParams): MysqlConnectParams {
+  if (params.engine === 'bigquery') throw new Error('MySQL driver received BigQuery parameters');
+  return params;
+}
+
+export function buildConnectionOptions(params: MysqlConnectParams): mysql.ConnectionOptions {
   const options: mysql.ConnectionOptions = {
     host: params.host,
     port: params.port,
@@ -34,7 +40,7 @@ export function buildConnectionOptions(params: ConnectParams): mysql.ConnectionO
   return options;
 }
 
-export function connect(params: ConnectParams): Promise<mysql.Connection> {
+export function connect(params: MysqlConnectParams): Promise<mysql.Connection> {
   return new Promise((resolve, reject) => {
     const conn = mysql.createConnection(buildConnectionOptions(params));
     conn.once('error', reject);

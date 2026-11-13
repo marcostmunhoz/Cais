@@ -93,7 +93,7 @@ function StatementList({ request, onGate }: { request: AgentRequestView; onGate:
             <span className="stmt-n">#{i + 1}</span>
             <span className={`agent-pill ${s.kind === 'write' ? 'warn' : ''}`}>{kindLabel(s.kind)}</span>
           </div>
-          <SqlView value={s.sql} label={t().modal.statement({ n: i + 1 })} />
+          <SqlView value={s.sql} label={t().modal.statement({ n: i + 1 })} environmentId={request.environmentId} />
         </div>
       ))}
     </div>
@@ -267,7 +267,7 @@ function CommitModal({ request }: { request: AgentRequestView }) {
             <div className="row" key={i}>
               {/* the whole command, with the same markers as the approval modal */}
               <div className="sql">
-                <SqlView value={s.sql} label={t().modal.statement({ n: i + 1 })} />
+                <SqlView value={s.sql} label={t().modal.statement({ n: i + 1 })} environmentId={request.environmentId} />
               </div>
               <span>
                 {s.error
@@ -381,7 +381,7 @@ function RequestRow({ request, onOpen, open }: { request: AgentRequestView; onOp
               </>
             )}
           </div>
-          <SqlView value={request.sql} label={msg.sql} />
+          <SqlView value={request.sql} label={msg.sql} environmentId={request.environmentId} />
         </div>
       )}
     </>

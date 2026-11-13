@@ -101,7 +101,7 @@ function Detail({ entry }: { entry: TrailEntry }) {
           </span>
         ))}
       </div>
-      {entry.sql && <SqlView value={entry.sql} label={d.sql} />}
+      {entry.sql && <SqlView value={entry.sql} label={d.sql} {...(entry.environmentId ? { environmentId: entry.environmentId } : {})} />}
     </div>
   );
 }

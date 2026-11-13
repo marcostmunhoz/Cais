@@ -7,7 +7,7 @@ Como o Cais se comporta e por quê. Cada regra traz o motivo quando ele não é 
 - **Produção não escreve por acidente.** Um ambiente de produção abre em Somente leitura; para escrever é preciso trocar o modo da aba, e o Auto-commit em produção pede confirmação.
 - **Segredo não sai do processo principal.** A interface envia a senha uma vez, ao salvar, e nunca a recebe de volta. Nada de senha ou token em log.
 - **A interface não conhece o motor.** Tudo o que depende do banco (dialeto, palavras-chave, introspecção, classificação de comandos) vem do driver e do dialeto. MySQL é o primeiro motor.
-- **O app não altera o `gcloud`.** Só lista as contas logadas e gera o token de login.
+- **O app não altera o `gcloud`.** Só lista as contas logadas e gera tokens: o de login do Cloud SQL e o de acesso do BigQuery.
 - **Poucas opções.** Um padrão seguro vale mais que uma configuração. Os valores fixos deste documento (limites de linhas, tempo de inatividade, níveis de agentes) são fixos de propósito; uma opção nova só entra com o motivo registrado aqui.
 
 ## Telas
@@ -44,7 +44,18 @@ A interface segue o tema claro ou escuro do sistema e usa as fontes do sistema. 
 - O token fica em memória por 50 minutos por conta e service account, e nunca vai para log.
 - **Achar o `gcloud`:** um app aberto pelo Finder (macOS) ou pelo menu de aplicativos (Linux) não herda o PATH do shell. O Cais procura no PATH atual, depois pelo shell de login (`$SHELL -lc 'command -v gcloud'`, uma vez) e depois em `/usr/local/bin/gcloud`, `/opt/homebrew/bin/gcloud`, `~/google-cloud-sdk/bin/gcloud` e `/opt/homebrew/share/google-cloud-sdk/bin/gcloud` (macOS), e `/usr/bin/gcloud`, `/snap/bin/gcloud` e `/usr/lib/google-cloud-sdk/bin/gcloud` (Linux).
 - Quando a conta precisa entrar de novo, o erro diz o comando: `gcloud auth login <conta>`.
-- O app só roda `gcloud auth list` e `gcloud sql generate-login-token`. Nenhum comando que altera o `gcloud`.
+- O app só roda três comandos: `gcloud auth list`, `gcloud sql generate-login-token` e `gcloud auth print-access-token --account=<conta>` (com `--impersonate-service-account` quando configurado; é o token do BigQuery, guardado em memória por 50 minutos, separado do token de login). Nenhum comando que altera o `gcloud`.
+
+## BigQuery (só leitura)
+
+O BigQuery é o segundo motor, e nesta versão só lê. A interface de cadastro, a árvore, o editor e a confirmação de custo ainda não existem para ele (veja [o plano](planos/linux-e-bigquery.md)); o que já vale no processo principal:
+
+- **Ambiente:** projeto do Google Cloud (onde os jobs rodam e são cobrados), dataset padrão opcional (é o "banco padrão") e limite de bytes por consulta, opcional. A credencial tem de ser "Google IAM via gcloud": usuário e senha são recusados ao salvar.
+- **Por que o campo de limite:** o BigQuery cobra pelo que lê, e uma consulta sem filtro numa tabela grande custa caro antes de qualquer sinal de problema. O limite vira o `maximumBytesBilled` do job: o BigQuery recusa, sem cobrar, a consulta que passaria dele. Vazio é sem limite, o caso de um projeto com reserva de slots, onde o limite pode não se aplicar. O campo é um inteiro de bytes de 1 GiB para cima.
+- **Sessão:** sempre Somente leitura, em qualquer ambiente. Cada comando passa pelo classificador do app e por um dry run: se o servidor não o lê como `SELECT`, recusa. Não há transação, Commit nem edição na grade.
+- **Dataset atual:** trocar de dataset confere que ele existe (`datasets.get`) e vira o padrão das consultas seguintes; a Trilha grava a linha com o verbo `DATASET`.
+- **Resultado:** o rodapé guarda bytes estimados, processados e faturados, se veio do cache e o id do job. "Buscar até 50.000" lê mais páginas do mesmo job, sem rodar de novo, enquanto o resultado dele existir (24 horas).
+- **Cancelar** usa `jobs.cancel`; fechar a aba cancela o job em andamento.
 
 ## Modos da sessão
 

@@ -6,14 +6,14 @@ import { AGENT_LEVEL_LABEL, agentLevelOf, type Environment, type EnvironmentDraf
 import { TRAIL_RETENTION_DAYS } from '@shared/agents';
 import { m } from '@shared/i18n';
 import type { SchemaTree } from '@shared/results';
-import { resolveCredential, toConnectParams } from './auth/credentials';
+import { connectParamsFor, type CredentialSources } from './auth/credentials';
 import type { GcloudTokenProvider } from './auth/gcloud';
 import type { AgentAccess } from './agents/access';
 import type { AgentBroker } from './agents/broker';
 import { AgentError } from './agents/errors';
 import { CaisError } from './errors';
 import { getDriver } from './drivers/registry';
-import { DriverError, type ConnectParams } from './drivers/types';
+import { DriverError } from './drivers/types';
 import { SessionManager } from './sessions';
 import { changedForAgents, type CatalogStore } from './store/catalog';
 import type { ScriptStore } from './store/scripts';
@@ -26,6 +26,8 @@ export interface Services {
   scripts: ScriptStore;
   agents: { access: AgentAccess; broker: AgentBroker };
   gcloud: GcloudTokenProvider;
+  /** BigQuery access token; the gcloud provider when absent (the e2e hook replaces it with a fixed fake). */
+  getAccessToken?: CredentialSources['getAccessToken'];
   sessions: SessionManager;
   /** Called after a session closes, to continue a pending quit. */
   afterSessionClose(): void;
@@ -42,18 +44,24 @@ const mode = z.enum(['read-only', 'transaction', 'autocommit']);
 
 // creating only: renaming goes through catalogRenameProject (trail, agents); an id here is ignored
 const projectInput = z.object({ name });
-const environmentInput = z.object({
+const environmentBase = {
   id: id.optional(),
   projectId: id,
   name,
-  engine: z.literal('mysql'),
-  host: z.string().max(255),
-  port: z.number().int().min(1).max(65535),
   defaultDatabase: z.string().max(200).optional(),
   credentialId: id,
   production: z.boolean(),
   agentLevel: z.enum(['approve-all', 'free-reads', 'free-reads-writes']).optional(),
-});
+};
+const environmentInput = z.discriminatedUnion('engine', [
+  z.object({ ...environmentBase, engine: z.literal('mysql'), host: z.string().max(255), port: z.number().int().min(1).max(65535) }),
+  z.object({
+    ...environmentBase,
+    engine: z.literal('bigquery'),
+    gcpProject: z.string().max(100),
+    maxBytesBilled: z.number().int().positive().safe().optional(),
+  }),
+]);
 const credentialInput = z.discriminatedUnion('kind', [
   z.object({
     id: id.optional(),
@@ -71,13 +79,22 @@ const credentialInput = z.discriminatedUnion('kind', [
     dbUsername: z.string().max(200),
   }),
 ]);
-const environmentDraft = z.object({
-  engine: z.literal('mysql'),
-  host: z.string().min(1).max(255),
-  port: z.number().int().min(1).max(65535),
-  defaultDatabase: z.string().max(200).optional(),
-  credentialId: id,
-});
+const environmentDraft = z.discriminatedUnion('engine', [
+  z.object({
+    engine: z.literal('mysql'),
+    host: z.string().min(1).max(255),
+    port: z.number().int().min(1).max(65535),
+    defaultDatabase: z.string().max(200).optional(),
+    credentialId: id,
+  }),
+  z.object({
+    engine: z.literal('bigquery'),
+    gcpProject: z.string().min(1).max(100),
+    defaultDatabase: z.string().max(200).optional(),
+    credentialId: id,
+    maxBytesBilled: z.number().int().positive().safe().optional(),
+  }),
+]);
 const runRequest = z.object({
   sql: z.string().max(5_000_000),
   scope: z.enum(['current', 'all']),
@@ -145,18 +162,13 @@ export function registerIpc(services: Services): void {
     });
   }
 
-  const connectParamsFor = async (
-    environment: Pick<Environment, 'host' | 'port' | 'credentialId'>,
-    database?: string,
-  ): Promise<ConnectParams> => {
-    const credential = store.getCredential(environment.credentialId);
-    if (!credential) throw new CaisError(m().mainMisc.credentialNotFound);
-    const resolved = await resolveCredential(credential, {
-      getPassword: (credentialId) => store.getPassword(credentialId),
-      getToken: (account, sa) => gcloud.getToken(account, sa),
-    });
-    return toConnectParams({ host: environment.host, port: environment.port, database }, resolved);
+  const sources: CredentialSources = {
+    getPassword: (credentialId) => store.getPassword(credentialId),
+    getToken: (account, sa) => gcloud.getToken(account, sa),
+    getAccessToken: services.getAccessToken ?? ((account, sa, opts) => gcloud.getAccessToken(account, sa, opts)),
   };
+  const paramsFor = (target: Parameters<typeof connectParamsFor>[0], database?: string) =>
+    connectParamsFor(target, database, { getCredential: (credentialId) => store.getCredential(credentialId), sources, origin: 'person' });
 
   const t = (...items: z.ZodType[]) => z.tuple(items as [z.ZodType, ...z.ZodType[]]) as unknown as z.ZodType<unknown[]>;
   const none = z.tuple([]) as unknown as z.ZodType<unknown[]>;
@@ -253,7 +265,7 @@ export function registerIpc(services: Services): void {
       return { ok: false as const, error: m().mainIpc.blockedCredentialTest };
     }
     try {
-      const params = await connectParamsFor(draft, draft.defaultDatabase?.trim() || undefined);
+      const params = await paramsFor(draft, draft.defaultDatabase?.trim() || undefined);
       const result = await getDriver(draft.engine).test(params);
       return { ok: true as const, serverVersion: result.serverVersion };
     } catch (error) {
@@ -301,7 +313,7 @@ export function registerIpc(services: Services): void {
       const environment = store.getEnvironment(key);
       if (!environment) throw new CaisError(m().mainSessions.environmentNotFound);
       store.requireTrusted(environment.id);
-      const params = await connectParamsFor(environment);
+      const params = await paramsFor(environment);
       const tree = await getDriver(environment.engine).introspect(params);
       schemaCache.set(key, tree);
       return tree;

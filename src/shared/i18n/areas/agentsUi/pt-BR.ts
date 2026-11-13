@@ -202,6 +202,8 @@ export const ptBR = {
   redact: {
     server: '<servidor>',
     user: '<usuário>',
+    project: '<projeto>',
+    account: '<conta>',
   },
 
   /** Alerts before a write: what the Rollback may not undo (person only). */

@@ -4,9 +4,9 @@ import type { CellValue, ColumnMeta, StatementResult } from '@shared/results';
 import { m, ref } from '@shared/i18n';
 import { CaisError } from '../../errors';
 import { quoteIdent } from '@shared/dialects/mysql/literals';
-import type { ConnectParams, DbSession, DbSessionError, ExecuteOptions } from '../types';
+import type { DbSession, DbSessionError, ExecuteOptions, MysqlConnectParams } from '../types';
 import { DriverError } from '../types';
-import { closeQuietly, connect, query } from './connection';
+import { closeQuietly, connect, mysqlParams, query } from './connection';
 import { mapMysqlError } from './errors';
 import { columnMeta, toCell, type FieldLike } from './values';
 
@@ -61,7 +61,7 @@ export class MysqlSession implements DbSession {
 
   constructor(
     private readonly conn: mysql.Connection,
-    private readonly params: ConnectParams,
+    private readonly params: MysqlConnectParams,
     readonly serverVersion: string,
     private readonly threadId: number,
   ) {
@@ -256,7 +256,7 @@ export class MysqlSession implements DbSession {
     let control: mysql.Connection | undefined;
     try {
       // an IAM token from open time may have expired: ask for fresh parameters
-      const params = this.params.refresh ? await this.params.refresh().catch(() => this.params) : this.params;
+      const params = this.params.refresh ? mysqlParams(await this.params.refresh().catch(() => this.params)) : this.params;
       control = await connect({ ...params, database: undefined });
       await query(control, `KILL QUERY ${this.threadId}`);
     } catch (error) {
@@ -435,7 +435,7 @@ export class MysqlSession implements DbSession {
   }
 }
 
-export async function openMysqlSession(params: ConnectParams): Promise<MysqlSession> {
+export async function openMysqlSession(params: MysqlConnectParams): Promise<MysqlSession> {
   let conn: mysql.Connection;
   try {
     conn = await connect(params);

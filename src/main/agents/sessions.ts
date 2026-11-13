@@ -11,8 +11,9 @@ import {
   WRITE_RUN_MAX_MS,
 } from '@shared/agents';
 import { CaisError } from '../errors';
-import type { ConnectParams, DbSession, Driver } from '../drivers/types';
-import { DriverError } from '../drivers/types';
+import type { ConnectParams, DbSession, Driver, MysqlConnectParams } from '../drivers/types';
+import { DriverError, withDatabase } from '../drivers/types';
+import { capabilitiesOf } from '@shared/engines';
 import { AGENT_LOCALE, getLocale, m, ref, renderRef, type MessageRef } from '@shared/i18n';
 import { AgentError, agentText, bothWays } from './errors';
 import { realScheduler, type Scheduler } from '../scheduler';
@@ -53,7 +54,7 @@ export interface WriteRun extends RunOutcome {
 /** What the broker needs from the agents' own connections (a fake in unit tests). */
 export interface AgentExecutor {
   /** `fresh`: metadata read now, never from the 60 s cache (what a write decision relies on). */
-  schema(environment: Environment, opts?: { fresh?: boolean }): Promise<SchemaTree>;
+  schema(environment: Environment, opts?: { fresh?: boolean; database?: string }): Promise<SchemaTree>;
   runRead(environment: Environment, args: RunArgs): Promise<RunOutcome>;
   runWrite(environment: Environment, args: RunArgs): Promise<WriteRun>;
   environmentChanged(environmentId: string): Promise<void>;
@@ -90,6 +91,8 @@ const ACCESS_CLOSED = (): AgentError => new AgentError(ref('agentsUi.error.acces
 
 /** The agent's time limit ran out: for the run and for the statement it cut. */
 const timeoutError = (): { message: string; code: string; ref: MessageRef } => ({ ...bothWays(ref('agentsUi.error.timeout')), code: 'agent_timeout' });
+/** Trees kept per agent session manager (one per environment, plus one per dataset asked for). */
+const SCHEMA_CACHE_MAX_ENTRIES = 64;
 const WRITE_VERBS = new Set(['INSERT', 'REPLACE', 'UPDATE', 'DELETE']);
 
 function label(result: StatementResult, statement: PlannedStatement, index: number): StatementResult {
@@ -117,13 +120,14 @@ function connectionFailure(error: unknown, environment: Environment): AgentError
 }
 
 /** Statement-level error as the agent sees it: no driver detail, no address, no login. */
-function safeError(result: StatementResult, environment: Environment): { message: string; code?: string; ref: MessageRef } {
+function safeError(result: StatementResult, environment: Environment): { message: string; code?: string; ref: MessageRef; serverText?: true } {
   const error = result.error!;
   const code = error.code && /^[A-Za-z0-9_]+$/.test(error.code) ? error.code : undefined;
   return {
     message: redactForAgent(error.message, environment, getLocale()),
     ...(code ? { code } : {}),
     ref: ref('agentsUi.verbatim', { text: redactForAgent(agentText(error), environment) }),
+    ...(error.serverText ? { serverText: true as const } : {}),
   };
 }
 
@@ -170,17 +174,34 @@ export class AgentSessions implements AgentExecutor {
   private async params(environment: Environment, database?: string): Promise<ConnectParams> {
     try {
       const params = await this.deps.resolveConnectParams(environment);
+      // BigQuery asks for its own new token (the params carry the function); MySQL re-resolves everything
+      if (params.engine === 'bigquery') return withDatabase(params, database);
       // KILL QUERY opens its own connection later: it must not reuse a token that may have expired
-      const refresh = (): Promise<ConnectParams> => this.deps.resolveConnectParams(environment);
-      return { ...params, ...(database ? { database } : {}), refresh };
+      const refresh = (): Promise<MysqlConnectParams> =>
+        this.deps.resolveConnectParams(environment).then((fresh) => {
+          if (fresh.engine === 'bigquery') throw new Error('engine changed');
+          return fresh;
+        });
+      return { ...(withDatabase(params, database) as MysqlConnectParams), refresh };
     } catch (error) {
       throw connectionFailure(error, environment);
     }
   }
 
   /** Metadata: one short connection, cached for 60 s per environment, one query at a time. */
-  async schema(environment: Environment, opts: { fresh?: boolean } = {}): Promise<SchemaTree> {
-    const cached = this.schemaCache.get(environment.id);
+  async schema(environment: Environment, opts: { fresh?: boolean; database?: string } = {}): Promise<SchemaTree> {
+    const driver = this.deps.getDriver(environment.engine);
+    // an engine that reads columns on demand caches one tree per dataset asked for; the others read everything at once
+    let scope = driver.lazyColumns && opts.database ? { database: opts.database } : undefined;
+    if (scope) {
+      // a name that is not a dataset must not open a read (nor a cache entry) of its own: the names come from an agent
+      const all = await this.schema(environment, { ...(opts.fresh ? { fresh: true } : {}) });
+      const known = all.databases.find((d) => d.name.toLowerCase() === scope!.database.toLowerCase());
+      if (!known) return all;
+      scope = { database: known.name };
+    }
+    const cacheKey = scope ? `${environment.id}\u0000${scope.database.toLowerCase()}` : environment.id;
+    const cached = this.schemaCache.get(cacheKey);
     // a fresh read never reuses a tree, nor a read that started before this request
     if (!opts.fresh) {
       if (cached?.promise) return cached.promise;
@@ -189,19 +210,32 @@ export class AgentSessions implements AgentExecutor {
     const promise = (async (): Promise<SchemaTree> => {
       const params = await this.params(environment);
       try {
-        return await this.deps.getDriver(environment.engine).introspect(params);
+        return await driver.introspect(params, scope);
       } catch (error) {
         throw connectionFailure(error, environment);
       }
     })();
-    this.schemaCache.set(environment.id, { at: this.now(), promise });
+    this.prune();
+    this.schemaCache.set(cacheKey, { at: this.now(), promise });
     try {
       const tree = await promise;
-      this.schemaCache.set(environment.id, { at: this.now(), tree });
+      this.schemaCache.set(cacheKey, { at: this.now(), tree });
       return tree;
     } catch (error) {
-      this.schemaCache.delete(environment.id);
+      this.schemaCache.delete(cacheKey);
       throw error;
+    }
+  }
+
+  /** Drops the trees past their time, and the oldest ones beyond the cap: the cache never grows with what an agent asks. */
+  private prune(): void {
+    for (const [key, entry] of this.schemaCache) {
+      if (!entry.promise && this.now() - entry.at >= SCHEMA_CACHE_MS) this.schemaCache.delete(key);
+    }
+    while (this.schemaCache.size >= SCHEMA_CACHE_MAX_ENTRIES) {
+      const oldest = this.schemaCache.keys().next().value;
+      if (oldest === undefined) break;
+      this.schemaCache.delete(oldest);
     }
   }
 
@@ -380,6 +414,10 @@ export class AgentSessions implements AgentExecutor {
   }
 
   async runWrite(environment: Environment, args: RunArgs): Promise<WriteRun> {
+    // the broker refuses first; this is the last door: an engine that has no transaction mode never opens a write
+    if (!capabilitiesOf(environment.engine).modes.includes('transaction')) {
+      throw new AgentError('Este motor só lê nesta versão: escrita de agente não é aceita.', 'engine_read_only');
+    }
     const epoch = this.epoch;
     const params = await this.params(environment, args.database);
     let opened: DbSession | undefined;
@@ -503,7 +541,9 @@ export class AgentSessions implements AgentExecutor {
 
   /** The environment changed or was removed: cached connections and metadata must not outlive it. */
   async environmentChanged(environmentId: string): Promise<void> {
-    this.schemaCache.delete(environmentId);
+    for (const key of [...this.schemaCache.keys()]) {
+      if (key === environmentId || key.startsWith(`${environmentId}\u0000`)) this.schemaCache.delete(key);
+    }
     await this.closePool(environmentId);
   }
 

@@ -13,6 +13,7 @@
     "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit",
     "unit": "vitest run --config vitest.unit.config.mts",
     "integration": "vitest run --config vitest.integration.config.mts",
+    "live:bigquery": "vitest run --config vitest.live.config.mts tests/live/bigquery.test.ts",
     "e2e": "playwright test --config tests/e2e/playwright.config.ts",
     "check": "npm run typecheck && npm run unit && npm run integration && npm run build && npm run e2e",
     "dist": "umask 022 && npm run build && electron-builder --publish never",

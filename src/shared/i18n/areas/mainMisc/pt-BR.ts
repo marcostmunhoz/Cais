@@ -32,6 +32,33 @@ export const ptBR = {
     reauth: (p: { account: string }) => `A conta ${p.account} precisa entrar de novo: rode \`gcloud auth login ${p.account}\` no terminal.`,
     tokenFailed: (p: { account: string; detail: string }) => `O gcloud não gerou o token de login da conta ${p.account}. ${p.detail}`,
     noToken: (p: { account: string }) => `O gcloud não devolveu um token para a conta ${p.account}.`,
+    accessTokenFailed: (p: { account: string; detail: string }) => `O gcloud não gerou o token de acesso da conta ${p.account}. ${p.detail}`,
+  },
+  /** The BigQuery driver (REST). Messages can reach agents: the driver keeps a MessageRef next to them. */
+  bigquery: {
+    noResponse: 'Sem resposta de bigquery.googleapis.com. A VPN está ligada? Confira também o proxy.',
+    unexpectedResponse: 'O BigQuery respondeu em um formato que o Cais não reconhece.',
+    modeNotSupported: 'O BigQuery só lê nesta versão: a sessão é sempre Somente leitura.',
+    refusedType: (p: { type: string }) => `Somente leitura: o BigQuery leu este comando como ${p.type}, e não como consulta (SELECT).`,
+    refusedUnknown: 'Somente leitura: o BigQuery não disse que tipo de comando é este.',
+    datasetNotFound: (p: { name: string }) => `O dataset ${p.name} não existe neste projeto, ou a conta não o enxerga.`,
+    datasetInvalid: 'Nome de dataset inválido: só letras, números e sublinhado.',
+    hintJobUser: 'A conta precisa do papel roles/bigquery.jobUser no projeto.',
+    hintDataViewer: 'Para ler as tabelas, a conta precisa de roles/bigquery.dataViewer nos datasets.',
+    error: {
+      accessDenied: 'O BigQuery negou o acesso. A conta precisa do papel roles/bigquery.jobUser no projeto e de roles/bigquery.dataViewer nos datasets que a consulta lê.',
+      unauthenticated: 'O BigQuery não aceitou o token da conta. Rode `gcloud auth login` no terminal e tente de novo.',
+      notFound: 'O BigQuery não encontrou o projeto, o dataset ou a tabela. Confira o nome e se a conta enxerga o recurso.',
+      invalidQuery: (p: { detail: string }) => `O BigQuery recusou o comando: ${p.detail}`,
+      bytesBilledLimitExceeded:
+        'A consulta leria mais bytes do que o limite do ambiente permite. O BigQuery não a rodou e nada foi cobrado.',
+      quotaExceeded: 'A cota do BigQuery acabou. Espere um pouco ou veja as cotas do projeto no Google Cloud.',
+      rateLimitExceeded: 'O BigQuery limitou o ritmo das consultas. Espere um pouco e tente de novo.',
+      responseTooLarge: 'O resultado é grande demais para o BigQuery devolver. Peça menos colunas ou menos linhas.',
+      backendError: 'O BigQuery falhou do lado dele. Tente de novo em instantes.',
+      stopped: 'O BigQuery interrompeu a consulta.',
+      timeout: 'A consulta passou do tempo limite e o BigQuery a interrompeu.',
+    },
   },
   store: {
     unreadable: (p: { name: string; aside: string }) =>

@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { getDialect } from '@shared/dialects/registry';
 import { MAX_PENDING, READ_GRANT_MS } from '@shared/agents';
-import type { Environment } from '@shared/model';
+import type { MysqlEnvironment as Environment } from '@shared/model';
 import type { SchemaTree, StatementResult } from '@shared/results';
 import { hiddenTextProblem, markInvisible } from '@shared/text';
 import { AgentError } from '@main/agents/errors';
@@ -651,11 +651,11 @@ describe('AgentSessions: writes', () => {
     await h.sessions.runWrite(agentEnv, { database: 'other', statements: updates('UPDATE t SET a = 1 WHERE id = 1'), maxRows: 1 });
     expect(h.opened).toHaveLength(2);
     for (const { params } of h.opened) expect(typeof params.refresh).toBe('function');
-    expect(h.opened[1]!.params.database).toBe('other');
+    expect((h.opened[1]!.params as { database?: string }).database).toBe('other');
     const before = h.resolveCalls();
     const fresh = await h.opened[1]!.params.refresh!();
     expect(h.resolveCalls()).toBe(before + 1);
-    expect(fresh.password).toBe(`token-${before + 1}`);
+    expect((fresh as { password?: string }).password).toBe(`token-${before + 1}`);
   });
 });
 

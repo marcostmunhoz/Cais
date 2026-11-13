@@ -181,10 +181,15 @@ function EnvNode({ env, expanded, onToggle }: { env: Environment; expanded: bool
   const items: MenuEntry[] = [
     { label: text.newTab, onSelect: () => openTab(env.id) },
     { label: text.editEnvironment, onSelect: () => setState({ registry: { section: 'environments', editId: env.id } }) },
-    {
-      label: text.duplicateEnvironment,
-      onSelect: () => setState({ registry: { section: 'environments', editId: 'new', duplicateOf: env.id } }),
-    },
+    // the form that reads a copy is MySQL's until BigQuery has its own
+    ...(env.engine === 'mysql'
+      ? [
+          {
+            label: text.duplicateEnvironment,
+            onSelect: () => setState({ registry: { section: 'environments', editId: 'new', duplicateOf: env.id } }),
+          },
+        ]
+      : []),
     { label: text.refreshSchema, onSelect: () => void loadSchema(env.id, true) },
   ];
 

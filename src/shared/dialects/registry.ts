@@ -1,10 +1,12 @@
 import type { Engine } from '../model';
 import type { Dialect } from './types';
 import { mysqlDialect } from './mysql';
+import { bigqueryDialect } from './bigquery';
 import { m } from '../i18n';
 
 const dialects: Record<Engine, Dialect> = {
   mysql: mysqlDialect,
+  bigquery: bigqueryDialect,
 };
 
 export function getDialect(engine: Engine): Dialect {

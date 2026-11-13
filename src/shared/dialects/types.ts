@@ -39,6 +39,22 @@ export interface Classification {
   serverStateFunction?: string;
   /** Shows account secrets (SHOW CREATE USER prints the password hash). */
   accountSecrets?: boolean;
+  /**
+   * Qualified functions outside the engine's built-in namespaces (`SAFE.`, `NET.`, `AEAD.`, `KEYS.`, `HLL_COUNT.`,
+   * `KLL_QUANTILES.`, `OBJ.`…), upper case, as written: a function defined in a project (it may be a remote function,
+   * which runs code outside the engine) plus every `ML.*` and `AI.*` call (they may call remote models and cost
+   * more than the bytes read). GoogleSQL only.
+   */
+  remoteCalls?: string[];
+  /** The statement calls EXTERNAL_QUERY, which runs a query on another database. GoogleSQL only. */
+  externalQuery?: boolean;
+  /**
+   * The statement reads a view that shows the SQL of other people's jobs or sessions (`INFORMATION_SCHEMA.JOBS*`,
+   * `JOBS_BY_*`, `SESSIONS_*`), in any spelling of the path (backticks, region or project qualifier). GoogleSQL only.
+   */
+  jobsMetadata?: boolean;
+  /** The text carries a `#legacySQL` or `#standardSQL` directive. GoogleSQL only. */
+  legacyDirective?: boolean;
 }
 
 /**
@@ -88,7 +104,7 @@ export interface Dialect {
   /** Product name for the interface ("MySQL"). */
   displayName: string;
   /** Name of the CodeMirror SQL dialect the renderer should use. */
-  codemirrorDialect: 'MySQL';
+  codemirrorDialect: 'MySQL' | 'GoogleSQL';
   keywords: string[];
   splitStatements(sql: string): SqlStatement[];
   /**

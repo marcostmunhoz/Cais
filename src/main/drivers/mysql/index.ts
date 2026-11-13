@@ -1,12 +1,12 @@
-import type { ConnectParams, Driver } from '../types';
+import type { Driver, MysqlConnectParams } from '../types';
 import { DriverError } from '../types';
-import { closeQuietly, connect, query } from './connection';
+import { closeQuietly, connect, mysqlParams, query } from './connection';
 import { mapMysqlError } from './errors';
 import { readSchema } from './introspect';
 import { openMysqlSession } from './session';
 
 async function withShortConnection<T>(
-  params: ConnectParams,
+  params: MysqlConnectParams,
   fn: (conn: Awaited<ReturnType<typeof connect>>) => Promise<T>,
 ): Promise<T> {
   const ctx = {
@@ -34,11 +34,11 @@ async function withShortConnection<T>(
 
 export const mysqlDriver: Driver = {
   engine: 'mysql',
-  open: (params) => openMysqlSession(params),
+  open: (params) => openMysqlSession(mysqlParams(params)),
   // the scope is ignored: MySQL reads every database and column at once
-  introspect: (params, _scope) => withShortConnection(params, readSchema),
+  introspect: (params, _scope) => withShortConnection(mysqlParams(params), readSchema),
   test: (params) =>
-    withShortConnection(params, async (conn) => {
+    withShortConnection(mysqlParams(params), async (conn) => {
       const { rows } = await query(conn, 'SELECT VERSION()');
       return { serverVersion: String((rows[0] as unknown[])[0]) };
     }),

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { getDialect } from '@shared/dialects/registry';
-import type { Environment } from '@shared/model';
+import type { MysqlEnvironment as Environment } from '@shared/model';
 import { AgentBroker } from '@main/agents/broker';
 import { AgentSessions } from '@main/agents/sessions';
 import { mysqlDriver } from '@main/drivers/mysql';
@@ -38,7 +38,7 @@ beforeAll(async () => {
     resolveConnectParams: async (e) => {
       const o = overrides[e.id];
       if (o === 'cred-error') throw new CaisError('Falha do gcloud: token ya29.SECRETTOKEN para conta x@y.com');
-      return params({ host: e.host, port: e.port, ...(o ?? {}) });
+      return params({ host: (e as Environment).host, port: (e as Environment).port, ...(o ?? {}) });
     },
   });
   let n = 0;

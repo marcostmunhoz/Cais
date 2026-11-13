@@ -72,6 +72,10 @@ export const en: Shape<typeof ptBR> = {
     testMissing: 'Fill in host, port and credential to test.',
     connected: (p) => `Connected · version ${p.version}`,
     invalidPort: 'Enter a valid port (1 to 65535).',
+    notEditable: (p) =>
+      `The environment ${p.name} uses the ${p.engine} engine, which has no edit form in this registry yet. It can be deleted from here.`,
+    notDuplicable: (p) =>
+      `The environment ${p.name} uses the ${p.engine} engine, which has no form in this registry yet: it cannot be duplicated.`,
     testing: 'Testing…',
     test: 'Test connection',
     blocked:

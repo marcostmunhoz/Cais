@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import type mysql from 'mysql2/promise';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { getDialect } from '@shared/dialects/registry';
-import type { Environment } from '@shared/model';
+import type { MysqlEnvironment as Environment } from '@shared/model';
 import { mysqlDriver } from '@main/drivers/mysql';
 import type { DbSession } from '@main/drivers/types';
 import { SessionManager } from '@main/sessions';

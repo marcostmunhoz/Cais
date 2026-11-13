@@ -72,6 +72,10 @@ export const ptBR = {
     testMissing: 'Preencha host, porta e credencial para testar.',
     connected: (p: { version: string }) => `Conectado · versão ${p.version}`,
     invalidPort: 'Informe uma porta válida (1 a 65535).',
+    notEditable: (p: { name: string; engine: string }) =>
+      `O ambiente ${p.name} usa o motor ${p.engine}, que ainda não tem formulário de edição neste cadastro. Ele pode ser apagado daqui.`,
+    notDuplicable: (p: { name: string; engine: string }) =>
+      `O ambiente ${p.name} usa o motor ${p.engine}, que ainda não tem formulário neste cadastro: não dá para duplicá-lo.`,
     testing: 'Testando…',
     test: 'Testar conexão',
     blocked:

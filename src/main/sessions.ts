@@ -531,7 +531,7 @@ export class SessionManager {
         }
         let result: StatementResult;
         try {
-          result = await entry.session.execute(text, { maxRows: req.maxRows, stopAtCap: c.kind === 'read' });
+          result = await entry.session.execute(text, { maxRows: req.maxRows, stopAtCap: c.kind === 'read', ...(req.refetch ? { refetch: true } : {}) });
         } catch (error) {
           const info = error instanceof DriverError ? error.info : { message: toCaisError(error).message };
           result = { index: i, sql: text, kind: c.kind, verb: c.verb, durationMs: 0, error: info };
@@ -665,7 +665,7 @@ export class SessionManager {
     // dropped meanwhile (idle timer, Desconectar, environment edited): nothing to update
     if (entry.session !== session) throw new CaisError(m().mainSessions.notConnected, 'not-connected');
     // the trail keeps the line of always: the driver's own text ("USE `db`"), verb USE, kind session
-    this.recordResult(entry, { ...result, verb: 'USE', kind: 'session' }, entry.state.database);
+    this.recordResult(entry, { ...result, verb: result.verb || 'USE', kind: 'session' }, entry.state.database);
     if (result.error) throw new CaisError(result.error.message, result.error.code);
     const current = await session.currentDatabase().catch(() => database);
     if (entry.session !== session) throw new CaisError(m().mainSessions.notConnected, 'not-connected');

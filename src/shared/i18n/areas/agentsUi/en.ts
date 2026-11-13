@@ -190,6 +190,8 @@ export const en: Shape<typeof ptBR> = {
   redact: {
     server: '<server>',
     user: '<user>',
+    project: '<project>',
+    account: '<account>',
   },
 
   nonTransactional: {

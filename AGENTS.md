@@ -8,7 +8,7 @@ Antes de mudar comportamento, leia [docs/comportamento.md](docs/comportamento.md
 
 | Pasta | O que tem |
 |---|---|
-| `src/main` | Processo principal: ciclo de vida, IPC (`ipc.ts`), sessões da pessoa (`sessions.ts`), drivers (`drivers/`), credenciais e `gcloud` (`auth/`), arquivos e cofre (`store/`), Trilha (`trail.ts`), acesso de agentes (`agents/`) |
+| `src/main` | Processo principal: ciclo de vida, IPC (`ipc.ts`), sessões da pessoa (`sessions.ts`), drivers (`drivers/mysql`, `drivers/bigquery`), credenciais e `gcloud` (`auth/`), arquivos e cofre (`store/`), Trilha (`trail.ts`), acesso de agentes (`agents/`) |
 | `src/preload` | A ponte `window.cais` (contrato `CaisApi`) |
 | `src/renderer` | Interface em React (`components/`, `lib/`) |
 | `src/shared` | TypeScript puro usado pelos dois lados: modelo, resultados, contrato de IPC, dialetos (`dialects/`), i18n (`i18n/`), regras de texto, edição na grade |
@@ -23,7 +23,7 @@ Antes de mudar comportamento, leia [docs/comportamento.md](docs/comportamento.md
 - **Segredo nunca sai do processo principal** em texto puro e nunca vai para log. A senha entra pelo IPC só ao salvar e nunca volta ao renderer. Agentes nunca recebem senha, token, host nem id de credencial.
 - **O processo principal nunca confia no renderer:** todo canal de IPC valida a entrada com zod, só aceita a janela principal, e o SQL é reclassificado pelo dialeto antes de executar.
 - **A interface não conhece o motor:** dialeto, classificação de comandos e introspecção vêm de `src/shared/dialects` e `src/main/drivers`.
-- **O app nunca altera o `gcloud`:** só `gcloud auth list` e `gcloud sql generate-login-token`.
+- **O app nunca altera o `gcloud`:** só três comandos, todos de leitura: `gcloud auth list`, `gcloud sql generate-login-token` e `gcloud auth print-access-token` (token do BigQuery, com cache próprio de 50 minutos).
 - **Toda requisição de agente é reclassificada no main** (`src/main/agents/policy.ts`). Agente não aprova, não liga o acesso, não muda o nível de um ambiente e não edita nem apaga script. O socket só existe com o acesso ligado (`settings.json`, desligado por padrão). Em produção, escrita de agente sempre pede aprovação. Nada de agente roda sem a Trilha.
 - **Somente leitura em duas camadas** (lista do app e `READ ONLY` no servidor). No classificador, na dúvida, recusa.
 - **Linux:** o cofre só vale com chaveiro de verdade (Secret Service; `basic_text` e `unknown` são recusados em `SafeStorageVault`). Os textos de atalho mostrados na interface saem de `src/shared/shortcuts.ts` (símbolos no macOS, Ctrl+… nos outros), nunca fixos no componente; o tratamento das teclas fica em `App.tsx` (`useGlobalShortcuts`) e deve bater com esses textos. O socket dos agentes cai em `$XDG_RUNTIME_DIR` quando o caminho padrão passa de 100 bytes. O deb instala o executável `cais-app` em `/opt/Cais`.
@@ -66,6 +66,7 @@ Todos rodam na raiz do projeto, com Node 20.19 ou mais novo e npm.
   - `CAIS_IDLE_MS`: inteiro de 100 ms ou mais, encurta a desconexão por inatividade.
 - **Banco:** os testes usam só o próprio container `cais-test-*`, em porta aleatória. Nunca a porta 3306 (para não colidir com um MySQL local), nunca outro container, nunca um banco real. Se um teste travar e deixar container para trás: `docker ps -a --filter name=cais-test-` e `docker rm -f` neles.
 - **`gcloud`:** nunca rodar o `gcloud` de verdade nos testes. Eles usam um `gcloud` falso (`spawn` injetável).
+- **BigQuery:** os testes nunca falam com o Google. O driver recebe `fetch` e endereço injetáveis, e `tests/support/bigquery-fake.ts` é um servidor HTTP local (porta aleatória) com o subconjunto da API que o Cais usa. Ganchos, só com `!app.isPackaged`: `CAIS_BIGQUERY_URL` troca o endereço da API pelo do servidor falso, e `CAIS_E2E=1` troca o token do BigQuery por um valor falso fixo (o `gcloud` não roda). A suíte ao vivo, `npm run live:bigquery` (`tests/live/`, fora do `npm run check`), precisa de `CAIS_BQ_LIVE_PROJECT` e `CAIS_BQ_LIVE_TOKEN`, pula tudo sem eles e nunca roda o `gcloud`.
 - **Comando `cais`:** nunca instalar na máquina durante os testes. `installCli` recebe as pastas por parâmetro e os testes usam pasta temporária.
 - **Acesso de agentes:** qualquer mudança em `src/main/agents/` ou em `src/cli/` precisa de `tests/unit/agent-*.test.ts` e `tests/integration/agents*.test.ts` (ataques, segredos, limites) verdes, e da saída do CLI estável byte a byte.
 - Novas regras do classificador entram com teste unitário e, quando dependem do servidor, com teste de integração que confere o estado do servidor depois.

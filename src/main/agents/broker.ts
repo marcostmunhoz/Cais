@@ -24,7 +24,7 @@ import {
   type RollbackReason,
 } from '@shared/agents';
 import { AGENT_LOCALE, m, ref, render, renderRef, type MessageRef } from '@shared/i18n';
-import { sameTarget } from '@shared/engines';
+import { capabilitiesOf, sameTarget } from '@shared/engines';
 import { hiddenTextProblem, stripInvisible } from '@shared/text';
 import { CaisError } from '../errors';
 import { AgentError, agentText, bothWays, refOf } from './errors';
@@ -95,7 +95,7 @@ interface Rec {
   rollbackReason?: RollbackReason;
   rollbackIncomplete?: boolean;
   /** `message` in the app locale (the person's view); `ref`, when present, is what the agent reads. */
-  error?: { message: string; code?: string; statementIndex?: number; ref?: MessageRef };
+  error?: { message: string; code?: string; statementIndex?: number; ref?: MessageRef; serverText?: boolean };
   results?: StatementResult[];
   finishedAt?: number;
   timer?: unknown;
@@ -140,6 +140,7 @@ function agentSqlProblem(sql: string, dialect: Dialect): { code: string; message
 }
 
 /** --database from an agent: a plain name the engine accepts (the dialect's rule), no system schema for writes (checked by the policy). */
+const MAX_SCOPED_SCHEMAS = 5;
 const badDatabase = (database: string, dialect: Dialect): boolean => !dialect.agentRules.isValidDatabaseName(database);
 
 const firstLine = (sql: string, max: number): string => {
@@ -250,6 +251,10 @@ export class AgentBroker {
     this.assertEnabled();
     const env = this.resolveEnv(p.env);
     const client = clean(p.client ?? 'agente', 60) || 'agente';
+    // a name the engine could not have: nothing is read for it
+    if (p.database !== undefined && badDatabase(p.database, this.deps.getDialect(env.engine))) {
+      throw new AgentError('Nome de banco inválido.', 'invalid_database');
+    }
     // what the agent typed goes to the trail cleaned (no bidi, no line breaks) and short
     const db = p.database ? clean(p.database, MAX_LABEL_NAME) : undefined;
     const label = `schema${db ? ` ${db}` : ''}${p.table ? ` ${clean(p.table, MAX_LABEL_NAME)}` : ''}`;
@@ -264,8 +269,20 @@ export class AgentBroker {
       throw new AgentError('A trilha do Cais não pôde ser gravada: nada de agente roda enquanto isso.', 'trail_unavailable');
     }
     let tree: SchemaTree;
+    // columns an engine reads on demand (BigQuery): the tree without a scope has none, so --table asks per dataset
+    const scoped = new Map<string, SchemaTree['databases'][number]>();
+    let beyondCap = false;
     try {
-      tree = await this.deps.executor.schema(env);
+      tree = await this.deps.executor.schema(env, db ? { database: db } : undefined);
+      if (p.table && !p.database) {
+        const wanted = p.table.toLowerCase();
+        const needs = tree.databases.filter((d) => d.tables.some((t) => t.name.toLowerCase() === wanted && t.columns.length === 0));
+        beyondCap = needs.length > MAX_SCOPED_SCHEMAS;
+        for (const d of needs.slice(0, MAX_SCOPED_SCHEMAS)) {
+          const one = (await this.deps.executor.schema(env, { database: d.name })).databases.find((x) => x.name === d.name);
+          if (one) scoped.set(d.name, one);
+        }
+      }
     } catch (error) {
       audit('failed', error instanceof AgentError ? error.code : 'internal_error');
       throw error;
@@ -281,10 +298,19 @@ export class AgentBroker {
     if (p.table) {
       const wanted = p.table.toLowerCase();
       const found = dbs
-        .map((d) => ({ name: d.name, tables: d.tables.filter((t) => t.name.toLowerCase() === wanted).map((t) => shape(t, true)) }))
+        .map((d) => ({
+          name: d.name,
+          tables: (scoped.get(d.name) ?? d).tables
+            .filter((t) => t.name.toLowerCase() === wanted && (t.columns.length > 0 || !scoped.size))
+            .map((t) => shape(t, true)),
+        }))
         .filter((d) => d.tables.length > 0);
       if (found.length === 0) throw new AgentError('Tabela não encontrada.', 'not_found');
-      return { environment: this.slugOf(env), databases: found };
+      return {
+        environment: this.slugOf(env),
+        databases: found,
+        ...(beyondCap ? { note: `A tabela existe em mais de ${MAX_SCOPED_SCHEMAS} bancos: só vêm os primeiros. Use --database para um banco específico.` } : {}),
+      };
     }
     const withColumns = !!p.database;
     return {
@@ -314,6 +340,10 @@ export class AgentBroker {
       });
       throw new AgentError(message, code);
     };
+    // an engine that cannot write (BigQuery in this version) takes no write from an agent, whatever the text says
+    if (p.write && !capabilitiesOf(env.engine).modes.includes('transaction')) {
+      refuse('engine_read_only', 'O BigQuery só lê nesta versão: escrita de agente (--write) não é aceita neste ambiente.');
+    }
     const textProblem = agentSqlProblem(sql, dialect);
     if (textProblem) refuse(textProblem.code, textProblem.message);
     if (database !== undefined && badDatabase(database, dialect)) refuse('invalid_database', 'Nome de banco inválido.');
@@ -1113,10 +1143,10 @@ export class AgentBroker {
     if (rec.rollbackReason) out.rollback_reason = rec.rollbackReason;
     if (rec.rollbackIncomplete) out.rollback_incomplete = true;
     if (rec.error) {
-      const { statementIndex, ref: _ref, ...rest } = rec.error;
+      const { statementIndex, ref: _ref, serverText, ...rest } = rec.error;
       const error = { ...rest, message: agentText(rec.error) };
       out.error = {
-        ...(rec.shareResult ? error : withheldError(error)),
+        ...(rec.shareResult ? error : withheldError({ ...error, ...(serverText ? { serverText } : {}) })),
         ...(statementIndex !== undefined ? { statement_index: statementIndex } : {}),
       };
     }
@@ -1178,9 +1208,12 @@ const shareableError = (e: { message: string; code?: string }): { message: strin
  * Server errors can quote row values ("Duplicate entry 'x'"): without the person's yes, only the code travels.
  * Agent-facing: fixed pt-BR.
  */
-function withheldError(e: { message: string; code?: string }): { message: string; code?: string } {
-  if (e.code?.startsWith('ER_')) return { message: 'O servidor recusou o comando. Os detalhes foram omitidos.', code: e.code };
-  return e;
+function withheldError(e: { message: string; code?: string; serverText?: boolean }): { message: string; code?: string } {
+  if (e.code?.startsWith('ER_') || e.serverText) {
+    return { message: 'O servidor recusou o comando. Os detalhes foram omitidos.', ...(e.code ? { code: e.code } : {}) };
+  }
+  const { serverText: _quoted, ...own } = e;
+  return own;
 }
 
 /** Result with the person's "no" on sharing: only how many rows, never which. */
@@ -1193,7 +1226,15 @@ function counts(r: StatementResult): Record<string, unknown> {
     ...(r.columns ? { row_count: r.rows?.length ?? 0 } : {}),
     ...(r.truncated ? { truncated: true } : {}),
     ...(r.affectedRows !== undefined ? { affected_rows: r.affectedRows } : {}),
-    ...(r.error ? { error: withheldError({ message: agentText(r.error), ...(r.error.code ? { code: r.error.code } : {}) }) } : {}),
+    ...(r.error
+      ? {
+          error: withheldError({
+            message: agentText(r.error),
+            ...(r.error.code ? { code: r.error.code } : {}),
+            ...(r.error.serverText ? { serverText: true } : {}),
+          }),
+        }
+      : {}),
   };
 }
 

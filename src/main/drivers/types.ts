@@ -2,7 +2,9 @@ import type { Engine, SessionMode } from '@shared/model';
 import type { SchemaTree, StatementError, StatementResult } from '@shared/results';
 import type { MessageRef } from '@shared/i18n';
 
-export interface ConnectParams {
+export interface MysqlConnectParams {
+  /** Absent in older callers and tests: MySQL is the default. */
+  engine?: 'mysql';
   host: string;
   port: number;
   database?: string;
@@ -12,6 +14,31 @@ export interface ConnectParams {
   tls: 'off' | 'required'; // required = encrypt without verifying (ssl-mode=REQUIRED)
   /** Fresh parameters for a side connection opened later (KILL QUERY): an IAM token from open time may have expired. */
   refresh?: () => Promise<ConnectParams>;
+}
+
+export interface BigqueryConnectParams {
+  engine: 'bigquery';
+  /** The Google Cloud project where jobs run and are billed. */
+  project: string;
+  /** OAuth access token from gcloud. Never logged, never leaves main. */
+  accessToken: string;
+  /** A new access token (the server refused the one in hand, or a side request is opened later). */
+  refresh?: () => Promise<string>;
+  /** Most bytes one statement may bill; absent: no limit. */
+  maxBytesBilled?: number;
+  /** Dataset for unqualified table names. */
+  defaultDataset?: string;
+  /** Who asked: the label `cais: person|agent` on every job, which splits the billing. */
+  origin: 'person' | 'agent';
+}
+
+/** What a driver needs to connect, by engine. */
+export type ConnectParams = MysqlConnectParams | BigqueryConnectParams;
+
+/** The same parameters with another default database (MySQL) or dataset (BigQuery). */
+export function withDatabase(params: ConnectParams, database: string | undefined): ConnectParams {
+  if (params.engine === 'bigquery') return { ...params, ...(database ? { defaultDataset: database } : {}) };
+  return { ...params, ...(database ? { database } : {}) };
 }
 
 export interface DbSessionError {
@@ -25,10 +52,14 @@ export interface DbSessionError {
   errno?: number;
   sqlState?: string;
   fatal?: boolean;
+  /** `message` quotes the server's own text (which can hold row values). */
+  serverText?: boolean;
 }
 
 export interface Driver {
   engine: Engine;
+  /** `introspect` reads the columns of one database only when asked for it (`scope.database`), not all at once. */
+  lazyColumns?: boolean;
   open(params: ConnectParams): Promise<DbSession>;
   /**
    * Own short connection. Without a scope: databases and tables. With `{ database }`: also the columns of that

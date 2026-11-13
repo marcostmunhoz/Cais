@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { m, ref } from '@shared/i18n';
-import { sameTarget } from '@shared/engines';
+import { isBigqueryDatasetId, isGcpProjectId, MIN_MAX_BYTES_BILLED, sameTarget } from '@shared/engines';
 import { cleanName, sameName, slashAllowed } from '@shared/names';
 import {
   AGENT_LEVEL_LABEL,
@@ -309,9 +309,10 @@ export class CatalogStore {
       const order = this.catalog.projects.reduce((max, p) => Math.max(max, p.order), -1) + 1;
       const project: Project = { id: randomUUID(), name, order };
       const copies = envs.map((src) => {
-        const { agentLevel: _level, ...rest } = structuredClone(src);
+        const copy: Environment = { ...structuredClone(src), id: randomUUID(), projectId: project.id };
+        delete copy.agentLevel;
         const level = this.clampLevel(src.production, src.agentLevel);
-        const copy: Environment = { ...rest, id: randomUUID(), projectId: project.id, ...(level ? { agentLevel: level } : {}) };
+        if (level) copy.agentLevel = level;
         return { source: this.effective(src), copy };
       });
       this.catalog.projects.push(project);
@@ -364,15 +365,14 @@ export class CatalogStore {
   saveEnvironment(input: EnvironmentInput): Promise<Environment> {
     return this.run(async () => {
       const name = cleanName(input.name);
-      const host = input.host.trim();
       if (!name) throw new CaisError(m().mainCatalog.environmentNameRequired, 'invalid-name');
-      if (!host) throw new CaisError(m().mainCatalog.hostRequired);
       if (!this.catalog.projects.some((p) => p.id === input.projectId)) {
         throw new CaisError(m().mainCatalog.projectNotFound, 'not-found');
       }
-      if (!this.catalog.credentials.some((c) => c.id === input.credentialId)) {
-        throw new CaisError(m().mainCatalog.credentialRequired);
-      }
+      const credential = this.catalog.credentials.find((c) => c.id === input.credentialId);
+      if (!credential) throw new CaisError(m().mainCatalog.credentialRequired);
+      const defaultDatabase = input.defaultDatabase?.trim();
+      const target = this.validatedTarget(input, credential, defaultDatabase);
       const current = input.id ? this.catalog.environments.find((e) => e.id === input.id) : undefined;
       if (!slashAllowed(name, current?.name)) throw new CaisError(m().mainCatalog.slashInName, 'invalid-name');
       const duplicate = this.catalog.environments.find(
@@ -384,12 +384,10 @@ export class CatalogStore {
         id: input.id ?? randomUUID(),
         projectId: input.projectId,
         name,
-        engine: input.engine,
-        host,
-        port: input.port,
+        ...target,
         credentialId: input.credentialId,
         production: input.production,
-        ...(input.defaultDatabase?.trim() ? { defaultDatabase: input.defaultDatabase.trim() } : {}),
+        ...(defaultDatabase ? { defaultDatabase } : {}),
         ...(agentLevel ? { agentLevel } : {}),
       };
       const index = this.catalog.environments.findIndex((e) => e.id === env.id);
@@ -401,6 +399,31 @@ export class CatalogStore {
       await this.persistCatalog();
       return structuredClone(env);
     });
+  }
+
+  /** The engine's own fields of an environment, checked: what is missing or malformed ends the save with a message. */
+  private validatedTarget(
+    input: EnvironmentInput,
+    credential: Credential,
+    defaultDatabase: string | undefined,
+  ): { engine: 'mysql'; host: string; port: number } | { engine: 'bigquery'; gcpProject: string; maxBytesBilled?: number } {
+    const t = m().mainCatalog;
+    if (input.engine === 'mysql') {
+      const host = input.host.trim();
+      if (!host) throw new CaisError(t.hostRequired);
+      return { engine: 'mysql', host, port: input.port };
+    }
+    const gcpProject = input.gcpProject.trim();
+    if (!gcpProject) throw new CaisError(t.gcpProjectRequired);
+    if (!isGcpProjectId(gcpProject)) throw new CaisError(t.gcpProjectInvalid);
+    // the token comes from gcloud: a user and password mean nothing to BigQuery
+    if (credential.kind !== 'gcloud-iam') throw new CaisError(t.bigqueryNeedsIam, 'invalid-credential');
+    if (defaultDatabase && !isBigqueryDatasetId(defaultDatabase)) throw new CaisError(t.datasetInvalid);
+    const limit = input.maxBytesBilled;
+    if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < MIN_MAX_BYTES_BILLED)) {
+      throw new CaisError(t.maxBytesInvalid);
+    }
+    return { engine: 'bigquery', gcpProject, ...(limit !== undefined ? { maxBytesBilled: limit } : {}) };
   }
 
   deleteEnvironment(id: string): Promise<void> {
@@ -423,6 +446,9 @@ export class CatalogStore {
       const id = input.id ?? randomUUID();
       let credential: Credential;
       if (input.kind === 'password') {
+        if (this.catalog.environments.some((e) => e.credentialId === id && e.engine === 'bigquery')) {
+          throw new CaisError(m().mainCatalog.bigqueryNeedsIam, 'invalid-credential');
+        }
         const username = input.username.trim();
         if (!username) throw new CaisError(m().mainCatalog.usernameRequired);
         const hasCurrent = this.secrets[id] !== undefined;
@@ -485,7 +511,7 @@ export class CatalogStore {
 
 /**
  * Whether saving an environment changed what an agent reaches or how it names it, so its 15-minute grant is
- * revoked and its pending requests expire: host, port, credential, default database, production, and its name
+ * revoked and its pending requests expire: where it connects (host and port, or project and byte limit), credential, default database, production, and its name
  * or project, because the `projeto/ambiente` slug changes and a pending request showing the old one would
  * mislead whoever approves it.
  */

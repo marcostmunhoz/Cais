@@ -40,6 +40,8 @@ A interface não conhece o motor: tudo o que depende do banco vem de dois contra
 
 Um motor novo é um dialeto e um driver registrados; a interface e as políticas não mudam.
 
+**O modelo por motor.** `Environment` é uma união discriminada por `engine`: o MySQL guarda `host` e `port` (o JSON de sempre, sem migração e com a mesma assinatura); o BigQuery guarda `gcpProject` e `maxBytesBilled?` (bytes; ausente é sem limite), e não tem host nem porta. `ConnectParams` segue a mesma divisão, e `connectParamsFor` (`auth/credentials.ts`) monta os parâmetros de um ambiente ou de um rascunho, com a origem (`person` ou `agent`) que vira o rótulo `cais` dos jobs do BigQuery. As capacidades do motor (modos aceitos, edição na grade) ficam em `src/shared/engines.ts`: o BigQuery só tem Somente leitura. Ganchos de teste do BigQuery, só no app não empacotado: `CAIS_BIGQUERY_URL` (endereço da API) e, com `CAIS_E2E=1`, um token falso fixo no lugar do `gcloud`.
+
 ## Processo principal
 
 | Módulo | Papel |
@@ -48,8 +50,8 @@ Um motor novo é um dialeto e um driver registrados; a interface e as políticas
 | `ipc.ts` | Handlers do IPC: só a janela principal, entrada validada com zod, erros traduzidos |
 | `sessions.ts` | `SessionManager`: uma sessão por aba, modos, transação, confirmações, inatividade, linhas da Trilha da pessoa |
 | `scheduler.ts` | Relógio injetável, usado pelas sessões da pessoa e dos agentes (os testes usam um relógio falso) |
-| `auth/credentials.ts`, `auth/gcloud.ts` | Resolução de credencial e `GcloudTokenProvider` (com `spawn` injetável; só `auth list` e `sql generate-login-token`) |
-| `drivers/` | Contrato e driver MySQL (conexão, sessão, introspecção, valores, erros) |
+| `auth/credentials.ts`, `auth/gcloud.ts` | Resolução de credencial e `GcloudTokenProvider` (com `spawn` injetável; só `auth list`, `sql generate-login-token` e `auth print-access-token`) |
+| `drivers/` | Contrato (`ConnectParams` por motor, `DbSession`, `Driver`) e os drivers. `drivers/mysql`: conexão, sessão, introspecção, valores, erros. `drivers/bigquery`: cliente REST (`client.ts`, `fetch` e endereço injetáveis; no app, `net.fetch`), sessão sem estado no servidor (`session.ts`), valores, erros, introspecção por `datasets.list`, `tables.list` e `tables.get`. `registry.ts` entrega o driver do motor, e `configureDrivers` ajusta o transporte do BigQuery na partida |
 | `store/` | `CatalogStore`, `ScriptStore`, `SettingsStore`, `TabsStore`, `Seal`, `Vault` e a escrita atômica |
 | `trail.ts` | A Trilha: um arquivo por dia, encadeamento, tetos, máscara de senha, listagem e conferência |
 | `agents/` | Acesso de agentes: `server`, `broker`, `policy`, `sessions`, `access`, `audit`, `redact`, `errors` |

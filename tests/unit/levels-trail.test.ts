@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, wr
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { getDialect } from '@shared/dialects/registry';
-import { agentLevelOf, agentLevelsFor, type Environment } from '@shared/model';
+import { agentLevelOf, agentLevelsFor, type MysqlEnvironment as Environment } from '@shared/model';
 import type { StatementResult } from '@shared/results';
 import { autoCommitBlocker } from '@main/agents/broker';
 import { decide, type ClassifiedStatement } from '@main/agents/policy';
@@ -767,7 +767,7 @@ describe('Seal of the catalog and of the switch', () => {
     expect((await store.snapshot()).agentLevelsLocked).toBe(true);
     // saving another environment does not write the in-memory approve-all of this one
     const { hml } = { hml: store.environments().find((e) => e.name === 'hml')! };
-    await store.saveEnvironment({ ...hml, host: 'h' });
+    await store.saveEnvironment({ ...hml, host: 'h' } as typeof hml & { host: string });
     expect(readCatalog().environments.find((e: Environment) => e.id === dev.id).agentLevel).toBe('free-reads-writes');
     // a looser level is stored as approve-all, without an error (the form shows the lock)
     expect((await store.saveEnvironment({ ...dev, agentLevel: 'free-reads' })).agentLevel).toBe('approve-all');

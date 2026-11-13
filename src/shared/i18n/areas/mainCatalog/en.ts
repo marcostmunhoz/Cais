@@ -20,6 +20,12 @@ export const en: Shape<typeof ptBR> = {
   projectHasEnvironments: (p) => `The project still has environments: ${p.names}. Delete the environments first.`,
   projectHasScripts: (p) => `The project has ${f.count(p.count, { one: 'script', other: 'scripts' })}.`,
   hostRequired: 'Enter the host.',
+  gcpProjectRequired: 'Enter the Google Cloud project.',
+  gcpProjectInvalid:
+    'The Google Cloud project is not a valid id: 6 to 30 characters, lower-case letters, digits and hyphens, starting with a letter (a domain project is written domain.com:project).',
+  bigqueryNeedsIam: 'BigQuery signs in through the "Google IAM via gcloud" credential: a user and password do not work.',
+  datasetInvalid: 'The default dataset can only have letters, digits and underscores.',
+  maxBytesInvalid: 'The bytes limit per query is a whole number of bytes, 1 GiB or more.',
   credentialRequired: 'Choose a credential.',
   credentialNameRequired: 'Enter the credential name.',
   credentialExists: (p) => `A credential named "${p.name}" already exists.`,

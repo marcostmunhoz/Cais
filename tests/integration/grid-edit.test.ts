@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { getDialect } from '@shared/dialects/registry';
 import { buildGridUpdates, gridEditability, type EditTarget, type PendingCells } from '@shared/grid';
 import { render } from '@shared/i18n';
-import type { Environment } from '@shared/model';
+import type { MysqlEnvironment as Environment } from '@shared/model';
 import type { CellValue, SchemaTree, StatementResult } from '@shared/results';
 import { mysqlDriver } from '@main/drivers/mysql';
 import type { DbSession } from '@main/drivers/types';

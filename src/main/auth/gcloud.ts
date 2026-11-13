@@ -88,7 +88,7 @@ const REAUTH_MARKERS = [
 
 /**
  * Gets IAM login tokens and the list of logged-in accounts from the gcloud CLI.
- * Only runs read-only subcommands (`sql generate-login-token`, `auth list`); never alters gcloud.
+ * Only runs read-only subcommands (`sql generate-login-token`, `auth list`, `auth print-access-token`); never alters gcloud.
  * Tokens stay in memory and are never logged.
  */
 export class GcloudTokenProvider {
@@ -96,6 +96,9 @@ export class GcloudTokenProvider {
   private binaryLookup: Promise<string | null> | null = null;
   private readonly tokens = new Map<string, { token: string; expiresAt: number }>();
   private readonly inflight = new Map<string, Promise<string>>();
+  // OAuth access tokens (BigQuery) live apart from the Cloud SQL login tokens: another audience, another cache
+  private readonly accessTokens = new Map<string, { token: string; expiresAt: number }>();
+  private readonly accessInflight = new Map<string, Promise<string>>();
 
   constructor(private readonly deps: GcloudDeps) {}
 
@@ -191,6 +194,47 @@ export class GcloudTokenProvider {
       .finally(() => this.inflight.delete(key));
     this.inflight.set(key, promise);
     return promise;
+  }
+
+  /**
+   * An OAuth access token for Google APIs (`gcloud auth print-access-token`), cached for 50 minutes apart from the
+   * login tokens. `force` skips the cache: the server refused the one in hand. A fetch already running is shared,
+   * forced or not (it asks gcloud for a new token anyway), so a burst of 401s opens one process.
+   */
+  async getAccessToken(account: string, impersonateServiceAccount?: string, opts: { force?: boolean } = {}): Promise<string> {
+    const sa = impersonateServiceAccount?.trim() || undefined;
+    const key = `${account}\u0000${sa ?? ''}`;
+    if (!opts.force) {
+      const cached = this.accessTokens.get(key);
+      if (cached && cached.expiresAt > this.deps.now()) return cached.token;
+    }
+    const pending = this.accessInflight.get(key);
+    if (pending) return pending;
+    const promise = this.fetchAccessToken(account, sa)
+      .then((token) => {
+        this.accessTokens.set(key, { token, expiresAt: this.deps.now() + TOKEN_TTL_MS });
+        return token;
+      })
+      .finally(() => {
+        if (this.accessInflight.get(key) === promise) this.accessInflight.delete(key);
+      });
+    this.accessInflight.set(key, promise);
+    return promise;
+  }
+
+  private async fetchAccessToken(account: string, sa?: string): Promise<string> {
+    const args = ['auth', 'print-access-token', `--account=${account}`];
+    if (sa) args.push(`--impersonate-service-account=${sa}`);
+    const res = await this.run(args, 30000);
+    if (res.code !== 0) {
+      if (REAUTH_MARKERS.some((re) => re.test(res.stderr))) {
+        throw CaisError.of(ref('mainMisc.gcloud.reauth', { account }), 'gcloud-reauth');
+      }
+      throw trimmed(ref('mainMisc.gcloud.accessTokenFailed', { account, detail: firstLine(res.stderr) }), 'gcloud-failed');
+    }
+    const token = res.stdout.trim();
+    if (!token) throw CaisError.of(ref('mainMisc.gcloud.noToken', { account }), 'gcloud-failed');
+    return token;
   }
 
   private async fetchToken(account: string, sa?: string): Promise<string> {

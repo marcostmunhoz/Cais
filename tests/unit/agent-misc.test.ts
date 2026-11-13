@@ -1,7 +1,7 @@
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { Environment } from '@shared/model';
+import type { MysqlEnvironment as Environment } from '@shared/model';
 import type { StatementResult } from '@shared/results';
 import { AgentAccess } from '@main/agents/access';
 import { AgentError, agentText } from '@main/agents/errors';
@@ -228,7 +228,7 @@ function sessionsHarness() {
     open: async (params) => {
       if (openError) throw openError;
       const session = new FakeDbSession();
-      session.db = params.database ?? null;
+      session.db = (params.engine === 'bigquery' ? params.defaultDataset : params.database) ?? null;
       opened.push({ session, params });
       return session;
     },

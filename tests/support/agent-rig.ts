@@ -1,7 +1,7 @@
 import type mysql from 'mysql2/promise';
 import mysqlP from 'mysql2/promise';
 import { getDialect } from '@shared/dialects/registry';
-import type { Environment } from '@shared/model';
+import type { MysqlEnvironment as Environment } from '@shared/model';
 import { AgentBroker } from '@main/agents/broker';
 import { AgentSessions } from '@main/agents/sessions';
 import { mysqlDriver } from '@main/drivers/mysql';
@@ -27,7 +27,7 @@ export function makeRig(opts: { envs?: Environment[]; user?: string; password?: 
   const clock = new FakeClock();
   const sessions = new AgentSessions({
     getDriver: () => mysqlDriver,
-    resolveConnectParams: async (e) => params({ host: e.host, port: e.port, ...(e.defaultDatabase ? { database: e.defaultDatabase } : {}), ...(opts.user ? { user: opts.user, password: opts.password ?? '' } : {}) }),
+    resolveConnectParams: async (e) => params({ host: (e as Environment).host, port: (e as Environment).port, ...(e.defaultDatabase ? { database: e.defaultDatabase } : {}), ...(opts.user ? { user: opts.user, password: opts.password ?? '' } : {}) }),
     scheduler: clock,
   });
   let seq = 0;

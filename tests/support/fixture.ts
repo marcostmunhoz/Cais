@@ -1,5 +1,5 @@
 import mysql from 'mysql2/promise';
-import type { ConnectParams } from '@main/drivers/types';
+import type { MysqlConnectParams } from '@main/drivers/types';
 
 export interface MysqlFixture {
   host: string;
@@ -17,7 +17,7 @@ export function fixture(): MysqlFixture {
   return JSON.parse(raw) as MysqlFixture;
 }
 
-export function params(overrides: Partial<ConnectParams> = {}): ConnectParams {
+export function params(overrides: Partial<MysqlConnectParams> = {}): MysqlConnectParams {
   const f = fixture();
   return { host: f.host, port: f.port, user: f.user, password: f.password, database: f.database, tls: 'off', ...overrides };
 }

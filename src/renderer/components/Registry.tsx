@@ -10,6 +10,7 @@ import {
   type Credential,
   type Environment,
 } from '@shared/model';
+import { getDialect } from '@shared/dialects/registry';
 import { AUTO_COMMIT_MAX_ROWS } from '@shared/agents';
 import type { GcloudAccount } from '@shared/ipc';
 import { MAX_CATALOG_NAME, sameName } from '@shared/names';
@@ -238,7 +239,62 @@ function CredentialForm({
 const NEW_PROJECT = '__new_project__';
 const NEW_CREDENTIAL = '__new_credential__';
 
-function EnvironmentForm({
+/** An environment of an engine whose form is not here yet (BigQuery, until its interface lands): it can be seen and deleted. */
+function EnvironmentNotEditable({ environment, onDeleted }: { environment: Environment; onDeleted: () => void }) {
+  const t = m().registry;
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const remove = async () => {
+    try {
+      await window.cais.catalog.deleteEnvironment(environment.id);
+      await reloadCatalog();
+      onDeleted();
+    } catch (e) {
+      setError(errorText(e));
+    }
+  };
+  return (
+    <div data-testid="env-not-editable">
+      <p className="hint">{t.environment.notEditable({ name: environment.name, engine: getDialect(environment.engine).displayName })}</p>
+      {error && <p className="form-error">{error}</p>}
+      <div className="form-actions">
+        {confirmDelete ? (
+          <>
+            <button className="btn danger" type="button" onClick={() => void remove()}>
+              {t.confirmDelete}
+            </button>
+            <button className="btn ghost" type="button" onClick={() => setConfirmDelete(false)}>
+              {t.cancel}
+            </button>
+          </>
+        ) : (
+          <button className="btn ghost" type="button" onClick={() => setConfirmDelete(true)}>
+            {t.delete}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+type EnvironmentFormProps = Parameters<typeof MysqlEnvironmentForm>[0];
+
+function EnvironmentForm(props: EnvironmentFormProps) {
+  const existing = useStore((s) => s.catalog.environments.find((e) => e.id === props.environmentId));
+  const source = useStore((s) => (props.duplicateOf ? s.catalog.environments.find((e) => e.id === props.duplicateOf) : undefined));
+  if (existing && existing.engine !== 'mysql') return <EnvironmentNotEditable environment={existing} onDeleted={props.onDeleted} />;
+  // a copy of an environment this form cannot read would open blank and look like a copy: say so instead
+  if (!existing && source && source.engine !== 'mysql') {
+    return (
+      <p className="hint" data-testid="env-not-duplicable">
+        {m().registry.environment.notDuplicable({ name: source.name, engine: getDialect(source.engine).displayName })}
+      </p>
+    );
+  }
+  return <MysqlEnvironmentForm {...props} />;
+}
+
+function MysqlEnvironmentForm({
   environmentId,
   presetProjectId,
   duplicateOf,
@@ -261,7 +317,8 @@ function EnvironmentForm({
   const catalog = useStore((s) => s.catalog);
   const existing = catalog.environments.find((e) => e.id === environmentId);
   // what the fields start from: the environment being edited, or the one being duplicated
-  const source = existing ?? (duplicateOf ? catalog.environments.find((e) => e.id === duplicateOf) : undefined);
+  const found = existing ?? (duplicateOf ? catalog.environments.find((e) => e.id === duplicateOf) : undefined);
+  const source = found?.engine === 'mysql' ? found : undefined;
   const sourceProject = source ? catalog.projects.find((p) => p.id === source.projectId) : undefined;
   const initialName = (): string => {
     if (existing || !source) return existing?.name ?? '';
