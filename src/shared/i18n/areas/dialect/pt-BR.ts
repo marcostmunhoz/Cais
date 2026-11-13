@@ -81,6 +81,7 @@ export const ptBR = {
       backslashIdent: 'Nome entre crases com barra invertida: o servidor e a revisão podem achar o fim do nome em lugares diferentes. Tire a barra.',
       dashComment: 'Comentário -- colado no texto seguinte: sem espaço depois dos dois traços, a revisão pode lê-lo como código. Ponha um espaço depois de --.',
       bytesPrefix: 'String de bytes (b\'...\'): a revisão pode lê-la como número binário e perder o fim da string. Use uma string normal ou FROM_BASE64.',
+      chainedCall: 'Chamada encadeada ((expressão).função(...) ou (expressão).(nome)(...)): a revisão não vê qual função roda. Escreva a chamada direta, função(expressão).',
       hexPrefix: 'Letra x colada numa string (x\'...\'): a revisão a lê como número hexa. Separe com espaço ou use outro nome.',
     },
   },

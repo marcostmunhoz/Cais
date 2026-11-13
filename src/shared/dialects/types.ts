@@ -93,9 +93,17 @@ export interface AgentRules {
   writeVerbs: string[];
   /** --database from an agent: a plain name the engine accepts, without hidden text. */
   isValidDatabaseName(name: string): boolean;
+  /**
+   * An unqualified call (as `Classification.functions` lists it) that the engine does not ship: it may be a routine
+   * defined in the project, so an agent's read that calls it waits for the person. Absent: the engine has no such
+   * routines to tell apart (MySQL keeps its own rules).
+   */
+  isUnknownFunction?(name: string): boolean;
   messages: {
     systemSchemaWrite: string;
     systemSchemaRead: string;
+    /** Reading the metadata of other people's jobs or sessions (`system_schema`). Absent: `systemSchemaRead`. */
+    jobsMetadata?: string;
   };
 }
 

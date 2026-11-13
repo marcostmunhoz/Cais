@@ -93,6 +93,16 @@ function StatementList({ request, onGate }: { request: AgentRequestView; onGate:
           <div className="stmt-head">
             <span className="stmt-n">#{i + 1}</span>
             <span className={`agent-pill ${s.kind === 'write' ? 'warn' : ''}`}>{kindLabel(s.kind)}</span>
+            {s.bytesEstimated !== undefined && (
+              <span className="bytes-estimate" data-testid="stmt-estimate">
+                {t().modal.estimate({ bytes: s.bytesEstimated })}
+              </span>
+            )}
+            {s.bytesBilled !== undefined && (
+              <span className="bytes-estimate" data-testid="stmt-billed">
+                {t().modal.billed({ bytes: s.bytesBilled })}
+              </span>
+            )}
           </div>
           <SqlView value={s.sql} label={t().modal.statement({ n: i + 1 })} environmentId={request.environmentId} />
         </div>

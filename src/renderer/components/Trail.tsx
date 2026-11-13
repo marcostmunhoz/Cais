@@ -94,7 +94,7 @@ function Detail({ entry }: { entry: TrailEntry }) {
       entry.statements
         .map(
           (s, i) =>
-            `#${i + 1} ${s.verb}${s.affectedRows !== undefined ? ` ${d.statementAffected({ count: s.affectedRows })}` : s.rows !== undefined ? ` ${d.statementRows({ count: s.rows })}` : ''}${s.errorCode ? ` ${s.errorCode}` : ''}`,
+            `#${i + 1} ${s.verb}${s.affectedRows !== undefined ? ` ${d.statementAffected({ count: s.affectedRows })}` : s.rows !== undefined ? ` ${d.statementRows({ count: s.rows })}` : ''}${s.bytesBilled !== undefined ? ` ${fmt().formatBytes(s.bytesBilled)}` : ''}${s.errorCode ? ` ${s.errorCode}` : ''}`,
         )
         .join(' · '),
     ]);

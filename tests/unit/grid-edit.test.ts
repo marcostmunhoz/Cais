@@ -468,9 +468,9 @@ describe('gridEditability: engine capability', () => {
   it('an engine without grid editing gives its own reason, before any other', () => {
     const e = gridEditability(result, schema, mysqlDialect.valueKind, { gridEdit: false, name: 'Motor X' });
     expect(e.editable).toBe(false);
-    expect(reasonOf(e)).toBe('Motor X não aceita edição na grade.');
+    expect(reasonOf(e)).toBe('Nesta versão o Motor X é só leitura.');
     expect(reasonOf(gridEditability({ kind: 'ddl', verb: 'CREATE' }, schema, mysqlDialect.valueKind, { gridEdit: false, name: 'Motor X' }))).toBe(
-      'Motor X não aceita edição na grade.',
+      'Nesta versão o Motor X é só leitura.',
     );
   });
   it('an engine with grid editing, or none given, edits as before', () => {

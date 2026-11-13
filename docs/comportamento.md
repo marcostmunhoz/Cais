@@ -6,7 +6,7 @@ Como o Cais se comporta e por quê. Cada regra traz o motivo quando ele não é 
 
 - **Produção não escreve por acidente.** Um ambiente de produção abre em Somente leitura; para escrever é preciso trocar o modo da aba, e o Auto-commit em produção pede confirmação.
 - **Segredo não sai do processo principal.** A interface envia a senha uma vez, ao salvar, e nunca a recebe de volta. Nada de senha ou token em log.
-- **A interface não conhece o motor.** Tudo o que depende do banco (dialeto, palavras-chave, introspecção, classificação de comandos) vem do driver e do dialeto. MySQL é o primeiro motor.
+- **A interface não conhece o motor.** Tudo o que depende do banco (dialeto, palavras-chave, introspecção, classificação de comandos) vem do driver e do dialeto. MySQL é o primeiro motor e o BigQuery, o segundo (só leitura).
 - **O app não altera o `gcloud`.** Só lista as contas logadas e gera tokens: o de login do Cloud SQL e o de acesso do BigQuery.
 - **Poucas opções.** Um padrão seguro vale mais que uma configuração. Os valores fixos deste documento (limites de linhas, tempo de inatividade, níveis de agentes) são fixos de propósito; uma opção nova só entra com o motivo registrado aqui.
 
@@ -48,15 +48,48 @@ A interface segue o tema claro ou escuro do sistema e usa as fontes do sistema. 
 
 ## BigQuery (só leitura)
 
-O BigQuery é o segundo motor, e nesta versão só lê. Ele tem cadastro próprio (escolha do motor no formulário do ambiente), árvore de datasets com as colunas lidas quando o dataset é aberto, editor em GoogleSQL, bytes no rodapé e o diálogo da confirmação de custo (veja [o plano](planos/linux-e-bigquery.md)):
+O BigQuery é o segundo motor, e nesta versão só lê: para a pessoa e para agentes. O que ficou de fora, e o que cada item exige, está em [roadmap.md](roadmap.md). A interface não muda de forma: o que depende do motor (dialeto, termo, capacidades) vem do dialeto e do driver, e a tela diz **dataset** onde o MySQL diz banco.
 
-- **Ambiente:** projeto do Google Cloud (onde os jobs rodam e são cobrados), dataset padrão opcional (é o "banco padrão") e limite de bytes por consulta, opcional. A credencial tem de ser "Google IAM via gcloud": usuário e senha são recusados ao salvar.
-- **Por que o campo de limite:** o BigQuery cobra pelo que lê, e uma consulta sem filtro numa tabela de terabytes custa caro antes de qualquer sinal de problema. Por isso o limite é por ambiente, e não um valor fixo do app: um projeto com tabelas de TB quer um teto baixo, enquanto um projeto com reserva de slots (capacidade paga à parte) não paga por byte lido e não precisa dele. Um ambiente novo já vem com 100 GiB (unidades binárias, GiB = 2^30 bytes), um teto que barra o erro caro e deixa passar o trabalho comum. Vazio é sem limite: nenhuma pergunta e nenhum `maximumBytesBilled`. O campo é um número inteiro de GiB, de 1 para cima.
-- **Regra de confirmação:** com limite, cada comando passa por um dry run antes de qualquer um rodar. Estimativa até o limite roda, com o limite como `maximumBytesBilled` do job: o BigQuery recusa, sem cobrar, o que passar dele. Estimativa acima do limite pergunta antes de rodar qualquer comando; em "Rodar todos" a pergunta lista cada comando acima do limite com a estimativa. Quem confirma autoriza aquela estimativa: o job roda com o maior valor entre o limite e a estimativa confirmada arredondada para cima ao GiB. A confirmação vale só para o texto do comando sobre o qual foi dada. Se o texto mudar, ou a estimativa nova passar do que foi confirmado (a tabela cresceu entre a pergunta e a execução), o Cais pergunta de novo. Se o ambiente for editado durante o dry run, nada roda com os dados antigos: a pessoa roda de novo. "Buscar até 50.000" não faz dry run nem pergunta: lê páginas do mesmo job, que já foi cobrado. Se o resultado do job não existir mais (24 horas, ou a sessão foi reiniciada), o Cais avisa e não roda a consulta de novo.
-- **Sessão:** sempre Somente leitura, em qualquer ambiente. Cada comando passa pelo classificador do app e por um dry run: se o servidor não o lê como `SELECT`, recusa. Não há transação, Commit nem edição na grade.
-- **Dataset atual:** trocar de dataset confere que ele existe (`datasets.get`) e vira o padrão das consultas seguintes; a Trilha grava a linha com o verbo `DATASET`.
-- **Resultado:** o rodapé guarda bytes estimados, processados e faturados, se veio do cache e o id do job. "Buscar até 50.000" lê mais páginas do mesmo job, sem rodar de novo, enquanto o resultado dele existir (24 horas).
-- **Cancelar** usa `jobs.cancel`; fechar a aba cancela o job em andamento.
+### Ambiente
+
+- **Campos:** projeto do Google Cloud (o id onde os jobs rodam e são cobrados), dataset padrão opcional (é o "banco padrão") e limite de bytes por consulta, opcional. Não há host nem porta. Não há campo de localização: o BigQuery a infere pela consulta, e o Cais repete a localização do job nas leituras seguintes (páginas, cancelamento).
+- **Credencial:** tem de ser "Google IAM via gcloud"; usuário e senha são recusados ao salvar. O Cais pede o token de acesso ao `gcloud` (`gcloud auth print-access-token --account=<conta>`, com `--impersonate-service-account` quando configurado), guarda-o em memória por 50 minutos e, se o servidor responder 401, pede outro uma vez e repete. O que a conta precisa: `roles/bigquery.jobUser` no projeto e `roles/bigquery.dataViewer` nos datasets lidos; a recusa do servidor chega com essa dica.
+- **Testar conexão** confere o token, lista os datasets e faz o dry run de um `SELECT 1`, que confere a permissão de criar jobs no projeto.
+- **Por que o campo de limite:** o BigQuery cobra pelo que lê, e uma consulta sem filtro numa tabela de terabytes custa caro antes de qualquer sinal de problema. Por isso o limite é por ambiente, e não um valor fixo do app: um projeto com tabelas de TB quer um teto baixo, enquanto um projeto com reserva de slots (capacidade paga à parte) não paga por byte lido e pode não precisar dele. Um ambiente novo já vem com 100 GiB (unidades binárias, GiB = 2^30 bytes), um teto que barra o erro caro e deixa passar o trabalho comum. Vazio é sem limite: nenhuma pergunta e nenhum `maximumBytesBilled`. O campo é um número inteiro de GiB, de 1 para cima. O limite protege os bytes lidos, e só eles (veja [seguranca.md](seguranca.md#bigquery-só-leitura)).
+- Mudar o projeto, a credencial ou o limite conta como mudança do ambiente, como mudar host e porta no MySQL: as liberações de agentes são revogadas e os pedidos pendentes expiram, e a assinatura do cadastro cobre os campos novos.
+- **Cais antigo:** um Cais sem o motor BigQuery que abrir um `catalog.json` com ambiente BigQuery o aparta como corrompido (`.corrupt-<data>.json`, nada se perde). Depois de cadastrar um ambiente BigQuery numa máquina, não se volta para uma versão anterior nela.
+
+### Aba e árvore
+
+- **Sempre Somente leitura**, em qualquer ambiente, produção ou não. Transação e Auto-commit aparecem desabilitados na barra, com o motivo; não há Commit, Rollback nem edição na grade. A barra de status diz BigQuery.
+- **Seletor de dataset:** trocar de dataset confere que ele existe (`datasets.get`) e vira o padrão das consultas seguintes (nomes sem qualificador). A Trilha grava a linha com o verbo `DATASET`. O dataset atual fica na memória da aba: o BigQuery não guarda sessão nesta versão.
+- **Árvore:** datasets › tabelas e views (view materializada e tabela externa levam marca própria) › colunas com o tipo completo (`STRUCT<…>`, `ARRAY<…>`, `NUMERIC(10, 2)`). As colunas de um dataset são lidas quando ele é aberto, por `tables.get` de cada tabela: não custa bytes (ler `INFORMATION_SCHEMA` custaria, com um mínimo por consulta). **Atualizar schema** lê de novo.
+- **Editor:** realce de GoogleSQL (crases, `#` e `--` como comentário, aspas duplas como string) e autocomplete de `dataset.tabela` e de colunas, a partir da árvore.
+- **Duplo clique numa tabela** roda `` SELECT * FROM `dataset`.`tabela` LIMIT 100; `` pelo caminho normal. No BigQuery o `LIMIT` não reduz os bytes lidos, então a estimativa e o limite do ambiente valem aqui também.
+
+### Rodar
+
+Cada comando passa por duas camadas, e uma recusa em qualquer uma o impede de rodar:
+
+1. **O classificador do app** (mesmo dialeto no renderer e no main) só deixa passar consulta: `SELECT`, `WITH`, sintaxe pipe começando em `FROM` e consulta entre parênteses. Na dúvida, recusa.
+2. **O dry run** (`jobs.query` com `dryRun`) devolve o tipo que o servidor leu e os bytes que leria. Se o servidor não lê o comando como `SELECT` (ou não diz o tipo), o comando não roda. O driver repete o dry run dentro de `execute`, então a segunda camada vale também para quem o chama sem passar pelo `SessionManager`.
+
+- **Regra de confirmação:** com limite, a estimativa até o limite roda, com o limite como `maximumBytesBilled` do job: o BigQuery recusa, sem cobrar, o que passar dele. Estimativa acima do limite pergunta antes de rodar qualquer comando; em "Rodar todos" a pergunta lista cada comando acima do limite com a estimativa. Quem confirma autoriza aquela estimativa: o job roda com o maior valor entre o limite e a estimativa confirmada arredondada para cima ao GiB. A confirmação vale só para o texto do comando sobre o qual foi dada. Se o texto mudar, ou a estimativa nova passar do que foi confirmado (a tabela cresceu entre a pergunta e a execução), o Cais pergunta de novo. Se o ambiente for editado durante o dry run, nada roda com os dados antigos: a pessoa roda de novo.
+- **Sem limite**, o Cais não pergunta e não manda `maximumBytesBilled`; a estimativa aparece no rodapé mesmo assim.
+- **Cada job** leva o rótulo `cais: person` (ou `cais: agent`), que separa no faturamento o que a pessoa e os agentes leram, e `jobTimeoutMs` de 30 s só nos pedidos de agente.
+- **Recusado para a pessoa:** DML (`INSERT`, `UPDATE`, `DELETE`, `MERGE`), DDL (inclusive `CREATE TEMP`), scripts (`DECLARE`, `SET`, `BEGIN … END`, `IF`, `LOOP`...), controle de transação, `CALL`, `EXECUTE IMMEDIATE`, `EXPORT DATA`, `LOAD DATA`, `GRANT`, `REVOKE`, `ASSERT`, mais de um comando por vez, a diretiva `#legacySQL` (e `#standardSQL`) e `EXTERNAL_QUERY`, que roda uma consulta em outro banco e cuja leitura só em transação de leitura não foi conferida. Texto com string, nome entre crases ou comentário sem fim também é recusado. O motivo aparece depois de "Somente leitura:".
+- **Erros** do BigQuery viram mensagens da interface com o `reason` como código e o texto original recolhido: acesso negado (com a dica de papel), não encontrado, consulta inválida, limite de bytes, cota, taxa, resultado grande demais, serviço indisponível. Sem rede, "Sem resposta de bigquery.googleapis.com", lembrando da VPN e do proxy.
+
+### Resultado
+
+- A grade de sempre, sem edição. O rodapé mostra linhas, tempo, bytes estimados, processados e faturados e se veio do cache. Números do BigQuery (`INT64`, `NUMERIC`, `BIGNUMERIC`, `FLOAT64`) ficam à direita. Inteiros, `NUMERIC` e `BIGNUMERIC` chegam como texto (sem perder precisão); `TIMESTAMP` em UTC com microssegundos; `DATE`, `DATETIME`, `TIME`, `INTERVAL`, `RANGE`, `GEOGRAPHY` (WKT) e `JSON` como texto; `STRUCT` e `ARRAY` como JSON, que o painel lateral formata; `BYTES` em hexadecimal, cortado em 256 bytes.
+- **"Buscar até 50.000" lê o mesmo job:** o Cais guarda o job do último resultado e lê mais páginas dele, sem dry run, sem pergunta e sem nova cobrança. Se o resultado não existir mais (o BigQuery o guarda por 24 horas, ou o texto ou o dataset mudaram depois), o Cais avisa "O resultado dessa consulta não está mais disponível" e não roda a consulta de novo, porque um job novo cobraria outra vez sem estimativa e sem pergunta.
+- **Cancelar** usa `jobs.cancel`; fechar a aba cancela o job em andamento. Um job que o servidor já criou e a pessoa cancelou antes da resposta também é cancelado.
+
+### Trilha e idioma
+
+- As linhas do BigQuery levam o id do job, os bytes estimados e os faturados (uma releitura do mesmo job aponta o job, sem bytes: já foi cobrado) e, no detalhe, a confirmação de um comando acima do limite do ambiente (a estimativa e o limite, no idioma de quando a linha foi escrita).
+- Os textos são os dos catálogos, nos dois idiomas, com o termo do motor ("dataset") como chave. O que vai para agentes continua em português (veja [agentes.md](agentes.md#bigquery)).
 
 ## Modos da sessão
 
@@ -73,7 +106,7 @@ Uma aba é uma sessão, que é uma conexão. O modo e a transação são da aba.
 
 ### Somente leitura
 
-Duas camadas: uma lista do que é permitido no app, que recusa o resto antes de sair, e a sessão em `READ ONLY` no servidor, reafirmada antes de cada comando.
+Duas camadas: uma lista do que é permitido no app, que recusa o resto antes de sair, e a sessão em `READ ONLY` no servidor, reafirmada antes de cada comando. No BigQuery as camadas são outras (veja [BigQuery](#bigquery-só-leitura)).
 
 - **Permitido:** `SELECT` (também por `WITH`, `TABLE` e `VALUES`), `SHOW`, `DESCRIBE`/`DESC`, `HELP`, `USE`, `EXPLAIN` de uma leitura (`EXPLAIN ANALYZE` só de leitura, porque ele executa o comando), `SET @variável = …` e `SET NAMES`/`SET CHARACTER SET` com utf8mb4, sozinhos.
 - **Recusado mesmo sendo leitura:** `INTO OUTFILE`, `INTO DUMPFILE` e leituras com lock (`FOR UPDATE`, `FOR SHARE`, `LOCK IN SHARE MODE`).
@@ -203,6 +236,7 @@ Um processo que escreve na pasta de dados poderia apontar o host de um ambiente 
 |---|---|
 | Web app hospedado | O navegador não fala o protocolo do MySQL e não acessa o `gcloud` local. |
 | Outros bancos (PostgreSQL etc.) | O contrato de driver e de dialeto é agnóstico; um driver novo entra quando houver uso. |
+| Escrever no BigQuery (DML, DDL, scripts, transação, edição na grade, escrita de agente) | Exige uma sessão do BigQuery por aba, a classificação de script inteiro e o custo da escrita no mesmo limite de bytes. A ordem e o que cada item exige estão em [roadmap.md](roadmap.md#bigquery-depois-da-versão-só-leitura). |
 | Histórico para reabrir queries, scripts como arquivos `.sql` numa pasta, pastas dentro de Scripts, exportar resultado para arquivo | Os scripts salvos ficam no cadastro do app, e a Trilha registra o que rodou. Copiar em TSV, CSV ou JSON cobre a saída de dados. |
 | Servidor MCP | O CLI cobre os agentes com shell. Um adaptador MCP seria uma camada fina sobre o mesmo protocolo local. |
 | DDL e comandos com commit implícito por agentes | Não dá para desfazer. Agente só lê ou faz DML dentro de transação. |

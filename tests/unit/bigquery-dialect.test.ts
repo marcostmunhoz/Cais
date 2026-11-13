@@ -429,7 +429,6 @@ describe('classify: functions and flags', () => {
       'SELECT KLL_QUANTILES.MERGE_POINT_INT64(s, 0.5)',
       'SELECT SAFE.PARSE_DATE("%Y", s)',
       'SELECT SAFE.NET.HOST(u)',
-      'SELECT OBJ.GET_ACCESS_URL(r, "r")',
       'SELECT COUNT(*), SUM(a), IF(a, b, c), COALESCE(a, b)',
     ]) {
       expect(classify(sql).remoteCalls, sql).toBeUndefined();
@@ -633,7 +632,7 @@ describe('the dialect object', () => {
     const r = d.agentRules;
     expect(r.systemSchemas).toEqual(['information_schema']);
     expect(r.secretSchemas).toEqual([]);
-    expect(r.deniedFunctions).toEqual(['EXTERNAL_QUERY']);
+    expect(r.deniedFunctions).toEqual(['EXTERNAL_QUERY', 'OBJ.FETCH_METADATA', 'OBJ.GET_ACCESS_URL', 'OBJ.MAKE_REF']);
     expect(r.writeVerbs).toEqual([]);
     expect(r.isValidDatabaseName('my_dataset1')).toBe(true);
     for (const bad of ['', 'a-b', 'a.b', 'a b', 'a`b', 'é', 'a\n', 'x'.repeat(1025)]) expect(r.isValidDatabaseName(bad), bad).toBe(false);

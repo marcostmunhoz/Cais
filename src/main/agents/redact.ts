@@ -13,12 +13,13 @@ export function redactForAgent(text: string, target: RedactTarget, locale: Local
   const { server, user, project, account } = messagesFor(locale).agentsUi.redact;
   let out = text;
   if ('gcpProject' in target) {
+    // e-mails first: a service account's domain carries the project id (`sa@my-project.iam.gserviceaccount.com`)
+    out = out.replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, () => account);
     const id = target.gcpProject.trim();
     if (id) out = out.split(id).join(project);
     // the project's name inside a domain-scoped id too ("example.com:my-project")
     const bare = id.includes(':') ? id.slice(id.indexOf(':') + 1) : '';
     if (bare) out = out.split(bare).join(project);
-    out = out.replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, () => account);
     return out;
   }
   const host = target.host.trim();

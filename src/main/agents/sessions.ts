@@ -18,6 +18,7 @@ import { AGENT_LOCALE, getLocale, m, ref, renderRef, type MessageRef } from '@sh
 import { AgentError, agentText, bothWays } from './errors';
 import { realScheduler, type Scheduler } from '../scheduler';
 import { redactForAgent } from './redact';
+import type { PrepareResult } from '../drivers/types';
 
 export interface PlannedStatement {
   text: string;
@@ -26,6 +27,20 @@ export interface PlannedStatement {
   kind?: StatementResult['kind'];
   /** USE: the session's current database may have changed. */
   changesDatabase?: boolean;
+  /**
+   * Engines that bill by bytes read: the most this statement's job may bill. A read whose estimate has grown past it
+   * by the time it runs does not run (`bytes_over_approved`). Absent: no ceiling (MySQL).
+   */
+  maxBytesBilled?: number;
+}
+
+/** What a dry run said about one statement of a request, before anything is decided. */
+export interface PreparedStatement {
+  /** The kind of statement as the server reads it ("SELECT"). */
+  serverKind?: string;
+  bytesEstimated?: number;
+  /** The dry run could not be done (connection, bad dataset, invalid text): the run itself reports the error. */
+  failed?: boolean;
 }
 
 export interface RunArgs {
@@ -55,6 +70,11 @@ export interface WriteRun extends RunOutcome {
 export interface AgentExecutor {
   /** `fresh`: metadata read now, never from the 60 s cache (what a write decision relies on). */
   schema(environment: Environment, opts?: { fresh?: boolean; database?: string }): Promise<SchemaTree>;
+  /**
+   * A dry run of every statement of a read (type and estimated bytes), on the agents' own read connection. Undefined
+   * when the engine has no dry run (MySQL): nothing is opened for it. Never throws for a failed dry run.
+   */
+  prepare?(environment: Environment, args: { database?: string; statements: PlannedStatement[] }): Promise<PreparedStatement[] | undefined>;
   runRead(environment: Environment, args: RunArgs): Promise<RunOutcome>;
   runWrite(environment: Environment, args: RunArgs): Promise<WriteRun>;
   environmentChanged(environmentId: string): Promise<void>;
@@ -93,6 +113,8 @@ const ACCESS_CLOSED = (): AgentError => new AgentError(ref('agentsUi.error.acces
 const timeoutError = (): { message: string; code: string; ref: MessageRef } => ({ ...bothWays(ref('agentsUi.error.timeout')), code: 'agent_timeout' });
 /** Trees kept per agent session manager (one per environment, plus one per dataset asked for). */
 const SCHEMA_CACHE_MAX_ENTRIES = 64;
+/** A dry run that does not answer in this time is given up and its connection dropped. */
+const PREPARE_MAX_MS = 15_000;
 const WRITE_VERBS = new Set(['INSERT', 'REPLACE', 'UPDATE', 'DELETE']);
 
 function label(result: StatementResult, statement: PlannedStatement, index: number): StatementResult {
@@ -340,7 +362,13 @@ export class AgentSessions implements AgentExecutor {
    * One statement with a client-side cut (it covers what max_execution_time does not: SET @x = (SELECT …),
    * SHOW … WHERE, DML): the query is killed and the connection is not reused.
    */
-  private async executeWithCut(session: DbSession, text: string, maxRows: number, cutMs: number): Promise<{ result: StatementResult; cut: boolean }> {
+  private async executeWithCut(
+    session: DbSession,
+    text: string,
+    maxRows: number,
+    cutMs: number,
+    ceiling?: number,
+  ): Promise<{ result: StatementResult; cut: boolean }> {
     let cut = false;
     let fallback: unknown;
     const timer = this.scheduler.set(() => {
@@ -353,11 +381,76 @@ export class AgentSessions implements AgentExecutor {
       }, 5000);
     }, Math.max(1, cutMs));
     try {
-      const result = await session.execute(text, { maxRows });
+      const result = await session.execute(text, { maxRows, ...(ceiling !== undefined ? { maxBytesBilled: ceiling, estimateCeiling: ceiling } : {}) });
       return { result, cut };
     } finally {
       this.scheduler.clear(timer);
       if (fallback !== undefined) this.scheduler.clear(fallback);
+    }
+  }
+
+  /** One dry run, given up after PREPARE_MAX_MS (the connection is then not trusted any more). */
+  private async prepareOne(session: DbSession, text: string): Promise<PrepareResult | 'timeout'> {
+    return new Promise<PrepareResult | 'timeout'>((resolve) => {
+      const timer = this.scheduler.set(() => resolve('timeout'), PREPARE_MAX_MS);
+      session.prepare!(text).then(
+        (r) => {
+          this.scheduler.clear(timer);
+          resolve(r);
+        },
+        (error: unknown) => {
+          this.scheduler.clear(timer);
+          resolve({ error: { message: error instanceof Error ? error.message : String(error) } });
+        },
+      );
+    });
+  }
+
+  async prepare(environment: Environment, args: { database?: string; statements: PlannedStatement[] }): Promise<PreparedStatement[] | undefined> {
+    if (!capabilitiesOf(environment.engine).dryRun) return undefined;
+    const failedAll = (): PreparedStatement[] => args.statements.map(() => ({ failed: true }));
+    const target = args.database ?? environment.defaultDatabase;
+    let entry: ReadEntry;
+    try {
+      entry = await this.acquire(environment, target);
+    } catch (error) {
+      // access went off: the request is over. Any other failure shows when the run itself tries to connect.
+      if (error instanceof AgentError && error.code === 'agent_access_off') throw error;
+      return failedAll();
+    }
+    if (!entry.session.prepare) {
+      this.release(environment.id, entry);
+      return undefined;
+    }
+    let recycle = false;
+    try {
+      if (target !== entry.database) {
+        const use = await entry.session.useDatabase(target!);
+        if (use.error) {
+          recycle = true;
+          return failedAll();
+        }
+        entry.database = target;
+      }
+      const out: PreparedStatement[] = [];
+      for (const statement of args.statements) {
+        const one = await this.prepareOne(entry.session, statement.text);
+        if (one === 'timeout') {
+          recycle = true;
+          out.push({ failed: true });
+        } else if (one.error) {
+          out.push({ failed: true });
+        } else {
+          out.push({
+            ...(one.serverKind ? { serverKind: one.serverKind } : {}),
+            ...(one.bytesEstimated !== undefined ? { bytesEstimated: one.bytesEstimated } : {}),
+          });
+        }
+      }
+      return out;
+    } finally {
+      if (recycle) await this.dropRead(environment.id, entry);
+      this.release(environment.id, entry);
     }
   }
 
@@ -384,7 +477,9 @@ export class AgentSessions implements AgentExecutor {
           recycle = true;
           return { results, error: timeoutError() };
         }
-        const { result: raw, cut } = await this.executeWithCut(entry.session, statement.text, args.maxRows, Math.min(READ_HARD_CUT_MS, remaining));
+        // the estimate may have grown since the person (or the policy) saw it: the ceiling is what was approved
+        const ceiling = statement.maxBytesBilled;
+        const { result: raw, cut } = await this.executeWithCut(entry.session, statement.text, args.maxRows, Math.min(READ_HARD_CUT_MS, remaining), ceiling);
         const result = label(raw, statement, index);
         if (cut) {
           recycle = true;

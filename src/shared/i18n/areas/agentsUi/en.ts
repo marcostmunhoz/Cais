@@ -60,6 +60,8 @@ export const en: Shape<typeof ptBR> = {
     production: 'Production',
     statementOne: 'statement',
     statementMany: 'statements',
+    estimate: (p) => `${f.formatBytes(p.bytes)} estimated`,
+    billed: (p) => `${f.formatBytes(p.bytes)} billed`,
     scrollToEnd: ' · scroll the list to the end to enable the button',
     writeNote:
       'Runs in a transaction. Then you see the affected rows and choose Commit or Rollback. If any statement writes outside the transaction, the request stops and you are told.',
@@ -145,6 +147,16 @@ export const en: Shape<typeof ptBR> = {
       `This environment allows writes, but the table ${p.table} has a trigger, and what it writes is not in the row count: the request waits for your approval.`,
     cascade: (p) =>
       `This environment allows writes, but the table ${p.table} has a cascading foreign key (${p.tables}), and those rows are not in the count: the request waits for your approval.`,
+    bigRead: (p) =>
+      `This read should scan ${f.formatBytes(p.bytes)}, above ${f.formatBytes(p.threshold)}: it waits for your approval, whatever the environment's level.`,
+    overLimit: (p) =>
+      `This read should scan ${f.formatBytes(p.bytes)}, above the environment's limit of ${f.formatBytes(p.limit)}: it waits for your approval, whatever the environment's level.`,
+    remoteFunction: (p) =>
+      `The command calls the function ${p.name}, defined in the project: it may be a remote function, which runs code outside BigQuery. The request waits for your approval.`,
+    generativeAi: (p) =>
+      `The command calls ${p.name}, a generative AI or model function: its cost does not show in the bytes read. The request waits for your approval.`,
+    unknownFunction: (p) =>
+      `The command calls the function ${p.name}, which is not a BigQuery built-in and may be a routine of the project (even a remote function). The request waits for your approval.`,
     triggersHidden: (p) =>
       `This environment allows writes, but the database user cannot see the triggers of ${p.database} (it lacks the TRIGGER privilege): the request waits for your approval.`,
   },
@@ -174,6 +186,8 @@ export const en: Shape<typeof ptBR> = {
     commitFailed: 'The commit failed and the server rolled the transaction back.',
     unexpected: 'Unexpected error while running the request.',
     timeout: 'Time limit for agents reached.',
+    bytesOverApproved: (p) =>
+      `The estimate for this read went past ${f.formatBytes(p.ceiling)}, the approved ceiling (now ${f.formatBytes(p.bytes)}): it did not run. Ask again so the person sees the new estimate.`,
     accessClosed: 'Agent access was turned off or the environment changed.',
     unexpectedCommit: 'The server ended the transaction during the request.',
     nonTransactionalWrite: 'The statement wrote outside the transaction (non-transactional or system table): Rollback does not undo it.',

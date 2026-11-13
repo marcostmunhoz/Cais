@@ -45,6 +45,12 @@ export interface DecideInput {
   database?: string;
   /** The engine's rules (dialect.agentRules): its system schemas, denied functions and write verbs. */
   rules: AgentRules;
+  /**
+   * Something outside the level calls for the person (a read past the bytes threshold, a call that runs outside the
+   * engine): the request goes to approval whatever the level or a 15-minute grant says. Needs a --reason like any
+   * request that waits.
+   */
+  forceApproval?: boolean;
 }
 
 /**
@@ -62,6 +68,13 @@ export const MESSAGES = {
   executableComment: 'Agentes não usam comentários executáveis (/*! … */ ou /*M! … */): o servidor pode rodar outra coisa do que a pessoa vê.',
   functionNotAllowed: (name: string): string =>
     `A função ${name} não é permitida para agentes (lock nomeado, espera, arquivo do servidor ou estado do servidor).`,
+  legacyDirective:
+    'Agentes não usam as diretivas #legacySQL e #standardSQL: elas mudam a linguagem em que o servidor lê o comando, e a pessoa revisa outra coisa.',
+  externalQuery: 'A função EXTERNAL_QUERY não é permitida para agentes: ela roda uma consulta em outro banco.',
+  serverNotQuery: (kind?: string): string =>
+    kind && /^[A-Z_]{1,40}$/.test(kind)
+      ? `O servidor leu este comando como ${kind}, não como consulta (SELECT): agentes só leem neste ambiente.`
+      : 'O servidor não disse que este comando é uma consulta (SELECT): nada roda sem isso.',
   hint: 'Agentes não usam hints que mudam variáveis de sessão (SET_VAR, MAX_EXECUTION_TIME).',
 } as const;
 
@@ -93,9 +106,15 @@ export function decide(input: DecideInput): Decision {
     return { action: 'refuse', code: 'executable_comment', message: MESSAGES.executableComment };
   }
   for (const s of statements) {
-    const denied = s.c.serverStateFunction ?? s.c.functions?.find((f) => deniedFunctions.has(f));
+    const denied = s.c.serverStateFunction ?? s.c.functions?.find((f) => deniedFunctions.has(f) || deniedFunctions.has(f.replace(/^SAFE\./, '')));
     if (denied) return { action: 'refuse', code: 'function_not_allowed', message: MESSAGES.functionNotAllowed(denied.replace(/^#NON_ASCII:/, '')) };
     if (s.c.setVarHint) return { action: 'refuse', code: 'function_not_allowed', message: MESSAGES.hint };
+  }
+  // `#legacySQL` is a comment the server obeys: what the person reviews is not what it runs
+  if (statements.some((s) => s.c.legacyDirective)) return { action: 'refuse', code: 'executable_comment', message: MESSAGES.legacyDirective };
+  if (statements.some((s) => s.c.externalQuery)) return { action: 'refuse', code: 'function_not_allowed', message: MESSAGES.externalQuery };
+  if (statements.some((s) => s.c.jobsMetadata)) {
+    return { action: 'refuse', code: 'system_schema', message: rules.messages.jobsMetadata ?? rules.messages.systemSchemaRead };
   }
   const database = input.database?.toLowerCase();
   const touches = (names: Set<string> | string[]): boolean => {
@@ -126,7 +145,7 @@ export function decide(input: DecideInput): Decision {
       : 'approve-all'
     : (input.level ?? 'free-reads');
   if (mode === 'write' && !input.reason?.trim()) return { action: 'refuse', code: 'reason_required', message: MESSAGES.reasonWrite };
-  const free = mode === 'read' ? level !== 'approve-all' || input.grantActive : level === 'free-reads-writes';
+  const free = !input.forceApproval && (mode === 'read' ? level !== 'approve-all' || input.grantActive : level === 'free-reads-writes');
   const needsApproval = !free || input.trailOk === false;
   if (!needsApproval) return { action: 'run' };
   if (!input.reason?.trim()) return { action: 'refuse', code: 'reason_required', message: MESSAGES.reason };

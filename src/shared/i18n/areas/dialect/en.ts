@@ -76,6 +76,7 @@ export const en: Shape<typeof ptBR> = {
       backslashIdent: 'Backtick-quoted name with a backslash: the server and the review may find the end of the name in different places. Remove the backslash.',
       dashComment: 'Comment -- glued to the text after it: with no space after the two dashes the review may read it as code. Put a space after --.',
       bytesPrefix: 'Bytes string (b\'...\'): the review may read it as a bit number and lose the end of the string. Use a normal string or FROM_BASE64.',
+      chainedCall: 'Chained call ((expression).function(...) or (expression).(name)(...)): the review cannot see which function runs. Write the direct call, function(expression).',
       hexPrefix: 'The letter x glued to a string (x\'...\'): the review reads it as a hex number. Separate them with a space or use another name.',
     },
   },

@@ -187,6 +187,14 @@ export class BigquerySession implements DbSession {
       if (active.cancelRequested) return { ...base, durationMs: elapsed(), error: cancelledError() };
       const refusal = this.refusal(dry);
       if (refusal) return { ...base, durationMs: elapsed(), error: refusal };
+      if (opts.estimateCeiling !== undefined && dry.totalBytesProcessed !== undefined && dry.totalBytesProcessed > opts.estimateCeiling) {
+        const params = { bytes: dry.totalBytesProcessed, ceiling: opts.estimateCeiling };
+        return {
+          ...base,
+          durationMs: elapsed(),
+          error: { message: m().agentsUi.error.bytesOverApproved(params), ref: ref('agentsUi.error.bytesOverApproved', params), code: 'bytes_over_approved' },
+        };
+      }
       const stats: StatementStats = { ...(dry.totalBytesProcessed !== undefined ? { bytesEstimated: dry.totalBytesProcessed } : {}) };
       const read = await this.run(sql, opts, active, stats);
       return { ...base, durationMs: elapsed(), ...read };

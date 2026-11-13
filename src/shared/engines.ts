@@ -9,12 +9,14 @@ export interface EngineCapabilities {
   gridEdit: boolean;
   /** The schema tree lists names first and reads the columns of one database (dataset) when it is opened. */
   lazyColumns?: boolean;
+  /** The engine answers a dry run (type and estimated bytes of a statement) before it runs. */
+  dryRun?: boolean;
 }
 
 const CAPABILITIES: Record<Engine, EngineCapabilities> = {
-  mysql: { modes: ['read-only', 'transaction', 'autocommit'], gridEdit: true, lazyColumns: false },
+  mysql: { modes: ['read-only', 'transaction', 'autocommit'], gridEdit: true, lazyColumns: false, dryRun: false },
   // BigQuery only reads in this version: no transactions, no auto-commit, no editing in the grid
-  bigquery: { modes: ['read-only'], gridEdit: false, lazyColumns: true },
+  bigquery: { modes: ['read-only'], gridEdit: false, lazyColumns: true, dryRun: true },
 };
 
 export function capabilitiesOf(engine: Engine): EngineCapabilities {

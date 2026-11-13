@@ -140,6 +140,10 @@ describe('cais llm guide', () => {
     expect(GUIDE).toContain('Você não executa, você pede');
     for (const word of ['--reason', '--wait', 'awaiting', 'Rollback', 'result_withheld', 'cais llm envs', '5  tempo']) expect(GUIDE).toContain(word.replace('awaiting', 'Commit'));
     expect(GUIDE).not.toMatch(/!/);
+    // the BigQuery section: read only, the estimate, the approval above 10 GiB and the codes
+    for (const word of ['BigQuery', 'engine_read_only', '10 GiB', 'bytes_over_approved', 'bytes_billed', 'EXTERNAL_QUERY', 'system_schema', 'ML.*, AI.*']) {
+      expect(GUIDE).toContain(word);
+    }
   });
 
   it('tells who decided and that a closed pipe keeps the exit code', () => {

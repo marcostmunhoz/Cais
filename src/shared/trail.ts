@@ -9,6 +9,10 @@ export interface TrailStatement {
   rows?: number;
   affectedRows?: number;
   errorCode?: string;
+  /** BigQuery: the job and its bytes. Never result data. */
+  jobId?: string;
+  bytesEstimated?: number;
+  bytesBilled?: number;
 }
 
 /**
@@ -46,7 +50,7 @@ export interface TrailEntry {
   affectedRows?: number;
   errorCode?: string;
   errno?: number;
-  /** BigQuery, person lines: the job's id, the bytes the dry run estimated and the bytes billed. Never result data. */
+  /** BigQuery (person lines; agent lines carry them too: the bytes summed over the request, the job id only when there was one job, and all of them per command in `statements`): the job's id, the bytes the dry run estimated and the bytes billed. Never result data. */
   jobId?: string;
   bytesEstimated?: number;
   bytesBilled?: number;

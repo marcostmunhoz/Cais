@@ -66,6 +66,8 @@ export const ptBR = {
     production: 'Produção',
     statementOne: 'comando',
     statementMany: 'comandos',
+    estimate: (p: { bytes: number }) => `${f.formatBytes(p.bytes)} estimados`,
+    billed: (p: { bytes: number }) => `${f.formatBytes(p.bytes)} faturados`,
     scrollToEnd: ' · role a lista até o fim para liberar o botão',
     writeNote:
       'Roda em transação. Depois você vê as linhas afetadas e decide Commit ou Rollback. Se algum comando gravar fora da transação, o pedido para e você fica sabendo.',
@@ -154,6 +156,16 @@ export const ptBR = {
       `Este ambiente libera escrita, mas a tabela ${p.table} tem trigger, e o que ele grava não entra na contagem de linhas: o pedido espera a sua aprovação.`,
     cascade: (p: { table: string; tables: string }) =>
       `Este ambiente libera escrita, mas a tabela ${p.table} tem chave estrangeira em cascata (${p.tables}), e essas linhas não entram na contagem: o pedido espera a sua aprovação.`,
+    bigRead: (p: { bytes: number; threshold: number }) =>
+      `Esta leitura deve ler ${f.formatBytes(p.bytes)}, acima de ${f.formatBytes(p.threshold)}: ela espera a sua aprovação, qualquer que seja o nível do ambiente.`,
+    overLimit: (p: { bytes: number; limit: number }) =>
+      `Esta leitura deve ler ${f.formatBytes(p.bytes)}, acima do limite de ${f.formatBytes(p.limit)} do ambiente: ela espera a sua aprovação, qualquer que seja o nível do ambiente.`,
+    remoteFunction: (p: { name: string }) =>
+      `O comando chama a função ${p.name}, definida no projeto: ela pode ser uma função remota, que roda código fora do BigQuery. O pedido espera a sua aprovação.`,
+    generativeAi: (p: { name: string }) =>
+      `O comando chama ${p.name}, de IA generativa ou de modelo: o custo não aparece nos bytes lidos. O pedido espera a sua aprovação.`,
+    unknownFunction: (p: { name: string }) =>
+      `O comando chama a função ${p.name}, que não é nativa do BigQuery e pode ser uma rotina do projeto (até uma função remota). O pedido espera a sua aprovação.`,
     triggersHidden: (p: { database: string }) =>
       `Este ambiente libera escrita, mas o usuário do banco não enxerga os triggers de ${p.database} (falta o privilégio TRIGGER): o pedido espera a sua aprovação.`,
   },
@@ -185,6 +197,8 @@ export const ptBR = {
     commitFailed: 'O commit falhou e o servidor desfez a transação.',
     unexpected: 'Erro inesperado ao executar o pedido.',
     timeout: 'Tempo limite para agentes esgotado.',
+    bytesOverApproved: (p: { bytes: number; ceiling: number }) =>
+      `A estimativa desta leitura passou de ${f.formatBytes(p.ceiling)}, o teto aprovado (agora ${f.formatBytes(p.bytes)}): ela não rodou. Peça de novo para a pessoa ver a nova estimativa.`,
     accessClosed: 'O acesso de agentes foi desligado ou o ambiente mudou.',
     unexpectedCommit: 'O servidor encerrou a transação durante o pedido.',
     nonTransactionalWrite: 'O comando gravou fora da transação (tabela não transacional ou do sistema): o Rollback não desfaz.',

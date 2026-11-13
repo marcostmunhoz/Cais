@@ -137,8 +137,8 @@ describe('agents on BigQuery (read only)', () => {
     await expect(q({ env: 'api/bq', sql: 'DELETE FROM orders WHERE id = 1', reason: 'x' })).rejects.toMatchObject({ name: 'AgentError' });
     expect(fake.requests).toHaveLength(0);
     fake.statementType = () => 'DELETE';
-    const res = await q({ env: 'api/bq', sql: 'SELECT 1' });
-    expect(res.status).toBe('failed');
+    // the dry run of the broker reads another type than the classifier did: refused before anything runs
+    await expect(q({ env: 'api/bq', sql: 'SELECT 1' })).rejects.toMatchObject({ code: 'writes_in_read' });
     expect(fake.realQueries).toHaveLength(0);
   });
 
@@ -211,7 +211,9 @@ describe('agents on BigQuery (read only)', () => {
   it('a read in production waits for the click, then runs', async () => {
     const res = await q({ env: 'api/bqpro', sql: 'SELECT 1', reason: 'conferir' });
     expect(res.status).toBe('pending_approval');
-    expect(fake.requests).toHaveLength(0);
+    // only the dry run went out: nothing ran
+    expect(fake.realQueries).toHaveLength(0);
+    expect(fake.dryRuns).toHaveLength(1);
     broker.approve(res.request_id, { shareResult: true });
     await broker.waitForStatus(res.request_id, (s) => s === 'succeeded', 10_000);
     expect(fake.realQueries).toHaveLength(1);

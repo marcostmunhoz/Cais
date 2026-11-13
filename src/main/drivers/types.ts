@@ -75,6 +75,11 @@ export interface ExecuteOptions {
   stopAtCap?: boolean;
   /** Upper bound of bytes the engine may bill for this statement. */
   maxBytesBilled?: number;
+  /**
+   * Refuse to run (code `bytes_over_approved`, nothing billed) when the dry run of this very run estimates more than
+   * this: the estimate someone approved has grown since. Agents' reads only.
+   */
+  estimateCeiling?: number;
   /** Read more rows of the result already computed by the previous run of the same statement, without running it again. */
   refetch?: boolean;
 }

@@ -76,11 +76,36 @@ O que a pessoa aprova no modal precisa ser o que o servidor roda. Por isso o SQL
 
 ### BigQuery (só leitura)
 
-- **Duas camadas:** o classificador do app recusa o que não é consulta antes de sair, e o driver faz um dry run de cada comando e só segue se o servidor o lê como `SELECT` (sem `statementType`, recusa). A segunda camada está dentro do driver, então vale também para quem o chama sem passar pelo `SessionManager`.
+O BigQuery não tem sessão `READ ONLY` no servidor, então as duas camadas do Somente leitura são outras: o classificador do app e o dry run. Nesta versão nenhum caminho (pessoa ou agente) escreve.
+
+- **Duas camadas:** o classificador do GoogleSQL recusa o que não é consulta antes de sair (na dúvida, recusa), e o dry run (`jobs.query` com `dryRun`) devolve o `statementType` que o servidor leu: só `SELECT` segue. Sem `statementType`, recusa. O `SessionManager` usa o dry run para recusar antes de sair e para a pergunta de custo; o driver repete o dry run dentro de `execute`, então a segunda camada vale também para quem o chama sem passar pelo `SessionManager`. Um dry run que falha (tabela que não existe, sem permissão) não decide nada: o erro aparece na execução.
 - **Agentes não escrevem:** `--write` num ambiente BigQuery é recusado com `engine_read_only` no broker, e `AgentSessions.runWrite` recusa de novo; nenhum modo de escrita chega ao driver.
-- **Token:** o token de acesso vem de `gcloud auth print-access-token`, fica em memória (50 minutos), vai só no cabeçalho `Authorization` das chamadas ao `bigquery.googleapis.com` feitas pelo processo principal e nunca entra em log, em mensagem de erro nem na resposta a agentes. Com 401, o driver pede outro uma vez e repete.
-- **Redação para agentes:** erros do BigQuery chegam ao agente sem o id do projeto e sem e-mails de conta.
-- **O que ainda depende de verificação no servidor de verdade** (suíte ao vivo, `npm run live:bigquery`): se o dry run de `jobs.query` traz sempre `statementType` para todas as classes de comando, e o efeito de `maximumBytesBilled` em projeto com reserva de slots.
+- **Texto do SQL:** o que a pessoa aprova no modal precisa ser o que o servidor roda. No GoogleSQL isso pede regras próprias, em `agentCodeProblem` e no classificador (veja abaixo).
+- **Custo:** o limite de bytes do ambiente e os 10 GiB fixos dos agentes (o menor dos dois, quando o ambiente tem limite) viram `maximumBytesBilled` do job, então o BigQuery recusa sem cobrar o que passar do teto. Detalhes em [comportamento.md](comportamento.md#bigquery-só-leitura) e [agentes.md](agentes.md#bigquery).
+- **Token:** o token de acesso vem de `gcloud auth print-access-token` e é um token OAuth de 1 hora. O Cais o guarda só em memória, por 50 minutos, vai só no cabeçalho `Authorization` das chamadas ao `bigquery.googleapis.com` feitas pelo processo principal e nunca entra em log, em mensagem de erro, na Trilha nem na resposta a agentes. Com 401, o driver pede outro uma vez e repete.
+- **Rede:** só o processo principal fala com a API (`net.fetch` do Electron: proxy e certificados do sistema). O gancho `CAIS_BIGQUERY_URL` troca o endereço só no app não empacotado.
+- **Redação para agentes:** erros e textos do BigQuery chegam ao agente sem o id do projeto e sem e-mails de conta ou de service account. Os e-mails são tirados antes do id do projeto, porque o domínio de uma service account carrega o id.
+
+**Regras de texto de agente no GoogleSQL** (somadas às gerais):
+
+- São recusados (`ambiguous_text`), porque o realce do modal não os lê como o servidor: strings de três aspas (`'''…'''`, `"""…"""`), string crua (`r'…'`) com barra invertida, string de bytes (`b'…'`), letra `x` colada numa string, nome entre crases com barra invertida, `--` sem espaço depois, comentário com outro `/*` dentro, CR dentro de comentário de linha, nome de parâmetro entre aspas ou crases e caractere fora do ASCII no código, fora de strings, de nomes entre crases e de comentários.
+- `#legacySQL` e `#standardSQL` são recusados (`ambiguous_text`; `executable_comment` quando chega à política): a diretiva muda como o servidor lê o texto inteiro.
+- `EXTERNAL_QUERY` é recusado (`function_not_allowed`): roda uma consulta em outro banco. `OBJ.GET_ACCESS_URL`, `OBJ.MAKE_REF` e `OBJ.FETCH_METADATA` também: a URL assinada do Cloud Storage (de escrita, no modo `rw`) é credencial que o agente não recebe.
+- A chamada encadeada (`(x).f()`, `(x).(ds.f)()`) é `ambiguous_text`: o classificador só vê chamadas escritas como `f(x)`, e uma função remota ou de IA passaria sem aprovação.
+- `INFORMATION_SCHEMA.JOBS*` e `SESSIONS*` são recusados (`system_schema`): mostram o SQL de outras pessoas do projeto. Agentes também não escrevem no `INFORMATION_SCHEMA`.
+- Esperam aprovação, com `approval_reason`: chamada de função definida no projeto (pode ser uma função remota, que roda código fora do BigQuery), função sem qualificador que não é nativa e `ML.*`/`AI.*` (IA generativa e modelos, que custam além dos bytes). A lista de funções nativas (`src/shared/dialects/bigquery/functions.ts`) é escrita à mão e erra para o lado de pedir aprovação.
+- Leitura estimada acima de 10 GiB (a soma dos comandos do pedido), ou acima do limite do ambiente quando ele é menor, sempre espera a pessoa, em qualquer nível, sob a liberação de 15 minutos e em ambiente sem limite.
+
+**Limites conhecidos do BigQuery:**
+
+- **Função remota e IA generativa dentro de um `SELECT`.** Uma chamada qualificada ou sem qualificador que o Cais não reconhece como nativa vai para aprovação, mas o que a pessoa aprova é o texto: a função remota roda código fora do BigQuery e `ML.GENERATE_*` custa fora dos bytes lidos, e nenhum dos dois é contido pelo limite de bytes.
+- **A estimativa pode errar.** O dry run estima; o custo real pode diferir (o cache, o armazenamento em coluna, uma tabela que cresce). O Cais repete o dry run antes de rodar e o job leva `maximumBytesBilled`, que é o que impede o excesso. Um agente que passou do teto aprovado recebe `bytes_over_approved` e nada é cobrado. A soma vale por pedido: não há janela entre pedidos, e vários pedidos de até 10 GiB cada, sem aprovação, somam além disso (limite conhecido, no plano).
+- **`maximumBytesBilled` sob reserva de slots.** Num projeto com reserva (capacidade fixa), o teto de bytes pode não se aplicar, e a cobrança é por slot, não por byte. Isso não foi conferido num projeto de verdade; o campo vazio existe para esse caso, e o limite fica sendo só uma confirmação.
+- **`INFORMATION_SCHEMA` é cobrado.** Uma consulta do usuário a `INFORMATION_SCHEMA` custa como qualquer outra (com mínimo por consulta) e passa pelo mesmo limite. A árvore do Cais não o usa: lê colunas por `tables.get`, que não cobra.
+- **O `LIMIT` não reduz os bytes lidos.** `SELECT * … LIMIT 100` lê a tabela inteira (ou as partições que o filtro não excluir). Por isso o duplo clique numa tabela passa pelo limite.
+- **`statementType` do servidor.** A segunda camada depende de o dry run dizer o tipo. A suíte ao vivo (`npm run live:bigquery`) confere, contra um projeto de verdade, que tudo o que o classificador deixa passar o servidor lê como `SELECT`; ela não faz parte de `npm run check` e ainda não foi rodada.
+- **Token de 1 hora em memória** (veja acima): um processo do mesmo usuário que consiga ler a memória do Cais, ou rodar `gcloud auth print-access-token` ele mesmo, fala com o BigQuery como a pessoa, fora do Cais. É o mesmo limite do `gcloud sql generate-login-token` no MySQL.
+- **Permissões da conta.** O Cais lê com a conta da credencial: use uma conta (ou service account impersonada) só com `roles/bigquery.jobUser` no projeto e `roles/bigquery.dataViewer` nos datasets de que o trabalho precisa. Um agente lê tudo o que essa conta lê.
 
 ## Isolamento do canal dos agentes
 

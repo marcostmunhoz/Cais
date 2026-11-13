@@ -193,6 +193,25 @@ export function nameParts(tok: Tok): string[] {
  *   a reading with MySQL's rules (no space after the dashes is not a comment; `b'` opens a bit literal) differs.
  * The text goes to the agent that sent the SQL, so it is in `AGENT_LOCALE` (pt-BR, fixed) unless asked otherwise.
  */
+/**
+ * The GoogleSQL chained call, `(x).fn()` or `(x).(ds.fn)()`: the function is named after the expression, where the
+ * path scan of the classifier does not look for calls. Refused for agents (when in doubt, refuse): a "." that does not
+ * follow a name and leads to a call, or a ")" glued to a "(".
+ */
+function isChainedCall(tokens: Tok[], k: number): boolean {
+  const tk = tokens[k]!;
+  const isP = (t: Tok | undefined, p: string): boolean => t !== undefined && t.kind === 'punct' && t.text === p;
+  const isN = (t: Tok | undefined): boolean => t !== undefined && (t.kind === 'word' || t.kind === 'ident');
+  if (tk.text === ')') return isP(tokens[k + 1], '(');
+  if (tk.text !== '.') return false;
+  if (isP(tokens[k + 1], '(')) return true;
+  if (isN(tokens[k - 1])) return false;
+  let j = k + 1;
+  if (!isN(tokens[j])) return false;
+  while (isP(tokens[j + 1], '.') && isN(tokens[j + 2])) j += 2;
+  return isP(tokens[j + 1], '(');
+}
+
 export function agentCodeProblem(text: string, locale: Locale = AGENT_LOCALE): string | null {
   const msg = messagesFor(locale).dialect.bigquery.agentCode;
   const tokens = lex(text, true);
@@ -230,6 +249,7 @@ export function agentCodeProblem(text: string, locale: Locale = AGENT_LOCALE): s
         if ((tk.text === 'x' || tk.text === 'X') && isQuote(text[tk.end]) && text[tk.end] === "'") return msg.hexPrefix;
         break;
       case 'punct': {
+        if (isChainedCall(tokens, k)) return msg.chainedCall;
         const code = tk.text.codePointAt(0)!;
         if (code > 0x7f) {
           return msg.nonAsciiCode({ marker: `⟨U+${code.toString(16).toUpperCase().padStart(4, '0')}⟩`, char: tk.text });

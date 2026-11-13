@@ -30,10 +30,12 @@ export function formatElapsed(ms: number): string {
   return `${s}s`;
 }
 
-const NUMERIC = new Set(['tinyint', 'smallint', 'mediumint', 'int', 'bigint', 'decimal', 'float', 'double', 'year']);
+// MySQL (as the server names them) and BigQuery (INT64 and NUMERIC, written in capitals, FLOAT64 and BIGNUMERIC)
+const NUMERIC = new Set(['tinyint', 'smallint', 'mediumint', 'int', 'bigint', 'decimal', 'float', 'double', 'year', 'int64', 'numeric', 'bignumeric', 'float64']);
 
+/** Numbers are aligned to the right in the grid. A type with parameters (`NUMERIC(10, 2)`) counts by its name. */
 export function isNumericType(type: string): boolean {
-  return NUMERIC.has(type);
+  return NUMERIC.has(type.replace(/\(.*$/, '').trim().toLowerCase());
 }
 
 /** Plain text of a cell (NULL as empty, binary as 0x...). */
