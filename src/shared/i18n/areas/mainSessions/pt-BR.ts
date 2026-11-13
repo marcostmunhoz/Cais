@@ -32,6 +32,7 @@ export const ptBR = {
   lostWithTransaction: (p: { count: number }) =>
     `A conexão caiu e o servidor desfez a transação aberta (${f.count(p.count, statements)}).`,
   setModeRunning: 'Aguarde o comando terminar para trocar o modo.',
+  modeNotSupported: (p: { mode: string; engine: string }) => `O modo ${p.mode} não vale para ${p.engine}.`,
   setModeTransaction: 'Faça commit ou rollback antes de trocar o modo.',
   beginNeedsTransactionMode: 'Use o modo Transação da aba para abrir uma transação.',
   readOnlyRefused: 'Somente leitura: este comando não é permitido.',

@@ -32,6 +32,7 @@ export const ptBR = {
     transaction: 'Transação',
     autocommit: 'Auto-commit',
   },
+  modeUnsupported: (p: { engine: string }) => `${p.engine} não aceita este modo.`,
   cancel: 'Cancelar',
   run: 'Rodar',
   txOpen: (p: { statements: number; elapsed: string }) =>

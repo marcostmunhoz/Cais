@@ -34,7 +34,7 @@ beforeAll(async () => {
   ];
   const clock = new FakeClock();
   sessions = new AgentSessions({
-    getDriver: () => mysqlDriver, getDialect, scheduler: clock,
+    getDriver: () => mysqlDriver, scheduler: clock,
     resolveConnectParams: async (e) => {
       const o = overrides[e.id];
       if (o === 'cred-error') throw new CaisError('Falha do gcloud: token ya29.SECRETTOKEN para conta x@y.com');

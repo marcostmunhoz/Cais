@@ -7,7 +7,7 @@ const dialect = getDialect('mysql');
 const analyze = (sql: string) => dialect.splitStatements(sql).map((s) => ({ text: s.text, c: dialect.classify(s.text) }));
 
 function d(sql: string, over: Partial<DecideInput> = {}) {
-  return decide({ mode: 'read', production: false, statements: analyze(sql), reason: undefined, pendingCount: 0, grantActive: false, ...over });
+  return decide({ mode: 'read', production: false, statements: analyze(sql), rules: dialect.agentRules, reason: undefined, pendingCount: 0, grantActive: false, ...over });
 }
 
 describe('decide(): the policy table', () => {
@@ -102,5 +102,52 @@ describe('dialect warnings', () => {
     expect(w('SELECT 1')).toEqual([]);
     expect(w('INSERT INTO t SELECT * FROM u')).toEqual([]);
     expect(w('/* where */ DELETE FROM cards')).toEqual(['DELETE sem WHERE']);
+  });
+});
+
+describe('decide(): the rules come from the dialect', () => {
+  const rules = {
+    ...dialect.agentRules,
+    systemSchemas: ['meta'],
+    secretSchemas: ['vault'],
+    deniedFunctions: ['FORBIDDEN_FN'],
+    writeVerbs: ['INSERT'],
+    messages: { systemSchemaWrite: 'sem escrita em meta', systemSchemaRead: 'sem leitura em vault' },
+  };
+  const withIds = (sql: string) => dialect.splitStatements(sql).map((s) => ({ text: s.text, c: dialect.classify(s.text), ids: dialect.identifiers(s.text) }));
+  it('refuses with the engine\'s own system schemas and messages', () => {
+    expect(d('', { statements: withIds('INSERT INTO meta.t VALUES (1)'), mode: 'write', reason: 'r', rules })).toEqual({
+      action: 'refuse', code: 'system_schema', message: 'sem escrita em meta',
+    });
+    expect(d('', { statements: withIds('SELECT * FROM vault.t'), rules })).toEqual({ action: 'refuse', code: 'system_schema', message: 'sem leitura em vault' });
+    // names of another engine mean nothing here
+    expect(d('', { statements: withIds('SELECT * FROM mysql.user'), rules })).toEqual({ action: 'run' });
+  });
+  it('uses the engine\'s denied functions and write verbs', () => {
+    expect(d('SELECT FORBIDDEN_FN(1)', { rules })).toMatchObject({ action: 'refuse', code: 'function_not_allowed' });
+    expect(d('SELECT SLEEP(1)', { rules })).toEqual({ action: 'run' });
+    expect(d('UPDATE t SET a = 1 WHERE id = 1', { mode: 'write', reason: 'r', rules })).toMatchObject({ action: 'refuse', code: 'command_not_allowed' });
+    expect(d('INSERT INTO t VALUES (1)', { mode: 'write', reason: 'r', rules })).toEqual({ action: 'approve' });
+  });
+  it('the MySQL dialect carries the values policy.ts had, and the same messages', () => {
+    const r = dialect.agentRules;
+    expect(r.systemSchemas).toEqual(['mysql', 'performance_schema', 'sys', 'information_schema']);
+    expect(r.secretSchemas).toEqual(['mysql']);
+    expect(r.deniedFunctions).toEqual(['GET_LOCK', 'RELEASE_LOCK', 'RELEASE_ALL_LOCKS', 'SLEEP', 'BENCHMARK', 'LOAD_FILE']);
+    expect(r.writeVerbs).toEqual(['INSERT', 'REPLACE', 'UPDATE', 'DELETE']);
+    expect(r.messages.systemSchemaWrite).toBe('Agentes não escrevem nos esquemas do sistema (mysql, performance_schema, sys, information_schema).');
+    expect(r.messages.systemSchemaRead).toBe('Agentes não leem o esquema mysql (contas e hashes de senha).');
+  });
+  it('isValidDatabaseName: up to 64 characters, no backtick, newline or hidden text', () => {
+    const ok = dialect.agentRules.isValidDatabaseName;
+    expect(ok('app')).toBe(true);
+    expect(ok('a'.repeat(64))).toBe(true);
+    expect(ok('a'.repeat(65))).toBe(false);
+    expect(ok('a`b')).toBe(false);
+    expect(ok('a\nb')).toBe(false);
+    expect(ok('a‮b')).toBe(false);
+  });
+  it('tablePreviewSql and the target key', () => {
+    expect(dialect.tablePreviewSql('app', 'us`ers')).toBe('SELECT * FROM `app`.`us``ers` LIMIT 100;');
   });
 });

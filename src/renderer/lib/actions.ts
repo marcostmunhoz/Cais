@@ -1,4 +1,5 @@
 import { getDialect } from '@shared/dialects/registry';
+import { capabilitiesOf, initialModeFor } from '@shared/engines';
 import { DEFAULT_MAX_ROWS, EXTENDED_MAX_ROWS } from '@shared/model';
 import type { AgentsSnapshot, ApproveOptions } from '@shared/agents';
 import type { Environment, SavedScript, SessionMode, TabState } from '@shared/model';
@@ -45,7 +46,8 @@ export function findEnvironment(id: string): Environment | undefined {
 }
 
 export function initialMode(env: Environment | undefined): SessionMode {
-  return env?.production ? 'read-only' : 'autocommit';
+  const engine = env?.engine ?? 'mysql';
+  return initialModeFor(capabilitiesOf(engine), !!env?.production);
 }
 
 export function effectiveMode(tabId: string): SessionMode {
@@ -787,7 +789,7 @@ export async function cancelQuit(): Promise<void> {
 
 export function openTableTab(environmentId: string, database: string, table: string): void {
   const dialect = getDialect(findEnvironment(environmentId)?.engine ?? 'mysql');
-  const sql = `SELECT * FROM ${dialect.quoteIdent(database)}.${dialect.quoteIdent(table)} LIMIT 100;`;
+  const sql = dialect.tablePreviewSql(database, table);
   openTab(environmentId, { sql, database, run: true });
 }
 
@@ -827,7 +829,11 @@ export function editabilityOf(tabId: string, result: StatementResult): Editabili
   const tab = s.tabs.find((t) => t.id === tabId);
   const env = tab ? findEnvironment(tab.environmentId) : undefined;
   const schema = env ? s.schemas[env.id] : undefined;
-  return gridEditability(result, schema?.status === 'ready' ? schema.tree : undefined, getDialect(env?.engine ?? 'mysql').valueKind);
+  const engine = env?.engine ?? 'mysql';
+  return gridEditability(result, schema?.status === 'ready' ? schema.tree : undefined, getDialect(engine).valueKind, {
+    gridEdit: capabilitiesOf(engine).gridEdit,
+    name: getDialect(engine).displayName,
+  });
 }
 
 /** Sets (or, with `undefined`, removes) the new value of one cell. Typing the original value back removes the edit. */

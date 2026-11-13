@@ -23,7 +23,7 @@ function makeRootRig(): Rig {
   const envs = [base, { ...base, id: 'e-pro', name: 'pro', production: true }];
   const clock = new FakeClock();
   const sessions = new AgentSessions({
-    getDriver: () => mysqlDriver, getDialect,
+    getDriver: () => mysqlDriver,
     resolveConnectParams: async (e) => rootParams({ host: e.host, port: e.port }),
     scheduler: clock,
   });

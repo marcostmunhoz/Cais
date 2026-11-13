@@ -353,7 +353,7 @@ async function bootstrap(): Promise<void> {
       get: (id) => scripts.get(id),
       save: (input, by) => scripts.save(input, by),
     },
-    executor: new AgentSessions({ getDriver, getDialect, resolveConnectParams: resolveParams }),
+    executor: new AgentSessions({ getDriver, resolveConnectParams: resolveParams }),
     audit,
     getDialect,
     onChange: () => pushAgents(),

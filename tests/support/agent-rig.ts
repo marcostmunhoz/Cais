@@ -26,7 +26,7 @@ export function makeRig(opts: { envs?: Environment[]; user?: string; password?: 
   const envs = opts.envs ?? [base, { ...base, id: 'e-pro', name: 'pro', production: true }];
   const clock = new FakeClock();
   const sessions = new AgentSessions({
-    getDriver: () => mysqlDriver, getDialect,
+    getDriver: () => mysqlDriver,
     resolveConnectParams: async (e) => params({ host: e.host, port: e.port, ...(e.defaultDatabase ? { database: e.defaultDatabase } : {}), ...(opts.user ? { user: opts.user, password: opts.password ?? '' } : {}) }),
     scheduler: clock,
   });

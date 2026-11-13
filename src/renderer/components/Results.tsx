@@ -3,6 +3,7 @@ import { defaultRangeExtractor, useVirtualizer, type Range } from '@tanstack/rea
 import { ChevronDown, Copy, PanelRight, X } from 'lucide-react';
 import type { CellValue, ColumnMeta, StatementResult } from '@shared/results';
 import { getDialect } from '@shared/dialects/registry';
+import { capabilitiesOf } from '@shared/engines';
 import { cellInputText, cellLock, gridEditability, parseCellInput, pendingCount, type EditTarget, type PendingCells } from '@shared/grid';
 import {
   applyEdits,
@@ -451,7 +452,7 @@ export function Results({ tabId }: { tabId: string }) {
     if (fromTable && schemaStatus === undefined && environmentId) void loadSchema(environmentId);
   }, [fromTable, schemaStatus, environmentId]);
   const target = useMemo(
-    () => (active && columns ? gridEditability(active, schemaTree, getDialect(engine).valueKind) : null),
+    () => (active && columns ? gridEditability(active, schemaTree, getDialect(engine).valueKind, { gridEdit: capabilitiesOf(engine).gridEdit, name: getDialect(engine).displayName }) : null),
     [active, columns, schemaTree, engine],
   );
   // a table created or changed after the schema was read: read it again, once per result

@@ -32,6 +32,7 @@ export const en: Shape<typeof ptBR> = {
   lostWithTransaction: (p) =>
     `The connection dropped and the server rolled back the open transaction (${f.count(p.count, statements)}).`,
   setModeRunning: 'Wait for the statement to finish before changing the mode.',
+  modeNotSupported: (p) => `${p.mode} mode is not available for ${p.engine}.`,
   setModeTransaction: 'Commit or roll back before changing the mode.',
   beginNeedsTransactionMode: 'Use the tab’s Transaction mode to open a transaction.',
   readOnlyRefused: 'Read-only: this statement is not allowed.',

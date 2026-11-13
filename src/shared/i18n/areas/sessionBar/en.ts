@@ -31,6 +31,7 @@ export const en: Shape<typeof ptBR> = {
     transaction: 'Transaction',
     autocommit: 'Auto-commit',
   },
+  modeUnsupported: (p) => `${p.engine} does not support this mode.`,
   cancel: 'Cancel',
   run: 'Run',
   txOpen: (p) => `Transaction open · ${f.count(p.statements, { one: 'statement', other: 'statements' })} · ${p.elapsed}`,

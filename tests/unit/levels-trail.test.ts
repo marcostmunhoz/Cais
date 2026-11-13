@@ -25,7 +25,7 @@ afterEach(() => rmSync(dir, { recursive: true, force: true }));
 const dialect = getDialect('mysql');
 const plan = (sql: string): ClassifiedStatement[] =>
   dialect.splitStatements(sql).map((s) => ({ text: s.text, c: dialect.classify(s.text), ids: dialect.identifiers(s.text) }));
-const base = { pendingCount: 0, grantActive: false };
+const base = { pendingCount: 0, grantActive: false, rules: dialect.agentRules };
 
 describe('policy: the level of the environment', () => {
   const read = plan('SELECT 1');
@@ -859,6 +859,14 @@ class FakeSession implements DbSession {
   database: string | null = 'app';
   inTx = false;
   async applyMode() {}
+  useDatabase(name: string): Promise<StatementResult> {
+    return this.execute(`USE ${'`' + name.replace(/`/g, '``') + '`'}`);
+  }
+
+  async transactionProbe(): Promise<boolean | undefined> {
+    return (await this.execute('DO 0').catch(() => undefined))?.inTransaction;
+  }
+
   async execute(sql: string): Promise<StatementResult> {
     if (/^\s*UPDATE/i.test(sql)) {
       this.inTx = true;

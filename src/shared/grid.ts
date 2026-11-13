@@ -83,8 +83,11 @@ export function gridEditability(
   result: ResultLike,
   schema: SchemaTree | undefined,
   valueKind: Dialect['valueKind'],
+  /** The engine's `gridEdit` capability and its name for the reason; absent means the engine edits. */
+  engine?: { gridEdit: boolean; name: string },
 ): Editability {
   const refuse = (reason: MessageRef): Editability => ({ editable: false, reason });
+  if (engine && !engine.gridEdit) return refuse(ref('grid.reason.engineNoEdit', { engine: engine.name }));
   const columns = result.columns;
   if (result.error || result.kind !== 'read' || !READ_VERBS.has(result.verb) || !columns) return refuse(ref('grid.reason.notRead'));
 

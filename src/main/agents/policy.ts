@@ -1,4 +1,4 @@
-import type { Classification } from '@shared/dialects/types';
+import type { AgentRules, Classification } from '@shared/dialects/types';
 import { MAX_PENDING, type AgentMode } from '@shared/agents';
 import type { AgentLevel } from '@shared/model';
 
@@ -43,6 +43,8 @@ export interface DecideInput {
   grantActive: boolean;
   /** --database, as given. */
   database?: string;
+  /** The engine's rules (dialect.agentRules): its system schemas, denied functions and write verbs. */
+  rules: AgentRules;
 }
 
 /**
@@ -61,16 +63,7 @@ export const MESSAGES = {
   functionNotAllowed: (name: string): string =>
     `A função ${name} não é permitida para agentes (lock nomeado, espera, arquivo do servidor ou estado do servidor).`,
   hint: 'Agentes não usam hints que mudam variáveis de sessão (SET_VAR, MAX_EXECUTION_TIME).',
-  systemSchemaWrite: 'Agentes não escrevem nos esquemas do sistema (mysql, performance_schema, sys, information_schema).',
-  systemSchemaRead: 'Agentes não leem o esquema mysql (contas e hashes de senha).',
 } as const;
-
-/** Functions agents never call: named locks (they outlive the request), waits that hold a connection, server files. */
-const AGENT_DENIED_FUNCTIONS = new Set(['GET_LOCK', 'RELEASE_LOCK', 'RELEASE_ALL_LOCKS', 'SLEEP', 'BENCHMARK', 'LOAD_FILE']);
-const SYSTEM_SCHEMAS = new Set(['mysql', 'performance_schema', 'sys', 'information_schema']);
-
-/** Verbs an agent may run as writes (always inside a transaction, always approved). */
-const AGENT_WRITE_VERBS = new Set(['INSERT', 'REPLACE', 'UPDATE', 'DELETE']);
 
 /** DDL, anything with an implicit commit, and transaction control: never for agents, in any mode. */
 function isForbidden(c: Classification): boolean {
@@ -90,7 +83,9 @@ function isForbidden(c: Classification): boolean {
  * nothing the client says about the SQL is trusted.
  */
 export function decide(input: DecideInput): Decision {
-  const { mode, statements } = input;
+  const { mode, statements, rules } = input;
+  const deniedFunctions = new Set(rules.deniedFunctions);
+  const writeVerbs = new Set(rules.writeVerbs);
   if (statements.length === 0) return { action: 'refuse', code: 'empty_sql', message: MESSAGES.empty };
 
   // what the person reviews must be what the server runs
@@ -98,7 +93,7 @@ export function decide(input: DecideInput): Decision {
     return { action: 'refuse', code: 'executable_comment', message: MESSAGES.executableComment };
   }
   for (const s of statements) {
-    const denied = s.c.serverStateFunction ?? s.c.functions?.find((f) => AGENT_DENIED_FUNCTIONS.has(f));
+    const denied = s.c.serverStateFunction ?? s.c.functions?.find((f) => deniedFunctions.has(f));
     if (denied) return { action: 'refuse', code: 'function_not_allowed', message: MESSAGES.functionNotAllowed(denied.replace(/^#NON_ASCII:/, '')) };
     if (s.c.setVarHint) return { action: 'refuse', code: 'function_not_allowed', message: MESSAGES.hint };
   }
@@ -107,9 +102,9 @@ export function decide(input: DecideInput): Decision {
     const set = names instanceof Set ? names : new Set(names);
     return (database !== undefined && set.has(database)) || statements.some((s) => (s.ids ?? []).some((id) => set.has(id)));
   };
-  if (mode === 'write' && touches(SYSTEM_SCHEMAS)) return { action: 'refuse', code: 'system_schema', message: MESSAGES.systemSchemaWrite };
-  if (touches(['mysql']) || statements.some((s) => s.c.accountSecrets)) {
-    return { action: 'refuse', code: 'system_schema', message: MESSAGES.systemSchemaRead };
+  if (mode === 'write' && touches(rules.systemSchemas)) return { action: 'refuse', code: 'system_schema', message: rules.messages.systemSchemaWrite };
+  if (touches(rules.secretSchemas) || statements.some((s) => s.c.accountSecrets)) {
+    return { action: 'refuse', code: 'system_schema', message: rules.messages.systemSchemaRead };
   }
 
   if (statements.some((s) => isForbidden(s.c))) {
@@ -119,7 +114,7 @@ export function decide(input: DecideInput): Decision {
     if (statements.some((s) => !s.c.allowedInReadOnly)) {
       return { action: 'refuse', code: 'writes_in_read', message: MESSAGES.writes };
     }
-  } else if (statements.some((s) => !s.c.allowedInReadOnly && !(s.c.kind === 'write' && AGENT_WRITE_VERBS.has(s.c.verb)))) {
+  } else if (statements.some((s) => !s.c.allowedInReadOnly && !(s.c.kind === 'write' && writeVerbs.has(s.c.verb)))) {
     return { action: 'refuse', code: 'command_not_allowed', message: MESSAGES.notAllowed };
   }
 

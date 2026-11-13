@@ -22,6 +22,14 @@ class FakeSession implements DbSession {
   async applyMode(mode: string) {
     this.modes.push(mode);
   }
+  useDatabase(name: string): Promise<StatementResult> {
+    return this.execute(`USE ${'`' + name.replace(/`/g, '``') + '`'}`);
+  }
+
+  async transactionProbe(): Promise<boolean | undefined> {
+    return (await this.execute('DO 0').catch(() => undefined))?.inTransaction;
+  }
+
   async execute(sql: string): Promise<StatementResult> {
     this.executed.push(sql);
     if (this.nextError) {
@@ -763,5 +771,57 @@ describe('SessionManager: switching the environment of a tab', () => {
     await opening;
     for (const s of sessions) expect(s.closed).toBe(true);
     expect(manager.state('t').status).toBe('disconnected');
+  });
+});
+
+describe('SessionManager: engine capabilities', () => {
+  const readOnlyEngine = { modes: ['read-only'] as const, gridEdit: false };
+  const noAutocommit = { modes: ['transaction', 'read-only'] as const, gridEdit: false };
+
+  it('opens a tab in the engine\'s only mode, even outside production', async () => {
+    const restricted = makeManager({ capabilitiesOf: () => readOnlyEngine });
+    expect((await restricted.open('t', 'dev')).mode).toBe('read-only');
+    expect(sessions[0]!.modes).toEqual(['read-only']);
+  });
+
+  it('falls back to the first accepted mode when Auto-commit is not accepted', async () => {
+    const restricted = makeManager({ capabilitiesOf: () => noAutocommit });
+    expect((await restricted.open('t', 'dev')).mode).toBe('transaction');
+    expect((await restricted.open('p', 'pro')).mode).toBe('read-only');
+  });
+
+  it('open() refuses a requested mode the engine does not accept, without connecting', async () => {
+    const restricted = makeManager({ capabilitiesOf: () => readOnlyEngine });
+    await expect(restricted.open('t', 'dev', { mode: 'autocommit' })).rejects.toMatchObject({ code: 'mode-not-supported' });
+    expect(sessions).toHaveLength(0);
+    expect(restricted.state('t').status).toBe('disconnected');
+  });
+
+  it('setMode() refuses a mode the engine does not accept and leaves the mode alone', async () => {
+    const restricted = makeManager({ capabilitiesOf: () => readOnlyEngine });
+    await restricted.open('t', 'dev');
+    await expect(restricted.setMode('t', 'transaction')).rejects.toMatchObject({ code: 'mode-not-supported' });
+    await expect(restricted.setMode('t', 'autocommit', { confirmed: true })).rejects.toMatchObject({ code: 'mode-not-supported' });
+    expect(restricted.state('t').mode).toBe('read-only');
+    expect(sessions[0]!.modes).toEqual(['read-only']);
+  });
+
+  it('keeps today\'s behavior for MySQL: the three modes, Auto-commit first outside production', async () => {
+    expect(SessionManager.initialMode({ engine: 'mysql', production: false })).toBe('autocommit');
+    expect(SessionManager.initialMode({ engine: 'mysql', production: true })).toBe('read-only');
+    await manager.open('t', 'dev');
+    expect((await manager.setMode('t', 'read-only')).session.mode).toBe('read-only');
+  });
+});
+
+describe('SessionManager: useDatabase goes through the session', () => {
+  it('records the same trail line as before (USE, verb USE, kind session)', async () => {
+    const lines: PersonTrailLine[] = [];
+    const m = makeManager({ trail: { append: (l) => lines.push(l) } });
+    await m.open('t', 'dev');
+    const state = await m.useDatabase('t', 'we`ird');
+    expect(sessions[0]!.executed).toEqual(['USE `we``ird`']);
+    expect(state.database).toBe('we`ird');
+    expect(lines.at(-1)).toMatchObject({ event: 'statement', sql: 'USE `we``ird`', verb: 'USE', kind: 'session', state: 'ok' });
   });
 });

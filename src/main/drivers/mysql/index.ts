@@ -35,7 +35,8 @@ async function withShortConnection<T>(
 export const mysqlDriver: Driver = {
   engine: 'mysql',
   open: (params) => openMysqlSession(params),
-  introspect: (params) => withShortConnection(params, readSchema),
+  // the scope is ignored: MySQL reads every database and column at once
+  introspect: (params, _scope) => withShortConnection(params, readSchema),
   test: (params) =>
     withShortConnection(params, async (conn) => {
       const { rows } = await query(conn, 'SELECT VERSION()');

@@ -5,6 +5,7 @@ const f = createFormat('pt-BR');
 /** Area "grid", pt-BR (the reference catalog: `en.ts` must follow its shape). */
 export const ptBR = {
   reason: {
+    engineNoEdit: (p: { engine: string }) => `${p.engine} não aceita edição na grade.`,
     notRead: 'Edição na grade só para o resultado de um SELECT.',
     noTable: 'Edição na grade só para resultado de uma tabela: as colunas deste resultado não vêm de uma tabela.',
     severalTables: (p: { tables: string }) => `Edição na grade só para resultado de uma tabela (este vem de ${p.tables}).`,

@@ -41,7 +41,7 @@ beforeAll(async () => {
   pro = { ...base, id: 'e-pro', name: 'pro', production: true };
   deadPort = { ...base, id: 'e-dead', name: 'hml', port: 1 }; // nothing listens there
   clock = new FakeClock();
-  sessions = new AgentSessions({ getDriver: () => mysqlDriver, getDialect, resolveConnectParams: async (e) => params({ host: e.host, port: e.port }), scheduler: clock });
+  sessions = new AgentSessions({ getDriver: () => mysqlDriver, resolveConnectParams: async (e) => params({ host: e.host, port: e.port }), scheduler: clock });
   let seq = 0;
   broker = new AgentBroker({
     now: () => clock.now,

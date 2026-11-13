@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { AlertTriangle, Clock, Play, PlugZap, Save, Square, Unplug } from 'lucide-react';
 import { connectionView } from '@shared/connection';
 import { getDialect } from '@shared/dialects/registry';
+import { capabilitiesOf } from '@shared/engines';
 import type { SessionMode } from '@shared/model';
 import { isScriptDirty } from '@shared/scripts';
 import { shortcutText } from '@shared/shortcuts';
@@ -21,6 +22,7 @@ import { formatElapsed } from '../lib/format';
 import { m } from '../lib/i18n';
 import { useStore } from '../lib/store';
 
+// every mode the app knows, in the order shown; the ones the engine does not accept are disabled
 const MODES: SessionMode[] = ['read-only', 'transaction', 'autocommit'];
 
 export function SessionBar({ tabId, platform }: { tabId: string; platform: string }) {
@@ -100,18 +102,22 @@ export function SessionBar({ tabId, platform }: { tabId: string; platform: strin
           ))}
         </select>
         <div className="seg" role="radiogroup" aria-label={t.modeGroup}>
-          {MODES.map((option) => (
-            <button
-              key={option}
-              role="radio"
-              aria-checked={mode === option}
-              className={mode === option ? 'on' : ''}
-              disabled={busy}
-              onClick={() => void changeMode(tabId, option)}
-            >
-              {t.mode[option]}
-            </button>
-          ))}
+          {MODES.map((option) => {
+            const supported = capabilitiesOf(env.engine).modes.includes(option);
+            return (
+              <button
+                key={option}
+                role="radio"
+                aria-checked={mode === option}
+                className={mode === option ? 'on' : ''}
+                disabled={busy || !supported}
+                {...(supported ? {} : { title: t.modeUnsupported({ engine: getDialect(env.engine).displayName }) })}
+                onClick={() => void changeMode(tabId, option)}
+              >
+                {t.mode[option]}
+              </button>
+            );
+          })}
         </div>
         <span className="spacer" />
         <button

@@ -41,6 +41,15 @@ export interface StatementError {
   fatal?: boolean; // the connection is gone
 }
 
+/** What the engine says a statement cost, for engines that bill by what they read. MySQL sends none. */
+export interface StatementStats {
+  bytesProcessed?: number;
+  bytesBilled?: number;
+  bytesEstimated?: number;
+  cacheHit?: boolean;
+  jobId?: string;
+}
+
 export interface StatementResult {
   index: number;
   sql: string;
@@ -58,6 +67,7 @@ export interface StatementResult {
   inTransaction?: boolean;
   /** Something the person must know about what the statement did to the session (pt-BR). */
   notice?: string;
+  stats?: StatementStats;
 }
 
 export type SessionStatus = 'disconnected' | 'connecting' | 'idle' | 'running' | 'error';

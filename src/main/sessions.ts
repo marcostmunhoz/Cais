@@ -5,6 +5,7 @@ import type { Classification } from '@shared/dialects/types';
 import { noStatementMessage, statementAtCursor } from '@shared/dialects/registry';
 import type { PendingTransaction, RunRequest, RunResponse, SetModeResponse } from '@shared/ipc';
 import type { SessionState, StatementResult } from '@shared/results';
+import { capabilitiesOf, initialModeFor, type EngineCapabilities } from '@shared/engines';
 import { m } from '@shared/i18n';
 import { CaisError } from './errors';
 import { realScheduler, type Scheduler } from './scheduler';
@@ -43,6 +44,8 @@ export interface SessionDeps {
   resolveConnectParams(environment: Environment): Promise<ConnectParams>;
   getDriver(engine: Environment['engine']): Driver;
   getDialect(engine: Environment['engine']): Dialect;
+  /** What the engine accepts (modes, grid edit). The registry in `@shared/engines` when absent; tests inject restricted engines. */
+  capabilitiesOf?(engine: Environment['engine']): EngineCapabilities;
   emit(state: SessionState): void;
   now(): number;
   /** The trail. Never throws into a run; absent in tests that do not look at it. */
@@ -94,8 +97,23 @@ export class SessionManager {
     this.idleMs = deps.idleMs ?? IDLE_MS;
   }
 
-  static initialMode(environment: Pick<Environment, 'production'>): SessionMode {
-    return environment.production ? 'read-only' : 'autocommit';
+  /** Read-only in production; elsewhere Auto-commit when the engine takes it, else the engine's first mode. */
+  static initialMode(environment: Pick<Environment, 'production' | 'engine'>, caps: EngineCapabilities = capabilitiesOf(environment.engine)): SessionMode {
+    return initialModeFor(caps, environment.production);
+  }
+
+  private initialModeOf(environment: Environment): SessionMode {
+    return SessionManager.initialMode(environment, this.capabilities(environment.engine));
+  }
+
+  private capabilities(engine: Environment['engine']): EngineCapabilities {
+    return (this.deps.capabilitiesOf ?? capabilitiesOf)(engine);
+  }
+
+  private assertModeSupported(engine: Environment['engine'], mode: SessionMode): void {
+    if (!this.capabilities(engine).modes.includes(mode)) {
+      throw new CaisError(m().mainSessions.modeNotSupported({ mode: modeLabel(mode), engine: this.deps.getDialect(engine).displayName }), 'mode-not-supported');
+    }
   }
 
   private record(entry: Entry, line: Omit<PersonTrailLine, 'environment' | 'mode'> & { mode?: SessionMode }): void {
@@ -234,7 +252,8 @@ export class SessionManager {
 
     // The mode belongs to the tab: it survives reconnects. A newly requested production
     // autocommit needs the confirmation; one the tab already had does not.
-    const mode = opts.mode ?? previousMode ?? SessionManager.initialMode(environment);
+    const mode = opts.mode ?? previousMode ?? this.initialModeOf(environment);
+    this.assertModeSupported(environment.engine, mode);
     if (mode === 'autocommit' && environment.production && mode !== previousMode && !opts.confirmed) {
       throw new CaisError(m().mainSessions.autocommitNeedsConfirmation, 'confirmation-required');
     }
@@ -291,7 +310,7 @@ export class SessionManager {
     delete entry.state.error;
     if (mode === 'autocommit' && environment.production && mode !== previousMode) {
       this.record(entry, { event: 'mode', sql: '', state: 'ok', detail: m().mainSessions.trail.openedAutocommitProduction });
-    } else if (mode !== (previousMode ?? SessionManager.initialMode(environment))) {
+    } else if (mode !== (previousMode ?? this.initialModeOf(environment))) {
       this.record(entry, { event: 'mode', sql: '', state: 'ok', detail: m().mainSessions.trail.openedIn({ mode: modeLabel(mode) }) });
     }
     const current = session;
@@ -364,6 +383,7 @@ export class SessionManager {
     const entry = this.requireConnected(tabId);
     if (entry.state.status === 'running') throw new CaisError(m().mainSessions.setModeRunning);
     if (mode === entry.state.mode) return { session: structuredClone(entry.state) };
+    this.assertModeSupported(entry.environment.engine, mode);
     if (entry.state.transaction.open) {
       throw new CaisError(m().mainSessions.setModeTransaction, 'transaction-open');
     }
@@ -493,8 +513,9 @@ export class SessionManager {
           results.push(cancelled);
           this.recordResult(entry, cancelled, entry.state.database);
           if (entry.state.mode === 'transaction') {
-            const probe = await entry.session.execute('DO 0', { maxRows: 1 }).catch(() => undefined);
-            if (probe?.inTransaction === false) entry.state.transaction = idleTransaction();
+            // an engine with no probe keeps the state it had
+            const open = await entry.session.transactionProbe?.().catch(() => undefined);
+            if (open === false) entry.state.transaction = idleTransaction();
           }
           this.publish(entry);
           break;
@@ -639,13 +660,12 @@ export class SessionManager {
   async useDatabase(tabId: string, database: string): Promise<SessionState> {
     const entry = this.requireConnected(tabId);
     if (entry.state.status === 'running') throw new CaisError(m().mainSessions.waitStatement);
-    const dialect = this.deps.getDialect(entry.environment.engine);
-    const sql = `USE ${dialect.quoteIdent(database)}`;
     const session = entry.session;
-    const result = await session.execute(sql, { maxRows: 1 });
+    const result = await session.useDatabase(database);
     // dropped meanwhile (idle timer, Desconectar, environment edited): nothing to update
     if (entry.session !== session) throw new CaisError(m().mainSessions.notConnected, 'not-connected');
-    this.recordResult(entry, { ...result, sql, verb: 'USE', kind: 'session' }, entry.state.database);
+    // the trail keeps the line of always: the driver's own text ("USE `db`"), verb USE, kind session
+    this.recordResult(entry, { ...result, verb: 'USE', kind: 'session' }, entry.state.database);
     if (result.error) throw new CaisError(result.error.message, result.error.code);
     const current = await session.currentDatabase().catch(() => database);
     if (entry.session !== session) throw new CaisError(m().mainSessions.notConnected, 'not-connected');

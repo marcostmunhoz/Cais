@@ -3,7 +3,8 @@ import type { SessionMode } from '@shared/model';
 import type { CellValue, ColumnMeta, StatementResult } from '@shared/results';
 import { m, ref } from '@shared/i18n';
 import { CaisError } from '../../errors';
-import type { ConnectParams, DbSession, DbSessionError } from '../types';
+import { quoteIdent } from '@shared/dialects/mysql/literals';
+import type { ConnectParams, DbSession, DbSessionError, ExecuteOptions } from '../types';
 import { DriverError } from '../types';
 import { closeQuietly, connect, query } from './connection';
 import { mapMysqlError } from './errors';
@@ -280,7 +281,17 @@ export class MysqlSession implements DbSession {
     });
   }
 
-  async execute(sql: string, opts: { maxRows: number; stopAtCap?: boolean }): Promise<StatementResult> {
+  async useDatabase(name: string): Promise<StatementResult> {
+    return this.execute(`USE ${quoteIdent(name)}`, { maxRows: 1 });
+  }
+
+  /** `DO 0` changes nothing and reports the server's transaction flag in the OK packet. */
+  async transactionProbe(): Promise<boolean | undefined> {
+    const probe = await this.execute('DO 0', { maxRows: 1 }).catch(() => undefined);
+    return probe?.inTransaction;
+  }
+
+  async execute(sql: string, opts: ExecuteOptions): Promise<StatementResult> {
     const started = performance.now();
     const base: StatementResult = { index: 0, sql, kind: 'other', verb: '', durationMs: 0 };
     const elapsed = (): number => Math.round(performance.now() - started);

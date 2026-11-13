@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { m, ref } from '@shared/i18n';
+import { sameTarget } from '@shared/engines';
 import { cleanName, sameName, slashAllowed } from '@shared/names';
 import {
   AGENT_LEVEL_LABEL,
@@ -490,9 +491,7 @@ export class CatalogStore {
  */
 export function changedForAgents(before: Environment, after: Environment): boolean {
   return (
-    before.host !== after.host ||
-    before.port !== after.port ||
-    before.credentialId !== after.credentialId ||
+    !sameTarget(before, after) ||
     before.defaultDatabase !== after.defaultDatabase ||
     before.production !== after.production ||
     before.name !== after.name ||

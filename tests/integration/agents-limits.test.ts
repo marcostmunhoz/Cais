@@ -39,7 +39,7 @@ beforeAll(async () => {
   envs = [base, { ...base, id: 'e-nodb', name: 'nodb', defaultDatabase: undefined }];
   clock = new FakeClock();
   sessions = new AgentSessions({
-    getDriver: () => mysqlDriver, getDialect, scheduler: clock, now: () => clock.now,
+    getDriver: () => mysqlDriver, scheduler: clock, now: () => clock.now,
     resolveConnectParams: async (e) => params({ host: e.host, port: e.port, database: e.defaultDatabase }),
   });
   let n = 0;

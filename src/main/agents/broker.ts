@@ -24,6 +24,7 @@ import {
   type RollbackReason,
 } from '@shared/agents';
 import { AGENT_LOCALE, m, ref, render, renderRef, type MessageRef } from '@shared/i18n';
+import { sameTarget } from '@shared/engines';
 import { hiddenTextProblem, stripInvisible } from '@shared/text';
 import { CaisError } from '../errors';
 import { AgentError, agentText, bothWays, refOf } from './errors';
@@ -123,8 +124,8 @@ const clamp = (n: number, lo: number, hi: number): number => Math.min(hi, Math.m
 const clean = (text: string, max: number): string => stripInvisible(text).trim().slice(0, max);
 /** Slugs compare NFC-normalized, with ASCII-only case folding (no Unicode lookalikes through case rules). */
 const fold = (text: string): string => text.normalize('NFC').replace(/[A-Z]/g, (c) => c.toLowerCase());
-/** MySQL identifiers are at most 64 characters; anything else in --database is refused before it reaches a modal. */
-const MAX_DATABASE_NAME = 64;
+/** Names (database, table) that go into a trail label or a modal are cut here; the dialect refuses a longer --database before. */
+const MAX_LABEL_NAME = 64;
 
 /** SQL from an agent that cannot be shown honestly to the person: refused before classification (agent-facing, pt-BR). */
 function agentSqlProblem(sql: string, dialect: Dialect): { code: string; message: string } | null {
@@ -138,9 +139,8 @@ function agentSqlProblem(sql: string, dialect: Dialect): { code: string; message
   return null;
 }
 
-/** --database from an agent: a plain name, no hidden text, no system schema for writes (checked by the policy). */
-const badDatabase = (database: string): boolean =>
-  database.length > MAX_DATABASE_NAME || hiddenTextProblem(database) !== null || /[\r\n`]/.test(database);
+/** --database from an agent: a plain name the engine accepts (the dialect's rule), no system schema for writes (checked by the policy). */
+const badDatabase = (database: string, dialect: Dialect): boolean => !dialect.agentRules.isValidDatabaseName(database);
 
 const firstLine = (sql: string, max: number): string => {
   const line = sql.trim().split('\n')[0] ?? '';
@@ -251,8 +251,8 @@ export class AgentBroker {
     const env = this.resolveEnv(p.env);
     const client = clean(p.client ?? 'agente', 60) || 'agente';
     // what the agent typed goes to the trail cleaned (no bidi, no line breaks) and short
-    const db = p.database ? clean(p.database, MAX_DATABASE_NAME) : undefined;
-    const label = `schema${db ? ` ${db}` : ''}${p.table ? ` ${clean(p.table, MAX_DATABASE_NAME)}` : ''}`;
+    const db = p.database ? clean(p.database, MAX_LABEL_NAME) : undefined;
+    const label = `schema${db ? ` ${db}` : ''}${p.table ? ` ${clean(p.table, MAX_LABEL_NAME)}` : ''}`;
     const id = this.deps.newId();
     const audit = (state: string, errorCode?: string): boolean =>
       this.deps.audit.append({
@@ -309,14 +309,14 @@ export class AgentBroker {
     const refuse = (code: string, message: string): never => {
       this.deps.audit.append({
         id: this.deps.newId(), client, environment: this.slugOf(env), environmentId: env.id, production: env.production, mode,
-        ...(reason ? { reason } : {}), ...(database ? { database: clean(database, MAX_DATABASE_NAME) } : {}),
+        ...(reason ? { reason } : {}), ...(database ? { database: clean(database, MAX_LABEL_NAME) } : {}),
         sql: sql.slice(0, 500), sqlLength: sql.length, state: 'refused', errorCode: code,
       });
       throw new AgentError(message, code);
     };
     const textProblem = agentSqlProblem(sql, dialect);
     if (textProblem) refuse(textProblem.code, textProblem.message);
-    if (database !== undefined && badDatabase(database)) refuse('invalid_database', 'Nome de banco inválido.');
+    if (database !== undefined && badDatabase(database, dialect)) refuse('invalid_database', 'Nome de banco inválido.');
 
     const statements: ClassifiedStatement[] = dialect
       .splitStatements(sql)
@@ -328,6 +328,7 @@ export class AgentBroker {
         level: agentLevelOf(target),
         trailOk: this.trailOk(),
         statements,
+        rules: dialect.agentRules,
         ...(reason ? { reason } : {}),
         ...(database ? { database } : {}),
         pendingCount: this.countPending() + this.reserving,
@@ -529,10 +530,10 @@ export class AgentBroker {
     const textProblem = agentSqlProblem(p.sql, dialect);
     if (textProblem) refuseScript(textProblem.message, textProblem.code);
     const scriptDatabase = p.database?.trim() || undefined;
-    if (scriptDatabase !== undefined && badDatabase(scriptDatabase)) refuseScript('Nome de banco inválido.', 'invalid_database');
+    if (scriptDatabase !== undefined && badDatabase(scriptDatabase, dialect)) refuseScript('Nome de banco inválido.', 'invalid_database');
     const statements = dialect.splitStatements(p.sql).map((s) => ({ text: s.text, c: dialect.classify(s.text), ids: dialect.identifiers(s.text) }));
     const verdict = decide({
-      mode: 'write', production: false, statements, reason: 'script', pendingCount: 0, grantActive: false,
+      mode: 'write', production: false, statements, rules: dialect.agentRules, reason: 'script', pendingCount: 0, grantActive: false,
       ...(scriptDatabase ? { database: scriptDatabase } : {}),
     });
     if (verdict.action === 'refuse' && verdict.code !== 'empty_sql') refuseScript(verdict.message, verdict.code);
@@ -592,7 +593,7 @@ export class AgentBroker {
     const current = this.deps.catalog.environments().find((e) => e.id === rec.environment.id);
     const before = rec.environment;
     if (
-      !current || current.host !== before.host || current.port !== before.port || current.credentialId !== before.credentialId ||
+      !current || !sameTarget(current, before) ||
       current.defaultDatabase !== before.defaultDatabase || current.production !== before.production ||
       // renamed or moved, even only in case: the modal showed the old project/environment name. The
       // store changes the catalog before the IPC path calls environmentChanged, so check here too.

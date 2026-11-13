@@ -1,4 +1,3 @@
-import type { Dialect } from '@shared/dialects/types';
 import type { Engine, Environment } from '@shared/model';
 import type { SchemaTree, StatementResult } from '@shared/results';
 import {
@@ -65,7 +64,6 @@ export { realScheduler, type Scheduler } from '../scheduler';
 
 export interface AgentSessionsDeps {
   getDriver(engine: Engine): Driver;
-  getDialect(engine: Engine): Dialect;
   resolveConnectParams(environment: Environment): Promise<ConnectParams>;
   scheduler?: Scheduler;
   now?: () => number;
@@ -332,7 +330,6 @@ export class AgentSessions implements AgentExecutor {
   async runRead(environment: Environment, args: RunArgs): Promise<RunOutcome> {
     const target = args.database ?? environment.defaultDatabase;
     const entry = await this.acquire(environment, target);
-    const dialect = this.deps.getDialect(environment.engine);
     const results: StatementResult[] = [];
     let recycle = false;
     // one budget for the whole request, and never more than the hard cut per statement
@@ -340,7 +337,7 @@ export class AgentSessions implements AgentExecutor {
     try {
       if (target !== entry.database) {
         // target is defined here: acquire() never hands out a connection in the wrong database when there is none
-        const use = await entry.session.execute(`USE ${dialect.quoteIdent(target!)}`, { maxRows: 1 });
+        const use = await entry.session.useDatabase(target!);
         if (use.error) {
           recycle = true;
           return { results, error: safeError(use, environment) };
