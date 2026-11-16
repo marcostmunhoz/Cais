@@ -108,10 +108,16 @@ function DatabaseNode({ env, db }: { env: Environment; db: { name: string; table
         style={{ paddingLeft: 6 + 2 * 12 }}
         onClick={toggle}
         data-testid={`database-${db.name}`}
+        aria-busy={lazy && columns?.status === 'loading' ? true : undefined}
       >
         <span className="chev">{open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}</span>
         <Database size={13} />
         <span className="label">{db.name}</span>
+        {lazy && columns?.status === 'loading' && (
+          <span className="detail" data-testid={`database-loading-${db.name}`}>
+            {m().sidebar.loadingDatasetColumns}
+          </span>
+        )}
       </div>
       {open &&
         db.tables.map((t) => (

@@ -334,3 +334,22 @@ test('the trail has the job id and the bytes of the person lines', async () => {
   expect(fake.requestsTo('/tables/', 'GET')).toHaveLength(7);
   expect(fake.requestsTo('/datasets/logs/tables/', 'GET')).toHaveLength(0);
 });
+
+// last on purpose: it opens the second dataset, which the tests above count on staying unread
+test('a dataset row shows a discreet loading signal while its columns are read', async () => {
+  await page.getByTestId('env-bq-dev').click();
+  await expect(chip()).toHaveAttribute('data-status', 'connected', { timeout: 20_000 });
+  const row = page.getByTestId('database-logs');
+  fake.tableGetDelayMs = 1500;
+  try {
+    await row.click();
+    await expect(page.getByTestId('database-loading-logs')).toBeVisible();
+    await expect(row).toHaveAttribute('aria-busy', 'true');
+    await expect(page.getByTestId('database-loading-logs')).toHaveCount(0, { timeout: 10_000 });
+    await expect(row).not.toHaveAttribute('aria-busy', 'true');
+    await page.locator('.tree-row', { hasText: /^acessos$/ }).getByRole('button', { name: 'Expandir colunas' }).click();
+    await expect(page.locator('.tree-row', { hasText: /^ip/ })).toContainText('STRING');
+  } finally {
+    fake.tableGetDelayMs = 0;
+  }
+});

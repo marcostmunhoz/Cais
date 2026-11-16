@@ -29,6 +29,7 @@ export const en: Shape<typeof ptBR> = {
   collapseDatabases: { database: 'Collapse databases', dataset: 'Collapse datasets' },
   expandDatabases: { database: 'Expand databases', dataset: 'Expand datasets' },
   loadingColumns: 'Loading columns…',
+  loadingDatasetColumns: 'Reading…',
   subtype: { 'materialized-view': 'materialized view', external: 'external table', snapshot: 'snapshot' },
   environmentMenu: (p) => `Menu of environment ${p.name}`,
   loadingSchema: 'Loading schema…',
