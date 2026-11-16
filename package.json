@@ -2,7 +2,7 @@
   "name": "cais",
   "productName": "Cais",
   "desktopName": "cais-app.desktop",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Cliente SQL de desktop organizado por projeto e ambiente",
   "main": "out/main/index.js",
   "author": "Cais",
