@@ -28,6 +28,15 @@ export interface SchemaView {
   status: 'loading' | 'ready' | 'error';
   tree?: SchemaTree;
   error?: string;
+  /** Engines that read columns per dataset (BigQuery): the state of that read, by dataset name. */
+  datasets?: Record<string, { status: 'loading' | 'ready' | 'error'; error?: string }>;
+}
+
+/** BigQuery: statements estimated above the environment's byte limit, waiting for the person's answer. */
+export interface BytesConfirmRequest {
+  limit: number;
+  statements: { index: number; sql: string; bytesEstimated: number }[];
+  onConfirm: () => void;
 }
 
 export interface ConfirmRequest {
@@ -96,6 +105,7 @@ export interface AppState {
   projectName: ProjectNameRequest | null;
   closeDirty: { tabId: string } | null;
   confirm: ConfirmRequest | null;
+  bytesConfirm: BytesConfirmRequest | null;
   closeTx: { tabId: string } | null;
   quit: PendingTransaction[] | null;
   notices: string[];
@@ -125,6 +135,7 @@ const initial: AppState = {
   projectName: null,
   closeDirty: null,
   confirm: null,
+  bytesConfirm: null,
   closeTx: null,
   quit: null,
   notices: [],

@@ -1,9 +1,9 @@
 import { getDialect } from '@shared/dialects/registry';
-import type { Environment, Project, SavedScript } from '@shared/model';
+import type { MysqlEnvironment as Environment, Project, SavedScript } from '@shared/model';
 import type { SchemaTree, StatementResult } from '@shared/results';
 import { AgentBroker } from '@main/agents/broker';
 import type { AuditEntry } from '@main/agents/audit';
-import type { AgentExecutor, RunArgs, RunOutcome, Scheduler, WriteRun } from '@main/agents/sessions';
+import type { AgentExecutor, PreparedStatement, RunArgs, RunOutcome, Scheduler, WriteRun } from '@main/agents/sessions';
 
 /** Manual clock + scheduler: `advance` runs the timers that fall due, in order. */
 export class FakeClock implements Scheduler {
@@ -68,6 +68,14 @@ export class FakeExecutor implements AgentExecutor {
       { name: 'other', tables: [] },
     ],
   };
+  /** The dry run's answer (BigQuery only; the broker never asks for it on MySQL). */
+  prepared: PreparedStatement[] | ((n: number) => PreparedStatement[]) | undefined;
+  prepareCalls: RunArgs['statements'][] = [];
+  async prepare(_env: Environment, args: { statements: RunArgs['statements'] }): Promise<PreparedStatement[] | undefined> {
+    this.prepareCalls.push(args.statements);
+    if (typeof this.prepared === 'function') return this.prepared(args.statements.length);
+    return this.prepared;
+  }
   async schema(): Promise<SchemaTree> {
     return this.tree;
   }

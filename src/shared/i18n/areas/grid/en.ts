@@ -6,6 +6,7 @@ const f = createFormat('en');
 /** Area "grid", English. */
 export const en: Shape<typeof ptBR> = {
   reason: {
+    engineNoEdit: (p) => `In this version ${p.engine} is read-only.`,
     notRead: 'Grid editing only works on the result of a SELECT.',
     noTable: 'Grid editing only works on the result of one table: the columns of this result do not come from a table.',
     severalTables: (p) => `Grid editing only works on the result of one table (this one comes from ${p.tables}).`,

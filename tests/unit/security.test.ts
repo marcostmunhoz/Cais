@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { getDialect } from '@shared/dialects/registry';
 import { MAX_PENDING, READ_GRANT_MS } from '@shared/agents';
-import type { Environment } from '@shared/model';
+import type { MysqlEnvironment as Environment } from '@shared/model';
 import type { SchemaTree, StatementResult } from '@shared/results';
 import { hiddenTextProblem, markInvisible } from '@shared/text';
 import { AgentError } from '@main/agents/errors';
@@ -22,7 +22,7 @@ const dialect = getDialect('mysql');
 const analyze = (sql: string) =>
   dialect.splitStatements(sql).map((s) => ({ text: s.text, c: dialect.classify(s.text), ids: dialect.identifiers(s.text) }));
 const d = (sql: string, over: Partial<DecideInput> = {}) =>
-  decide({ mode: 'read', production: false, statements: analyze(sql), reason: 'r', pendingCount: 0, grantActive: false, ...over });
+  decide({ mode: 'read', production: false, statements: analyze(sql), rules: dialect.agentRules, reason: 'r', pendingCount: 0, grantActive: false, ...over });
 
 const refused = async (p: Promise<unknown>): Promise<AgentError> => {
   try {
@@ -95,7 +95,7 @@ describe('policy: system schemas', () => {
     'UPDATE `information_schema`.`tables` SET a = 1 WHERE id = 1',
     "REPLACE INTO `MySQL`.db VALUES ('x')",
   ])('agents never write to a system schema: %s', (sql) => {
-    expect(d(sql, { mode: 'write' })).toEqual({ action: 'refuse', code: 'system_schema', message: MESSAGES.systemSchemaWrite });
+    expect(d(sql, { mode: 'write' })).toEqual({ action: 'refuse', code: 'system_schema', message: dialect.agentRules.messages.systemSchemaWrite });
   });
 
   it('a write with --database set to a system schema is refused', () => {
@@ -106,7 +106,7 @@ describe('policy: system schemas', () => {
   });
 
   it('agents never read the mysql schema, by identifier or by --database; other system schemas stay readable', () => {
-    expect(d('SELECT user, authentication_string FROM mysql.user')).toEqual({ action: 'refuse', code: 'system_schema', message: MESSAGES.systemSchemaRead });
+    expect(d('SELECT user, authentication_string FROM mysql.user')).toEqual({ action: 'refuse', code: 'system_schema', message: dialect.agentRules.messages.systemSchemaRead });
     expect(d('SELECT * FROM `mysql`.`user`')).toMatchObject({ code: 'system_schema' });
     expect(d('SELECT * FROM user', { database: 'MySQL' })).toMatchObject({ code: 'system_schema' });
     expect(d('SELECT * FROM performance_schema.threads')).toEqual({ action: 'run' });
@@ -427,6 +427,14 @@ class CtlSession implements DbSession {
     this.limits.push(l);
     if (this.limitsError) throw this.limitsError;
   }
+  useDatabase(name: string): Promise<StatementResult> {
+    return this.execute(`USE ${'`' + name.replace(/`/g, '``') + '`'}`);
+  }
+
+  async transactionProbe(): Promise<boolean | undefined> {
+    return (await this.execute('DO 0').catch(() => undefined))?.inTransaction;
+  }
+
   async execute(sql: string): Promise<StatementResult> {
     this.executed.push(sql);
     this.onExecute?.(sql);
@@ -488,7 +496,6 @@ function ctlHarness(prepare: (s: CtlSession, n: number) => void = () => undefine
   };
   const sessions = new AgentSessions({
     getDriver: () => driver,
-    getDialect,
     resolveConnectParams: async () => {
       resolveCalls++;
       return { host: 'h', port: 1, user: 'u', password: `token-${resolveCalls}`, tls: 'off' };
@@ -644,11 +651,11 @@ describe('AgentSessions: writes', () => {
     await h.sessions.runWrite(agentEnv, { database: 'other', statements: updates('UPDATE t SET a = 1 WHERE id = 1'), maxRows: 1 });
     expect(h.opened).toHaveLength(2);
     for (const { params } of h.opened) expect(typeof params.refresh).toBe('function');
-    expect(h.opened[1]!.params.database).toBe('other');
+    expect((h.opened[1]!.params as { database?: string }).database).toBe('other');
     const before = h.resolveCalls();
     const fresh = await h.opened[1]!.params.refresh!();
     expect(h.resolveCalls()).toBe(before + 1);
-    expect(fresh.password).toBe(`token-${before + 1}`);
+    expect((fresh as { password?: string }).password).toBe(`token-${before + 1}`);
   });
 });
 
@@ -668,6 +675,14 @@ class TabSession implements DbSession {
   async applyMode(mode: string) {
     this.modes.push(mode);
   }
+  useDatabase(name: string): Promise<StatementResult> {
+    return this.execute(`USE ${'`' + name.replace(/`/g, '``') + '`'}`, { maxRows: 1 });
+  }
+
+  async transactionProbe(): Promise<boolean | undefined> {
+    return (await this.execute('DO 0', { maxRows: 1 }).catch(() => undefined))?.inTransaction;
+  }
+
   async execute(sql: string, opts: { maxRows: number; stopAtCap?: boolean }): Promise<StatementResult> {
     this.executed.push(sql);
     this.opts.push(opts);
@@ -965,7 +980,7 @@ describe('classifier follows the server', () => {
   it('SHOW CREATE USER is flagged and refused for agents', () => {
     const c = mysql.classify("SHOW /**/ CREATE USER 'root'@'localhost'");
     expect(c.accountSecrets).toBe(true);
-    const d = decide({ mode: 'read', production: false, statements: [{ text: 'x', c }], pendingCount: 0, grantActive: false });
+    const d = decide({ mode: 'read', production: false, statements: [{ text: 'x', c }], rules: dialect.agentRules, pendingCount: 0, grantActive: false });
     expect(d).toMatchObject({ action: 'refuse', code: 'system_schema' });
     expect(mysql.classify('SHOW GRANTS').accountSecrets).toBeUndefined();
   });
@@ -1039,7 +1054,7 @@ describe('functions after FROM inside TRIM/SUBSTRING/EXTRACT are calls', () => {
     ["SELECT STRAIGHT_JOIN GET_LOCK('k', 0)", 'GET_LOCK'],
   ])('%s calls %s', (sql, fn) => {
     expect(mysql.classify(sql).functions).toContain(fn);
-    const d = decide({ mode: 'read', production: false, statements: [{ text: sql, c: mysql.classify(sql) }], pendingCount: 0, grantActive: false });
+    const d = decide({ mode: 'read', production: false, statements: [{ text: sql, c: mysql.classify(sql) }], rules: mysql.agentRules, pendingCount: 0, grantActive: false });
     expect(d).toMatchObject({ action: 'refuse', code: 'function_not_allowed' });
   });
   it('server-state functions there are refused in read-only', () => {

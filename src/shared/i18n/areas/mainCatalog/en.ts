@@ -20,6 +20,12 @@ export const en: Shape<typeof ptBR> = {
   projectHasEnvironments: (p) => `The project still has environments: ${p.names}. Delete the environments first.`,
   projectHasScripts: (p) => `The project has ${f.count(p.count, { one: 'script', other: 'scripts' })}.`,
   hostRequired: 'Enter the host.',
+  gcpProjectRequired: 'Enter the Google Cloud project.',
+  gcpProjectInvalid:
+    'The Google Cloud project is not a valid id: 6 to 30 characters, lower-case letters, digits and hyphens, starting with a letter (a domain project is written domain.com:project).',
+  bigqueryNeedsIam: 'BigQuery signs in through the "Google IAM via gcloud" credential: a user and password do not work.',
+  datasetInvalid: 'The default dataset can only have letters, digits and underscores.',
+  maxBytesInvalid: 'The bytes limit per query is a whole number of GiB, 1 or more.',
   credentialRequired: 'Choose a credential.',
   credentialNameRequired: 'Enter the credential name.',
   credentialExists: (p) => `A credential named "${p.name}" already exists.`,
@@ -27,6 +33,8 @@ export const en: Shape<typeof ptBR> = {
   passwordRequired: 'Enter the password.',
   vaultUnavailable:
     'The system password vault is not available. The password was not saved (Cais never stores a password in plain text).',
+  vaultUnavailableLinuxHint:
+    'Install or unlock a keyring (GNOME Keyring or KWallet). If your desktop is not recognized, open Cais with --password-store=gnome-libsecret.',
   gcloudAccountRequired: 'Enter the gcloud account.',
   dbUsernameRequired: 'Enter the database user.',
   credentialInUse: (p) => `The credential is in use by: ${p.names}.`,

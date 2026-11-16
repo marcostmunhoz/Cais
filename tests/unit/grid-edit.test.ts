@@ -462,3 +462,19 @@ describe('grid edits to UPDATEs', () => {
     expect(remapCells(e.key, rows, fresh, { 0: { 1: 'x' }, 1: { 1: 'y' }, 2: { 2: 'z' } })).toEqual({ 1: { 1: 'x' }, 0: { 2: 'z' } });
   });
 });
+
+describe('gridEditability: engine capability', () => {
+  const result = read([src('id'), src('name')], [[1, 'Ana']]);
+  it('an engine without grid editing gives its own reason, before any other', () => {
+    const e = gridEditability(result, schema, mysqlDialect.valueKind, { gridEdit: false, name: 'Motor X' });
+    expect(e.editable).toBe(false);
+    expect(reasonOf(e)).toBe('Nesta versão o Motor X é só leitura.');
+    expect(reasonOf(gridEditability({ kind: 'ddl', verb: 'CREATE' }, schema, mysqlDialect.valueKind, { gridEdit: false, name: 'Motor X' }))).toBe(
+      'Nesta versão o Motor X é só leitura.',
+    );
+  });
+  it('an engine with grid editing, or none given, edits as before', () => {
+    expect(gridEditability(result, schema, mysqlDialect.valueKind, { gridEdit: true, name: 'MySQL' }).editable).toBe(true);
+    expect(gridEditability(result, schema, mysqlDialect.valueKind).editable).toBe(true);
+  });
+});

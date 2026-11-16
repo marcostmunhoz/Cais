@@ -8,8 +8,11 @@ import {
   looksLikeProduction,
   type AgentLevel,
   type Credential,
+  type Engine,
   type Environment,
 } from '@shared/model';
+import { getDialect } from '@shared/dialects/registry';
+import { GIB, isGcpProjectId } from '@shared/engines';
 import { AUTO_COMMIT_MAX_ROWS } from '@shared/agents';
 import type { GcloudAccount } from '@shared/ipc';
 import { MAX_CATALOG_NAME, sameName } from '@shared/names';
@@ -36,10 +39,13 @@ function CredentialForm({
   onDeleted,
   notice = false,
   onDirty,
+  iamOnly = false,
 }: {
   credentialId: string;
   onSaved: (c: Credential) => void;
   onDeleted?: () => void;
+  /** Opened from a BigQuery environment: only the Google IAM kind, with no database user (BigQuery has none). */
+  iamOnly?: boolean;
   /** "Salvo" survives the remount that follows saving a new item. */
   notice?: boolean;
   onDirty?: () => void;
@@ -50,7 +56,7 @@ function CredentialForm({
   const usedBy = catalog.environments.filter((e) => e.credentialId === credentialId).length;
 
   const [name, setName] = useState(existing?.name ?? '');
-  const [kind, setKind] = useState<'password' | 'gcloud-iam'>(existing?.kind ?? 'password');
+  const [kind, setKind] = useState<'password' | 'gcloud-iam'>(existing?.kind ?? (iamOnly ? 'gcloud-iam' : 'password'));
   const [username, setUsername] = useState(existing?.kind === 'password' ? existing.username : '');
   const [password, setPassword] = useState('');
   const [account, setAccount] = useState(existing?.kind === 'gcloud-iam' ? existing.account : '');
@@ -131,6 +137,7 @@ function CredentialForm({
         <label htmlFor="cred-name">{c.name}</label>
         <input id="cred-name" className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder={c.namePlaceholder} />
       </div>
+      {!iamOnly && (
       <div className="field">
         <span className="label">{c.kind}</span>
         <div className="seg" role="radiogroup" aria-label={c.kindLabel} style={{ alignSelf: 'flex-start' }}>
@@ -142,6 +149,8 @@ function CredentialForm({
           </button>
         </div>
       </div>
+      )}
+      {iamOnly && <p className="hint" style={{ marginBottom: 10 }}>{c.iamOnly}</p>}
       {kind === 'password' ? (
         <>
           <div className="field">
@@ -186,6 +195,7 @@ function CredentialForm({
             <label htmlFor="cred-sa">{c.impersonate}</label>
             <input id="cred-sa" className="input" value={sa} onChange={(e) => setSa(e.target.value)} placeholder={c.impersonatePlaceholder} autoComplete="off" />
           </div>
+          {!iamOnly && (
           <div className="field">
             <label htmlFor="cred-dbuser">{c.dbUser}</label>
             <input
@@ -200,6 +210,7 @@ function CredentialForm({
             />
             <span className="hint">{c.dbUserHint}</span>
           </div>
+          )}
         </>
       )}
       {existing && <div className="hint" style={{ marginBottom: 10 }}>{c.usedBy({ count: usedBy })}</div>}
@@ -261,7 +272,8 @@ function EnvironmentForm({
   const catalog = useStore((s) => s.catalog);
   const existing = catalog.environments.find((e) => e.id === environmentId);
   // what the fields start from: the environment being edited, or the one being duplicated
-  const source = existing ?? (duplicateOf ? catalog.environments.find((e) => e.id === duplicateOf) : undefined);
+  const found = existing ?? (duplicateOf ? catalog.environments.find((e) => e.id === duplicateOf) : undefined);
+  const source = found;
   const sourceProject = source ? catalog.projects.find((p) => p.id === source.projectId) : undefined;
   const initialName = (): string => {
     if (existing || !source) return existing?.name ?? '';
@@ -274,10 +286,25 @@ function EnvironmentForm({
   );
   const [newProject, setNewProject] = useState('');
   const [name, setName] = useState(initialName);
-  const [host, setHost] = useState(source?.host ?? '');
-  const [port, setPort] = useState(String(source?.port ?? 3306));
+  // the engine is chosen for a new environment only: a saved one (or a copy of it) keeps its engine
+  const [engine, setEngine] = useState<Engine>(source?.engine ?? 'mysql');
+  const bigquery = engine === 'bigquery';
+  const [host, setHost] = useState(source?.engine === 'mysql' ? source.host : '');
+  const [port, setPort] = useState(String(source?.engine === 'mysql' ? source.port : 3306));
+  const [gcpProject, setGcpProject] = useState(source?.engine === 'bigquery' ? source.gcpProject : '');
+  // GiB, 100 filled in on a new environment; empty means no limit
+  const [maxGib, setMaxGib] = useState(
+    source?.engine === 'bigquery' ? (source.maxBytesBilled !== undefined ? String(source.maxBytesBilled / GIB) : '') : '100',
+  );
   const [database, setDatabase] = useState(source?.defaultDatabase ?? '');
-  const [credentialId, setCredentialId] = useState(source?.credentialId ?? catalog.credentials[0]?.id ?? '');
+  // BigQuery only takes Google IAM credentials (the token comes from gcloud)
+  const credentialOptions = useMemo(
+    () => (bigquery ? catalog.credentials.filter((c) => c.kind === 'gcloud-iam') : catalog.credentials),
+    [bigquery, catalog.credentials],
+  );
+  const [credentialId, setCredentialId] = useState(
+    source?.credentialId ?? (source?.engine === 'bigquery' ? credentialOptions : catalog.credentials)[0]?.id ?? '',
+  );
   const [production, setProductionState] = useState(source?.production ?? false);
   const [productionTouched, setProductionTouched] = useState(!!source);
   const [agentLevel, setAgentLevel] = useState<AgentLevel>(source ? agentLevelOf(source) : 'free-reads');
@@ -294,7 +321,8 @@ function EnvironmentForm({
     }
     setProductionState(next);
   };
-  const levels = agentLevelsFor(production);
+  // BigQuery is read-only: agents never write there, so "Leitura e escrita liberadas" does not exist for it
+  const levels: readonly AgentLevel[] = bigquery ? ['approve-all', 'free-reads'] : agentLevelsFor(production);
   const shownLevel: AgentLevel = catalog.agentLevelsLocked ? 'approve-all' : levels.includes(agentLevel) ? agentLevel : 'approve-all';
   const [error, setError] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
@@ -302,10 +330,10 @@ function EnvironmentForm({
   const [credDialog, setCredDialog] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
-  const credentialIds = useMemo(() => new Set(catalog.credentials.map((c) => c.id)), [catalog.credentials]);
+  const credentialIds = useMemo(() => new Set(credentialOptions.map((c) => c.id)), [credentialOptions]);
   useEffect(() => {
-    if (!credentialIds.has(credentialId) && catalog.credentials[0]) setCredentialId(catalog.credentials[0].id);
-  }, [credentialIds, credentialId, catalog.credentials]);
+    if (!credentialIds.has(credentialId)) setCredentialId(credentialOptions[0]?.id ?? '');
+  }, [credentialIds, credentialId, credentialOptions]);
 
   const onName = (value: string) => {
     setName(value);
@@ -314,24 +342,43 @@ function EnvironmentForm({
 
   const draftPort = Number(port);
   const validPort = Number.isInteger(draftPort) && draftPort > 0 && draftPort < 65536;
+  const projectOk = isGcpProjectId(gcpProject.trim());
+  // empty is no limit; otherwise a whole number of GiB from 1
+  const gibText = maxGib.trim();
+  const validGib = gibText === '' || (/^\d{1,7}$/.test(gibText) && Number(gibText) >= 1 && Number(gibText) * GIB <= Number.MAX_SAFE_INTEGER);
+  const maxBytesBilled = gibText === '' ? undefined : Number(gibText) * GIB;
 
   const test = async () => {
     setTestResult(null);
-    if (!host.trim() || !validPort || !credentialIds.has(credentialId)) {
-      setTestResult({ ok: false, text: m().registry.environment.testMissing });
+    setError(null);
+    const missing = bigquery ? !gcpProject.trim() : !host.trim() || !validPort;
+    if (missing || !credentialIds.has(credentialId)) {
+      setTestResult({ ok: false, text: bigquery ? m().registry.environment.testMissingBigquery : m().registry.environment.testMissing });
       return;
     }
     setTesting(true);
     try {
-      const res = await window.cais.connection.test({
-        engine: 'mysql',
-        host: host.trim(),
-        port: draftPort,
-        ...(database.trim() ? { defaultDatabase: database.trim() } : {}),
-        credentialId,
-      });
+      const res = await window.cais.connection.test(
+        bigquery
+          ? {
+              engine: 'bigquery',
+              gcpProject: gcpProject.trim(),
+              ...(database.trim() ? { defaultDatabase: database.trim() } : {}),
+              credentialId,
+              ...(maxBytesBilled !== undefined && validGib ? { maxBytesBilled } : {}),
+            }
+          : {
+              engine: 'mysql',
+              host: host.trim(),
+              port: draftPort,
+              ...(database.trim() ? { defaultDatabase: database.trim() } : {}),
+              credentialId,
+            },
+      );
       setTestResult(
-        res.ok ? { ok: true, text: m().registry.environment.connected({ version: res.serverVersion }) } : { ok: false, text: res.error },
+        res.ok
+          ? { ok: true, text: bigquery ? m().registry.environment.connectedBigquery : m().registry.environment.connected({ version: res.serverVersion }) }
+          : { ok: false, text: res.error },
       );
     } catch (e) {
       setTestResult({ ok: false, text: errorText(e) });
@@ -342,7 +389,16 @@ function EnvironmentForm({
 
   const save = async () => {
     setError(null);
-    if (!validPort) {
+    if (bigquery) {
+      if (!projectOk) {
+        setError(m().registry.environment.invalidProject);
+        return;
+      }
+      if (!validGib) {
+        setError(m().registry.environment.invalidMaxGib);
+        return;
+      }
+    } else if (!validPort) {
       setError(m().registry.environment.invalidPort);
       return;
     }
@@ -357,9 +413,9 @@ function EnvironmentForm({
         ...(existing ? { id: existing.id } : {}),
         projectId: pid,
         name,
-        engine: 'mysql',
-        host,
-        port: draftPort,
+        ...(bigquery
+          ? { engine: 'bigquery' as const, gcpProject: gcpProject.trim(), ...(maxBytesBilled !== undefined ? { maxBytesBilled } : {}) }
+          : { engine: 'mysql' as const, host, port: draftPort }),
         ...(database.trim() ? { defaultDatabase: database.trim() } : {}),
         credentialId,
         production,
@@ -424,20 +480,70 @@ function EnvironmentForm({
         <label htmlFor="env-name">{v.name}</label>
         <input id="env-name" className="input" value={name} onChange={(e) => onName(e.target.value)} placeholder={v.namePlaceholder} autoComplete="off" />
       </div>
-      <div className="field-row">
+      {!existing && !source && (
         <div className="field">
-          <label htmlFor="env-host">{v.host}</label>
-          <input id="env-host" className="input" value={host} onChange={(e) => setHost(e.target.value)} placeholder="10.0.0.5" autoComplete="off" />
+          <span className="label">{v.engine}</span>
+          <div className="seg" role="radiogroup" aria-label={v.engineLabel} style={{ alignSelf: 'flex-start' }} data-testid="env-engine">
+            {(['mysql', 'bigquery'] as const).map((option) => (
+              <button
+                key={option}
+                type="button"
+                role="radio"
+                aria-checked={engine === option}
+                className={engine === option ? 'on' : ''}
+                onClick={() => setEngine(option)}
+              >
+                {getDialect(option).displayName}
+              </button>
+            ))}
+          </div>
         </div>
+      )}
+      {bigquery ? (
         <div className="field">
-          <label htmlFor="env-port">{v.port}</label>
-          <input id="env-port" className="input" value={port} onChange={(e) => setPort(e.target.value)} inputMode="numeric" />
+          <label htmlFor="env-gcp-project">{v.gcpProject}</label>
+          <input
+            id="env-gcp-project"
+            className="input"
+            value={gcpProject}
+            onChange={(e) => setGcpProject(e.target.value)}
+            placeholder={v.gcpProjectPlaceholder}
+            autoComplete="off"
+            spellCheck={false}
+          />
+          <span className="hint">{v.gcpProjectHint}</span>
         </div>
-      </div>
+      ) : (
+        <div className="field-row">
+          <div className="field">
+            <label htmlFor="env-host">{v.host}</label>
+            <input id="env-host" className="input" value={host} onChange={(e) => setHost(e.target.value)} placeholder="10.0.0.5" autoComplete="off" />
+          </div>
+          <div className="field">
+            <label htmlFor="env-port">{v.port}</label>
+            <input id="env-port" className="input" value={port} onChange={(e) => setPort(e.target.value)} inputMode="numeric" />
+          </div>
+        </div>
+      )}
       <div className="field">
-        <label htmlFor="env-db">{v.database}</label>
+        <label htmlFor="env-db">{v.database[getDialect(engine).databaseTerm]}</label>
         <input id="env-db" className="input" value={database} onChange={(e) => setDatabase(e.target.value)} autoComplete="off" />
       </div>
+      {bigquery && (
+        <div className="field">
+          <label htmlFor="env-max-gib">{v.maxGib}</label>
+          <input
+            id="env-max-gib"
+            className="input"
+            value={maxGib}
+            onChange={(e) => setMaxGib(e.target.value)}
+            inputMode="numeric"
+            autoComplete="off"
+            aria-invalid={!validGib}
+          />
+          <span className="hint">{v.maxGibHint}</span>
+        </div>
+      )}
       <div className="field">
         <label htmlFor="env-cred">{v.credential}</label>
         <select
@@ -449,14 +555,15 @@ function EnvironmentForm({
             else setCredentialId(e.target.value);
           }}
         >
-          {catalog.credentials.length === 0 && <option value="">{v.noCredential}</option>}
-          {catalog.credentials.map((c) => (
+          {credentialOptions.length === 0 && <option value="">{v.noCredential}</option>}
+          {credentialOptions.map((c) => (
             <option key={c.id} value={c.id}>
               {c.name}
             </option>
           ))}
           <option value={NEW_CREDENTIAL}>{v.newCredential}</option>
         </select>
+        {bigquery && <span className="hint" data-testid="env-iam-hint">{credentialOptions.length === 0 ? v.noIamCredential : v.iamHint}</span>}
       </div>
       <div className="field">
         <label className="check">
@@ -470,7 +577,7 @@ function EnvironmentForm({
           />
           {v.production}
         </label>
-        <span className="hint">{v.productionHint}</span>
+        <span className="hint">{bigquery ? v.bigqueryProductionHint : v.productionHint}</span>
       </div>
       <div className="field">
         <label htmlFor="env-agents">{v.agents}</label>
@@ -491,6 +598,8 @@ function EnvironmentForm({
         <span className="hint" data-testid="env-agent-hint">
           {catalog.agentLevelsLocked
             ? t.levelHint.locked
+            : bigquery
+              ? t.levelHint.bigquery[shownLevel === 'free-reads' ? 'free-reads' : 'approve-all']
             : production
               ? shownLevel === 'free-reads'
                 ? t.levelHint.productionFreeReads
@@ -558,6 +667,7 @@ function EnvironmentForm({
           <div className="dialog-body" style={{ width: 420 }}>
             <CredentialForm
               credentialId="new"
+              iamOnly={bigquery}
               onSaved={(c) => {
                 setCredentialId(c.id);
                 setCredDialog(false);

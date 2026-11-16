@@ -1,8 +1,7 @@
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { getDialect } from '@shared/dialects/registry';
-import type { Environment } from '@shared/model';
+import type { MysqlEnvironment as Environment } from '@shared/model';
 import type { StatementResult } from '@shared/results';
 import { AgentAccess } from '@main/agents/access';
 import { AgentError, agentText } from '@main/agents/errors';
@@ -183,6 +182,14 @@ class FakeDbSession implements DbSession {
   async applyMode(mode: string) {
     this.modes.push(mode);
   }
+  useDatabase(name: string): Promise<StatementResult> {
+    return this.execute(`USE ${'`' + name.replace(/`/g, '``') + '`'}`);
+  }
+
+  async transactionProbe(): Promise<boolean | undefined> {
+    return (await this.execute('DO 0').catch(() => undefined))?.inTransaction;
+  }
+
   async execute(sql: string): Promise<StatementResult> {
     this.executed.push(sql);
     const use = /^USE `(.+)`$/.exec(sql);
@@ -221,14 +228,14 @@ function sessionsHarness() {
     open: async (params) => {
       if (openError) throw openError;
       const session = new FakeDbSession();
-      session.db = params.database ?? null;
+      session.db = (params.engine === 'bigquery' ? params.defaultDataset : params.database) ?? null;
       opened.push({ session, params });
       return session;
     },
     introspect: async () => ({ databases: [] }),
     test: async () => ({ serverVersion: 'x' }),
   };
-  const sessions = new AgentSessions({ getDriver: () => driver, getDialect, resolveConnectParams: async (e) => ({ host: env.host, port: env.port, ...(e.defaultDatabase ? { database: e.defaultDatabase } : {}), user: 'u', password: 'secret-pw', tls: 'off' }), scheduler: clock });
+  const sessions = new AgentSessions({ getDriver: () => driver, resolveConnectParams: async (e) => ({ host: env.host, port: env.port, ...(e.defaultDatabase ? { database: e.defaultDatabase } : {}), user: 'u', password: 'secret-pw', tls: 'off' }), scheduler: clock });
   return { sessions, opened, clock, failOpen: (e: Error) => (openError = e) };
 }
 const plan = (...texts: string[]) => texts.map((text) => ({ text }));
@@ -287,7 +294,6 @@ describe('AgentSessions', () => {
     };
     const s = new AgentSessions({
       getDriver: () => ({ engine: 'mysql', open: async () => failing(), introspect: async () => ({ databases: [] }), test: async () => ({ serverVersion: 'x' }) }),
-      getDialect,
       resolveConnectParams: async () => ({ host: env.host, port: env.port, user: 'app_ro', tls: 'off' }),
     });
     const read = await s.runRead(env, { statements: plan('SELECT * FROM t'), maxRows: 10 });
@@ -326,7 +332,6 @@ describe('AgentSessions', () => {
     session.script = [() => ({ kind: 'write', verb: 'UPDATE', affectedRows: 2, inTransaction: true })];
     const s2 = new AgentSessions({
       getDriver: () => ({ engine: 'mysql', open: async () => session, introspect: async () => ({ databases: [] }), test: async () => ({ serverVersion: 'x' }) }),
-      getDialect,
       resolveConnectParams: async () => ({ host: 'h', port: 1, user: 'u', tls: 'off' }),
     });
     const run = await s2.runWrite(env, { statements: plan('UPDATE t SET a = 1 WHERE id = 1'), maxRows: 10 });
@@ -342,7 +347,6 @@ describe('AgentSessions', () => {
     failing.script = [() => ({ inTransaction: true }), () => ({ error: { message: 'boom', code: 'ER_Y' }, inTransaction: true })];
     const s = new AgentSessions({
       getDriver: () => ({ engine: 'mysql', open: async () => failing, introspect: async () => ({ databases: [] }), test: async () => ({ serverVersion: 'x' }) }),
-      getDialect,
       resolveConnectParams: async () => ({ host: 'h', port: 1, user: 'u', tls: 'off' }),
     });
     const r = await s.runWrite(env, { statements: plan('UPDATE a SET x = 1 WHERE id = 1', 'UPDATE b SET x = 1 WHERE id = 1', 'UPDATE c SET x = 1 WHERE id = 1'), maxRows: 10 });
@@ -355,7 +359,6 @@ describe('AgentSessions', () => {
     sneaky.script = [() => ({ inTransaction: true }), () => ({ inTransaction: false })];
     const s2 = new AgentSessions({
       getDriver: () => ({ engine: 'mysql', open: async () => sneaky, introspect: async () => ({ databases: [] }), test: async () => ({ serverVersion: 'x' }) }),
-      getDialect,
       resolveConnectParams: async () => ({ host: 'h', port: 1, user: 'u', tls: 'off' }),
     });
     const r2 = await s2.runWrite(env, { statements: plan('UPDATE a SET x = 1 WHERE id = 1', 'UPDATE b SET x = 1 WHERE id = 1'), maxRows: 10 });
@@ -375,7 +378,7 @@ describe('AgentSessions', () => {
     const denied = (await sessions.runWrite(env, { statements: plan('UPDATE t SET a = 1'), maxRows: 1 }).catch((e) => e)) as AgentError;
     expect(denied.message).not.toMatch(/'u'|10\.1\.1\.1|secret-pw/);
 
-    const broken = new AgentSessions({ getDriver: () => sessionsHarness().sessions as never, getDialect, resolveConnectParams: async () => { throw new Error('gcloud: token ya29.SECRET for ana@corp.com'); } });
+    const broken = new AgentSessions({ getDriver: () => sessionsHarness().sessions as never, resolveConnectParams: async () => { throw new Error('gcloud: token ya29.SECRET for ana@corp.com'); } });
     const cred = (await broken.runRead(env, { statements: plan('SELECT 1'), maxRows: 1 }).catch((e) => e)) as AgentError;
     expect(cred.message).not.toMatch(/ya29|ana@corp/);
   });
@@ -430,7 +433,7 @@ describe('AgentSessions: limits, pool, database and schema cache', () => {
       introspect: async () => ({ databases: [] }),
       test: async () => ({ serverVersion: 'x' }),
     };
-    const sessions = new AgentSessions({ getDriver: () => driver, getDialect, resolveConnectParams: async () => ({ host: 'h', port: 1, user: 'u', tls: 'off' }), scheduler: clock, now: () => clock.now });
+    const sessions = new AgentSessions({ getDriver: () => driver, resolveConnectParams: async () => ({ host: 'h', port: 1, user: 'u', tls: 'off' }), scheduler: clock, now: () => clock.now });
     return { sessions, opened, clock };
   }
 
@@ -501,7 +504,7 @@ describe('AgentSessions: limits, pool, database and schema cache', () => {
       },
       test: async () => ({ serverVersion: 'x' }),
     };
-    const sessions = new AgentSessions({ getDriver: () => driver, getDialect, resolveConnectParams: async () => ({ host: 'h', port: 1, user: 'u', tls: 'off' }), scheduler: clock, now: () => clock.now });
+    const sessions = new AgentSessions({ getDriver: () => driver, resolveConnectParams: async () => ({ host: 'h', port: 1, user: 'u', tls: 'off' }), scheduler: clock, now: () => clock.now });
     const burst = Promise.all(Array.from({ length: 40 }, () => sessions.schema(env)));
     await flush();
     gate.open!();
@@ -529,7 +532,6 @@ describe('AgentSessions: limits, pool, database and schema cache', () => {
     session.lastRollbackIncomplete = true;
     const s = new AgentSessions({
       getDriver: () => ({ engine: 'mysql', open: async () => session, introspect: async () => ({ databases: [] }), test: async () => ({ serverVersion: 'x' }) }),
-      getDialect,
       resolveConnectParams: async () => ({ host: 'h', port: 1, user: 'u', tls: 'off' }),
     });
     const run = await s.runWrite(env, { statements: plan('UPDATE t SET a = 1 WHERE id = 1'), maxRows: 1 });

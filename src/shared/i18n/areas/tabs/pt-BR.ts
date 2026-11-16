@@ -6,5 +6,5 @@ export const ptBR = {
   transactionOpen: 'Transação aberta',
   close: (p: { label: string }) => `Fechar aba ${p.label}`,
   newTab: 'Nova aba',
-  newTabTitle: 'Nova aba (Cmd+T)',
+  newTabTitle: (p: { shortcut: string }) => `Nova aba (${p.shortcut})`,
 };

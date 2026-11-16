@@ -19,6 +19,12 @@ export const ptBR = {
   projectHasEnvironments: (p: { names: string }) => `O projeto ainda tem ambientes: ${p.names}. Apague os ambientes primeiro.`,
   projectHasScripts: (p: { count: number }) => `O projeto tem ${f.count(p.count, { one: 'script', other: 'scripts' })}.`,
   hostRequired: 'Informe o host.',
+  gcpProjectRequired: 'Informe o projeto do Google Cloud.',
+  gcpProjectInvalid:
+    'O projeto do Google Cloud não é um id válido: de 6 a 30 caracteres, com letras minúsculas, números e hífens, começando por uma letra (um projeto de domínio se escreve dominio.com:projeto).',
+  bigqueryNeedsIam: 'O BigQuery entra pela credencial "Google IAM via gcloud": usuário e senha não servem.',
+  datasetInvalid: 'O dataset padrão só pode ter letras, números e sublinhado.',
+  maxBytesInvalid: 'O limite de bytes por consulta é um número inteiro de GiB, de 1 para cima.',
   credentialRequired: 'Escolha uma credencial.',
   credentialNameRequired: 'Informe o nome da credencial.',
   credentialExists: (p: { name: string }) => `Já existe uma credencial chamada "${p.name}".`,
@@ -26,6 +32,8 @@ export const ptBR = {
   passwordRequired: 'Informe a senha.',
   vaultUnavailable:
     'O cofre de senhas do sistema não está disponível. A senha não foi salva (o Cais nunca grava senha em texto puro).',
+  vaultUnavailableLinuxHint:
+    'Instale ou desbloqueie um chaveiro (GNOME Keyring ou KWallet). Se o seu ambiente gráfico não for reconhecido, abra o Cais com --password-store=gnome-libsecret.',
   gcloudAccountRequired: 'Informe a conta do gcloud.',
   dbUsernameRequired: 'Informe o usuário no banco.',
   credentialInUse: (p: { names: string }) => `A credencial está em uso por: ${p.names}.`,

@@ -2,7 +2,7 @@ import { createServer } from 'node:net';
 import type mysql from 'mysql2/promise';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { getDialect } from '@shared/dialects/registry';
-import type { Environment } from '@shared/model';
+import type { MysqlEnvironment as Environment } from '@shared/model';
 import type { SessionState } from '@shared/results';
 import { mysqlDriver } from '@main/drivers/mysql';
 import type { DbSession } from '@main/drivers/types';

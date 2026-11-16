@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
 import { AlertTriangle, Clock, Play, PlugZap, Save, Square, Unplug } from 'lucide-react';
 import { connectionView } from '@shared/connection';
-import { getDialect } from '@shared/dialects/registry';
+import { engineVersionLabel, getDialect } from '@shared/dialects/registry';
+import { capabilitiesOf } from '@shared/engines';
 import type { SessionMode } from '@shared/model';
 import { isScriptDirty } from '@shared/scripts';
+import { shortcutText } from '@shared/shortcuts';
 import {
   cancelTab,
   changeMode,
@@ -20,9 +22,10 @@ import { formatElapsed } from '../lib/format';
 import { m } from '../lib/i18n';
 import { useStore } from '../lib/store';
 
+// every mode the app knows, in the order shown; the ones the engine does not accept are disabled
 const MODES: SessionMode[] = ['read-only', 'transaction', 'autocommit'];
 
-export function SessionBar({ tabId }: { tabId: string }) {
+export function SessionBar({ tabId, platform }: { tabId: string; platform: string }) {
   const tab = useStore((s) => s.tabs.find((t) => t.id === tabId));
   const env = useStore((s) => s.catalog.environments.find((e) => e.id === tab?.environmentId));
   const project = useStore((s) => s.catalog.projects.find((p) => p.id === env?.projectId));
@@ -43,7 +46,9 @@ export function SessionBar({ tabId }: { tabId: string }) {
   const txOpen = !!session?.transaction.open;
   const t = m().sessionBar;
   const view = connectionView(session, run);
-  const chipDetail = view.status === 'connected' && view.detail ? `${getDialect(env.engine).displayName} ${view.detail}` : view.detail;
+  const chipDetail = view.status === 'connected' && view.detail ? engineVersionLabel(env.engine, view.detail) : view.detail;
+  // "banco" or "dataset": the engine's own word
+  const term = getDialect(env.engine).databaseTerm;
   const dirty = !!script && isScriptDirty(tab.sql, script);
 
   return (
@@ -78,7 +83,7 @@ export function SessionBar({ tabId }: { tabId: string }) {
             className="btn small ghost"
             data-testid="btn-disconnect"
             disabled={!!view.disconnectBlocked}
-            title={view.disconnectBlocked ?? t.disconnectTitle}
+            title={view.disconnectBlocked ?? t.disconnectTitle[term]}
             onClick={() => void disconnectTab(tabId)}
           >
             <Unplug size={12} /> {t.disconnect}
@@ -86,12 +91,12 @@ export function SessionBar({ tabId }: { tabId: string }) {
         )}
         <select
           className="select"
-          aria-label={t.currentDatabase}
+          aria-label={t.currentDatabase[term]}
           value={database ?? ''}
           disabled={busy || options.length === 0}
           onChange={(e) => void chooseDatabase(tabId, e.target.value)}
         >
-          {!database && <option value="">{t.noDatabase}</option>}
+          {!database && <option value="">{t.noDatabase[term]}</option>}
           {options.map((name) => (
             <option key={name} value={name}>
               {name}
@@ -99,18 +104,22 @@ export function SessionBar({ tabId }: { tabId: string }) {
           ))}
         </select>
         <div className="seg" role="radiogroup" aria-label={t.modeGroup}>
-          {MODES.map((option) => (
-            <button
-              key={option}
-              role="radio"
-              aria-checked={mode === option}
-              className={mode === option ? 'on' : ''}
-              disabled={busy}
-              onClick={() => void changeMode(tabId, option)}
-            >
-              {t.mode[option]}
-            </button>
-          ))}
+          {MODES.map((option) => {
+            const supported = capabilitiesOf(env.engine).modes.includes(option);
+            return (
+              <button
+                key={option}
+                role="radio"
+                aria-checked={mode === option}
+                className={mode === option ? 'on' : ''}
+                disabled={busy || !supported}
+                {...(supported ? {} : { title: t.modeUnsupported({ engine: getDialect(env.engine).displayName }) })}
+                onClick={() => void changeMode(tabId, option)}
+              >
+                {t.mode[option]}
+              </button>
+            );
+          })}
         </div>
         <span className="spacer" />
         <button
@@ -118,7 +127,7 @@ export function SessionBar({ tabId }: { tabId: string }) {
           data-testid="btn-save"
           data-dirty={dirty ? 'true' : 'false'}
           aria-label={t.save}
-          title={t.saveTitle}
+          title={t.saveTitle({ save: shortcutText('save', platform), saveAs: shortcutText('saveAs', platform) })}
           onClick={() => void saveTab(tabId)}
         >
           <Save size={12} /> {t.save}
@@ -126,7 +135,7 @@ export function SessionBar({ tabId }: { tabId: string }) {
         </button>
         {run?.running ? (
           <button className="btn danger" onClick={() => void cancelTab(tabId)} aria-label={t.cancel}>
-            <Square size={12} fill="currentColor" /> {t.cancel} <kbd>⌘.</kbd>
+            <Square size={12} fill="currentColor" /> {t.cancel} <kbd>{shortcutText('cancel', platform)}</kbd>
           </button>
         ) : (
           <button
@@ -136,7 +145,7 @@ export function SessionBar({ tabId }: { tabId: string }) {
             aria-label={t.run}
             data-testid="run"
           >
-            <Play size={12} fill="currentColor" /> {t.run} <kbd>⌘↵</kbd>
+            <Play size={12} fill="currentColor" /> {t.run} <kbd>{shortcutText('run', platform)}</kbd>
           </button>
         )}
       </div>

@@ -9,6 +9,7 @@ import {
   dialog,
   Menu,
   nativeTheme,
+  net,
   Notification,
   safeStorage,
   type MenuItemConstructorOptions,
@@ -21,13 +22,12 @@ import type { AuditEntry } from './agents/audit';
 import { AgentBroker } from './agents/broker';
 import { AgentServer, socketPathFor } from './agents/server';
 import { AgentSessions, realScheduler } from './agents/sessions';
-import { resolveCredential, toConnectParams } from './auth/credentials';
+import { connectParamsFor, type CredentialSources } from './auth/credentials';
 import { installCli } from './cli-install';
 import { GcloudTokenProvider, type SpawnFn } from './auth/gcloud';
-import { CaisError } from './errors';
 import { initMainLocale, mainLocale } from './i18n';
 import iconPath from '../../resources/icon.png?asset';
-import { getDriver } from './drivers/registry';
+import { configureDrivers, getDriver } from './drivers/registry';
 import { registerIpc } from './ipc';
 import { SessionManager } from './sessions';
 import type { Environment } from '@shared/model';
@@ -160,7 +160,9 @@ function buildMenu(): void {
   if (!app.isPackaged) view.push({ role: 'reload', label: t.reload }, { role: 'toggleDevTools', label: t.toggleDevTools });
   template.push({ label: t.view, submenu: view });
   // Cmd+W and Cmd+T belong to the renderer (tabs), so no "Close Window" item here.
-  template.push({ label: t.window, submenu: [{ role: 'minimize', label: t.minimize }, { role: 'zoom', label: t.zoom }] });
+  const windowMenu: MenuItemConstructorOptions[] = [{ role: 'minimize', label: t.minimize }];
+  if (isMac) windowMenu.push({ role: 'zoom', label: t.zoom });
+  template.push({ label: t.window, submenu: windowMenu });
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
@@ -214,6 +216,7 @@ function createWindow(): BrowserWindow {
       app.quit();
     }
   });
+  win.on('focus', () => win.flashFrame(false));
   win.on('closed', () => {
     mainWindow = null;
   });
@@ -282,21 +285,28 @@ async function bootstrap(): Promise<void> {
     now: () => Date.now(),
   });
 
+  // Test hook (unpackaged app only): the BigQuery token is a fixed fake, and the REST address may be a local fake server.
+  // The e2e never runs gcloud for BigQuery either.
+  const sources: CredentialSources = {
+    getPassword: (id) => store.getPassword(id),
+    getToken: (account, sa) => gcloud.getToken(account, sa),
+    getAccessToken: (account, sa, opts) => (e2e ? Promise.resolve('cais-test-access-token') : gcloud.getAccessToken(account, sa, opts)),
+  };
+  configureDrivers({
+    bigquery: {
+      fetch: (input, init) => net.fetch(input as string, init as RequestInit),
+      ...(!app.isPackaged && process.env.CAIS_BIGQUERY_URL ? { baseUrl: process.env.CAIS_BIGQUERY_URL } : {}),
+    },
+  });
+  // an environment changed outside the Cais may point at someone else's host or project: no credential goes there
+  const resolveParams = async (environment: Environment, origin: 'person' | 'agent') => {
+    store.requireTrusted(environment.id);
+    return connectParamsFor(environment, environment.defaultDatabase, { getCredential: (id) => store.getCredential(id), sources, origin });
+  };
+
   const sessions = new SessionManager({
     getEnvironment: (id) => store.getEnvironment(id),
-    resolveConnectParams: async (environment) => {
-      store.requireTrusted(environment.id);
-      const credential = store.getCredential(environment.credentialId);
-      if (!credential) throw new CaisError(m().mainMisc.credentialNotFound);
-      const resolved = await resolveCredential(credential, {
-        getPassword: (id) => store.getPassword(id),
-        getToken: (account, sa) => gcloud.getToken(account, sa),
-      });
-      return toConnectParams(
-        { host: environment.host, port: environment.port, database: environment.defaultDatabase },
-        resolved,
-      );
-    },
+    resolveConnectParams: (environment) => resolveParams(environment, 'person'),
     getDriver,
     getDialect,
     emit: (state) => {
@@ -321,20 +331,6 @@ async function bootstrap(): Promise<void> {
   });
 
   // --- agent access: socket, broker, trail. Nothing listens until the person turns it on. ---
-  const resolveParams = async (environment: Environment) => {
-    // an environment changed outside the Cais may point at someone else's host: no credential goes there
-    store.requireTrusted(environment.id);
-    const credential = store.getCredential(environment.credentialId);
-    if (!credential) throw new CaisError(m().mainMisc.credentialNotFound);
-    const resolved = await resolveCredential(credential, {
-      getPassword: (id) => store.getPassword(id),
-      getToken: (account, sa) => gcloud.getToken(account, sa),
-    });
-    return toConnectParams(
-      { host: environment.host, port: environment.port, database: environment.defaultDatabase },
-      resolved,
-    );
-  };
   let lastNotified = 0;
   const audit = {
     append: (entry: AuditEntry) => trail.append({ ...entry, actor: entry.actor ?? 'agent' }),
@@ -350,7 +346,7 @@ async function bootstrap(): Promise<void> {
       get: (id) => scripts.get(id),
       save: (input, by) => scripts.save(input, by),
     },
-    executor: new AgentSessions({ getDriver, getDialect, resolveConnectParams: resolveParams }),
+    executor: new AgentSessions({ getDriver, resolveConnectParams: (environment) => resolveParams(environment, 'agent') }),
     audit,
     getDialect,
     onChange: () => pushAgents(),
@@ -380,7 +376,8 @@ async function bootstrap(): Promise<void> {
         mainWindow.focus();
       });
       note.show();
-      app.dock?.bounce('informational');
+      if (isMac) app.dock?.bounce('informational');
+      else if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isFocused()) mainWindow.flashFrame(true);
     },
     onScriptsChanged: () => {
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(CHANNELS.eventScriptsChanged);
@@ -394,6 +391,7 @@ async function bootstrap(): Promise<void> {
       uid: process.getuid?.() ?? 0,
       username: userInfo().username,
       tmpdir: tmpdir(),
+      runtimeDir: process.env.XDG_RUNTIME_DIR,
       // CAIS_SOCKET only counts in an unpackaged app (the test hook); the packaged app ignores it
       ...(!app.isPackaged && process.env.CAIS_SOCKET ? { override: process.env.CAIS_SOCKET } : {}),
     }),
@@ -422,6 +420,9 @@ async function bootstrap(): Promise<void> {
     scripts,
     agents: { access, broker },
     gcloud,
+    // the e2e never runs gcloud: the registry offers a fixed account
+    ...(e2e ? { listGcloudAccounts: async () => [{ account: 'ana@exemplo.com', status: 'ACTIVE' }] } : {}),
+    getAccessToken: sources.getAccessToken,
     sessions,
     isMainWindow: (contents) => mainWindow !== null && contents === mainWindow.webContents,
     afterSessionClose: () => {

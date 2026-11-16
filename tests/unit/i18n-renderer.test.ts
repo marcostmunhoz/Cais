@@ -110,7 +110,7 @@ describe('renderer catalog areas', () => {
     expect(en.sessionBar.mode['read-only']).toBe('Read-only');
     expect(en.sessionBar.txOpen({ statements: 1, elapsed: '5s' })).toBe('Transaction open · 1 statement · 5s');
     expect(en.statusBar.affectedRows({ n: 3 })).toBe('3 rows affected');
-    expect(en.statusBar.runHint({ mod: 'Cmd' })).toBe('Cmd+Enter runs the statement under the cursor');
+    expect(en.statusBar.runHint({ shortcut: 'Ctrl+Enter' })).toBe('Ctrl+Enter runs the statement under the cursor');
     expect(en.results.label.error({ n: 2, verb: 'UPDATE' })).toBe('2 · UPDATE · error');
     expect(en.results.bytesPartial({ length: 4096, shown: 64 })).toBe('(4,096 bytes, showing the first 64)');
     expect(en.tabs.close({ label: 'api · dev' })).toBe('Close tab api · dev');

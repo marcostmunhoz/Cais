@@ -14,6 +14,7 @@ import {
 import { clientName, currentAgentModal } from '../lib/agents';
 import { plural } from '../lib/format';
 import { getLocale, m } from '../lib/i18n';
+import { getDialect } from '@shared/dialects/registry';
 import { displaySql } from '@shared/text';
 import { AGENT_LEVEL_LABEL, agentLevelOf } from '@shared/model';
 import { setState, useStore } from '../lib/store';
@@ -92,8 +93,18 @@ function StatementList({ request, onGate }: { request: AgentRequestView; onGate:
           <div className="stmt-head">
             <span className="stmt-n">#{i + 1}</span>
             <span className={`agent-pill ${s.kind === 'write' ? 'warn' : ''}`}>{kindLabel(s.kind)}</span>
+            {s.bytesEstimated !== undefined && (
+              <span className="bytes-estimate" data-testid="stmt-estimate">
+                {t().modal.estimate({ bytes: s.bytesEstimated })}
+              </span>
+            )}
+            {s.bytesBilled !== undefined && (
+              <span className="bytes-estimate" data-testid="stmt-billed">
+                {t().modal.billed({ bytes: s.bytesBilled })}
+              </span>
+            )}
           </div>
-          <SqlView value={s.sql} label={t().modal.statement({ n: i + 1 })} />
+          <SqlView value={s.sql} label={t().modal.statement({ n: i + 1 })} environmentId={request.environmentId} />
         </div>
       ))}
     </div>
@@ -102,12 +113,14 @@ function StatementList({ request, onGate }: { request: AgentRequestView; onGate:
 
 function Meta({ request }: { request: AgentRequestView }) {
   const msg = t().modal;
+  const engine = useStore((s) => s.catalog.environments.find((e) => e.id === request.environmentId)?.engine);
+  const term = engine ? getDialect(engine).databaseTerm : 'database';
   return (
     <div className="agent-meta">
       <span className="k">{msg.environment}</span>
       <span className="v">
         {request.environmentLabel}
-        {request.database ? msg.database({ database: request.database }) : ''}
+        {request.database ? msg[term]({ database: request.database }) : ''}
       </span>
       <span className="k">{msg.client}</span>
       <span className="v">
@@ -267,7 +280,7 @@ function CommitModal({ request }: { request: AgentRequestView }) {
             <div className="row" key={i}>
               {/* the whole command, with the same markers as the approval modal */}
               <div className="sql">
-                <SqlView value={s.sql} label={t().modal.statement({ n: i + 1 })} />
+                <SqlView value={s.sql} label={t().modal.statement({ n: i + 1 })} environmentId={request.environmentId} />
               </div>
               <span>
                 {s.error
@@ -381,7 +394,7 @@ function RequestRow({ request, onOpen, open }: { request: AgentRequestView; onOp
               </>
             )}
           </div>
-          <SqlView value={request.sql} label={msg.sql} />
+          <SqlView value={request.sql} label={msg.sql} environmentId={request.environmentId} />
         </div>
       )}
     </>

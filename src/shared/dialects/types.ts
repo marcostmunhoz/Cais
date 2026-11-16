@@ -39,6 +39,22 @@ export interface Classification {
   serverStateFunction?: string;
   /** Shows account secrets (SHOW CREATE USER prints the password hash). */
   accountSecrets?: boolean;
+  /**
+   * Qualified functions outside the engine's built-in namespaces (`SAFE.`, `NET.`, `AEAD.`, `KEYS.`, `HLL_COUNT.`,
+   * `KLL_QUANTILES.`, `OBJ.`…), upper case, as written: a function defined in a project (it may be a remote function,
+   * which runs code outside the engine) plus every `ML.*` and `AI.*` call (they may call remote models and cost
+   * more than the bytes read). GoogleSQL only.
+   */
+  remoteCalls?: string[];
+  /** The statement calls EXTERNAL_QUERY, which runs a query on another database. GoogleSQL only. */
+  externalQuery?: boolean;
+  /**
+   * The statement reads a view that shows the SQL of other people's jobs or sessions (`INFORMATION_SCHEMA.JOBS*`,
+   * `JOBS_BY_*`, `SESSIONS_*`), in any spelling of the path (backticks, region or project qualifier). GoogleSQL only.
+   */
+  jobsMetadata?: boolean;
+  /** The text carries a `#legacySQL` or `#standardSQL` directive. GoogleSQL only. */
+  legacyDirective?: boolean;
 }
 
 /**
@@ -62,12 +78,43 @@ export interface UpdateSpec {
   where: UpdateValue[];
 }
 
+/**
+ * What agents may and may not touch, as the engine names it. `decide()` (main/agents/policy.ts) and the broker
+ * read these and know no engine's names. The refusal messages go to agents only (fixed pt-BR).
+ */
+export interface AgentRules {
+  /** Lower-case names of schemas/databases agents never write to. */
+  systemSchemas: string[];
+  /** Lower-case names of schemas agents never read (accounts, password hashes). */
+  secretSchemas: string[];
+  /** Upper-case function names agents never call. */
+  deniedFunctions: string[];
+  /** Verbs an agent may run as writes (always inside a transaction, always approved). */
+  writeVerbs: string[];
+  /** --database from an agent: a plain name the engine accepts, without hidden text. */
+  isValidDatabaseName(name: string): boolean;
+  /**
+   * An unqualified call (as `Classification.functions` lists it) that the engine does not ship: it may be a routine
+   * defined in the project, so an agent's read that calls it waits for the person. Absent: the engine has no such
+   * routines to tell apart (MySQL keeps its own rules).
+   */
+  isUnknownFunction?(name: string): boolean;
+  messages: {
+    systemSchemaWrite: string;
+    systemSchemaRead: string;
+    /** Reading the metadata of other people's jobs or sessions (`system_schema`). Absent: `systemSchemaRead`. */
+    jobsMetadata?: string;
+  };
+}
+
 export interface Dialect {
   engine: Engine;
   /** Product name for the interface ("MySQL"). */
   displayName: string;
   /** Name of the CodeMirror SQL dialect the renderer should use. */
-  codemirrorDialect: 'MySQL';
+  codemirrorDialect: 'MySQL' | 'GoogleSQL';
+  /** What the engine calls the namespace a statement runs in: a MySQL "database", a BigQuery "dataset". The catalogs have both words. */
+  databaseTerm: 'database' | 'dataset';
   keywords: string[];
   splitStatements(sql: string): SqlStatement[];
   /**
@@ -84,6 +131,10 @@ export interface Dialect {
   /** Why SQL from an agent may read differently to a person than to the server (pt-BR), or null. */
   agentCodeProblem?(sql: string): string | null;
   quoteIdent(name: string): string;
+  /** What agents may and may not touch. */
+  agentRules: AgentRules;
+  /** The preview a double click on a table runs: its first rows, written as the engine reads them. */
+  tablePreviewSql(database: string, table: string): string;
   /** How a value of this column type is written (and whether the grid can edit it at all). */
   valueKind(type: string): ValueKind;
   /**

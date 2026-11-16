@@ -39,6 +39,19 @@ export interface StatementError {
   errno?: number;
   sqlState?: string;
   fatal?: boolean; // the connection is gone
+  /** `message` quotes the server's own text, which can hold row values: agents only get it when the person shares the result. */
+  serverText?: boolean;
+}
+
+/** What the engine says a statement cost, for engines that bill by what they read. MySQL sends none. */
+export interface StatementStats {
+  bytesProcessed?: number;
+  bytesBilled?: number;
+  bytesEstimated?: number;
+  cacheHit?: boolean;
+  jobId?: string;
+  /** The result was read again from a job that had already run (and been billed): no new cost. */
+  reread?: boolean;
 }
 
 export interface StatementResult {
@@ -58,6 +71,7 @@ export interface StatementResult {
   inTransaction?: boolean;
   /** Something the person must know about what the statement did to the session (pt-BR). */
   notice?: string;
+  stats?: StatementStats;
 }
 
 export type SessionStatus = 'disconnected' | 'connecting' | 'idle' | 'running' | 'error';
@@ -91,6 +105,8 @@ export type SchemaTable = {
   name: string;
   type: 'table' | 'view';
   engine?: string;
+  /** BigQuery: what kind of table or view it is, when it is not the plain one. */
+  subtype?: 'materialized-view' | 'external' | 'snapshot';
   columns: SchemaColumn[];
   /** View: the tables it reads, "db.table" lower-case (what a write through the view reaches). */
   uses?: string[];

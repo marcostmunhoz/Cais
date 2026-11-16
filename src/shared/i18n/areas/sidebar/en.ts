@@ -4,7 +4,7 @@ import type { ptBR } from './pt-BR';
 /** Area "sidebar", English. */
 export const en: Shape<typeof ptBR> = {
   envTitle: 'Click focuses a tab of this environment · double click opens another',
-  scriptsEmpty: 'No scripts. Save a tab with Save (⌘S).',
+  scriptsEmpty: (p) => `No scripts. Save a tab with Save (${p.save}).`,
   duplicateEnvironment: 'Duplicate',
   projectMenu: (p) => `Menu of project ${p.name}`,
   newEnvironment: 'New environment',
@@ -26,8 +26,11 @@ export const en: Shape<typeof ptBR> = {
   newTab: 'New tab',
   editEnvironment: 'Edit',
   refreshSchema: 'Refresh schema',
-  collapseDatabases: 'Collapse databases',
-  expandDatabases: 'Expand databases',
+  collapseDatabases: { database: 'Collapse databases', dataset: 'Collapse datasets' },
+  expandDatabases: { database: 'Expand databases', dataset: 'Expand datasets' },
+  loadingColumns: 'Loading columns…',
+  loadingDatasetColumns: 'Reading…',
+  subtype: { 'materialized-view': 'materialized view', external: 'external table', snapshot: 'snapshot' },
   environmentMenu: (p) => `Menu of environment ${p.name}`,
   loadingSchema: 'Loading schema…',
   newEnvironmentIn: (p) => `New environment in ${p.name}`,

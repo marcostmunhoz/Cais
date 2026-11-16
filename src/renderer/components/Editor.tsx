@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap } from '@codemirror/autocomplete';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
-import { MySQL, sql, SQLDialect, type SQLNamespace } from '@codemirror/lang-sql';
+import { sql, SQLDialect, type SQLNamespace } from '@codemirror/lang-sql';
 import { bracketMatching, HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { Compartment, EditorState, type Extension, RangeSetBuilder } from '@codemirror/state';
 import {
@@ -17,9 +17,11 @@ import {
 } from '@codemirror/view';
 import { tags } from '@lezer/highlight';
 import { getDialect, statementAtCursor } from '@shared/dialects/registry';
+import type { Engine } from '@shared/model';
 import type { Dialect } from '@shared/dialects/types';
 import type { SchemaTree } from '@shared/results';
 import { registerEditor, updateTabSql } from '../lib/actions';
+import { CODEMIRROR_DIALECTS } from '../lib/codemirrorDialects';
 import { m } from '../lib/i18n';
 
 export const highlightStyle = HighlightStyle.define([
@@ -63,7 +65,7 @@ function activeStatementPlugin(dialect: Dialect) {
   );
 }
 
-function buildNamespace(tree: SchemaTree | undefined): SQLNamespace {
+function buildNamespace(tree: SchemaTree | undefined, term: Dialect['databaseTerm']): SQLNamespace {
   const t = m().editor;
   const ns: Record<string, SQLNamespace> = {};
   for (const db of tree?.databases ?? []) {
@@ -78,17 +80,11 @@ function buildNamespace(tree: SchemaTree | undefined): SQLNamespace {
         })),
       };
     }
-    ns[db.name] = { self: { label: db.name, type: 'namespace', detail: t.databaseDetail }, children: tables };
+    ns[db.name] = { self: { label: db.name, type: 'namespace', detail: t.databaseDetail[term] }, children: tables };
   }
   return ns;
 }
 
-/**
- * The sessions always run with backslash escapes on (the app removes NO_BACKSLASH_ESCAPES), so the highlighter
- * must read 'x\'' the same way the server does; the stock MySQL spec has them off.
- */
-export const MYSQL_AS_SERVER = SQLDialect.define({ ...MySQL.spec, backslashEscapes: true });
-const CODEMIRROR_DIALECTS = { MySQL: MYSQL_AS_SERVER };
 
 function sqlExtension(dialect: Dialect, tree: SchemaTree | undefined, database: string | null): Extension {
   const base = CODEMIRROR_DIALECTS[dialect.codemirrorDialect];
@@ -98,7 +94,7 @@ function sqlExtension(dialect: Dialect, tree: SchemaTree | undefined, database: 
   });
   return sql({
     dialect: withKeywords,
-    schema: buildNamespace(tree),
+    schema: buildNamespace(tree, dialect.databaseTerm),
     ...(database ? { defaultSchema: database } : {}),
     upperCaseKeywords: true,
   });
@@ -107,7 +103,7 @@ function sqlExtension(dialect: Dialect, tree: SchemaTree | undefined, database: 
 interface Props {
   tabId: string;
   initialSql: string;
-  engine: 'mysql';
+  engine: Engine;
   schema: SchemaTree | undefined;
   database: string | null;
 }

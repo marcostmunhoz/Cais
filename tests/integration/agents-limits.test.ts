@@ -2,7 +2,7 @@ import type mysql from 'mysql2/promise';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { getDialect } from '@shared/dialects/registry';
 import { READ_HARD_CUT_MS } from '@shared/agents';
-import type { Environment } from '@shared/model';
+import type { MysqlEnvironment as Environment } from '@shared/model';
 import { AgentBroker } from '@main/agents/broker';
 import { AgentSessions } from '@main/agents/sessions';
 import { mysqlDriver } from '@main/drivers/mysql';
@@ -39,8 +39,8 @@ beforeAll(async () => {
   envs = [base, { ...base, id: 'e-nodb', name: 'nodb', defaultDatabase: undefined }];
   clock = new FakeClock();
   sessions = new AgentSessions({
-    getDriver: () => mysqlDriver, getDialect, scheduler: clock, now: () => clock.now,
-    resolveConnectParams: async (e) => params({ host: e.host, port: e.port, database: e.defaultDatabase }),
+    getDriver: () => mysqlDriver, scheduler: clock, now: () => clock.now,
+    resolveConnectParams: async (e) => params({ host: (e as Environment).host, port: (e as Environment).port, database: e.defaultDatabase }),
   });
   let n = 0;
   broker = new AgentBroker({

@@ -24,6 +24,11 @@ export const AUTO_COMMIT_MAX_ROWS = 1000;
 /** And, per environment, up to this many rows in the last 15 minutes: a loop of small deletes still reaches the person. */
 export const AUTO_COMMIT_WINDOW_ROWS = 5000;
 export const AUTO_COMMIT_WINDOW_MS = 15 * 60_000;
+/**
+ * BigQuery: a read an agent asks for with more estimated bytes than this waits for the person, even in "Leitura
+ * liberada", under a 15-minute grant and in an environment with no limit. Fixed: not an option.
+ */
+export const AGENT_BYTES_APPROVAL = 10 * 1024 ** 3;
 export const AGENT_DEFAULT_ROWS = 200;
 export const AGENT_MAX_ROWS = 1000;
 
@@ -56,6 +61,9 @@ export interface AgentStatementView {
   verb: string;
   kind: StatementKind;
   rows?: number; // rows returned (reads) once it ran
+  /** Engines that bill by bytes read: what the dry run estimated, asked before the person decides, and what the job billed. */
+  bytesEstimated?: number;
+  bytesBilled?: number;
   affectedRows?: number; // rows changed (writes) once it ran
   error?: string;
 }

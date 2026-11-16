@@ -132,6 +132,7 @@ function agentSessions(opts: { openError?: Error; onExecute?: (sql: string) => P
     applyMode: async () => undefined,
     applyLimits: async () => undefined,
     execute: async (sql) => ({ index: 0, sql, kind: 'read', verb: 'SELECT', durationMs: 1, ...(opts.onExecute?.(sql) ?? {}) }),
+    useDatabase: async (name) => ({ index: 0, sql: `USE \`${name}\``, kind: 'session', verb: 'USE', durationMs: 1 }),
     cancel: async () => undefined,
     commit: async () => undefined,
     rollback: async () => undefined,
@@ -150,7 +151,6 @@ function agentSessions(opts: { openError?: Error; onExecute?: (sql: string) => P
   };
   return new AgentSessions({
     getDriver: () => driver,
-    getDialect,
     resolveConnectParams: async () => ({ host: dev.host, port: dev.port, database: 'app', user: 'u', password: 'secret-pw', tls: 'off' }),
     scheduler: new FakeClock(),
   });

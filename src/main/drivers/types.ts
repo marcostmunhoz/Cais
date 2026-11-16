@@ -1,8 +1,10 @@
 import type { Engine, SessionMode } from '@shared/model';
-import type { SchemaTree, StatementResult } from '@shared/results';
+import type { SchemaTree, StatementError, StatementResult } from '@shared/results';
 import type { MessageRef } from '@shared/i18n';
 
-export interface ConnectParams {
+export interface MysqlConnectParams {
+  /** Absent in older callers and tests: MySQL is the default. */
+  engine?: 'mysql';
   host: string;
   port: number;
   database?: string;
@@ -12,6 +14,31 @@ export interface ConnectParams {
   tls: 'off' | 'required'; // required = encrypt without verifying (ssl-mode=REQUIRED)
   /** Fresh parameters for a side connection opened later (KILL QUERY): an IAM token from open time may have expired. */
   refresh?: () => Promise<ConnectParams>;
+}
+
+export interface BigqueryConnectParams {
+  engine: 'bigquery';
+  /** The Google Cloud project where jobs run and are billed. */
+  project: string;
+  /** OAuth access token from gcloud. Never logged, never leaves main. */
+  accessToken: string;
+  /** A new access token (the server refused the one in hand, or a side request is opened later). */
+  refresh?: () => Promise<string>;
+  /** Most bytes one statement may bill; absent: no limit. */
+  maxBytesBilled?: number;
+  /** Dataset for unqualified table names. */
+  defaultDataset?: string;
+  /** Who asked: the label `cais: person|agent` on every job, which splits the billing. */
+  origin: 'person' | 'agent';
+}
+
+/** What a driver needs to connect, by engine. */
+export type ConnectParams = MysqlConnectParams | BigqueryConnectParams;
+
+/** The same parameters with another default database (MySQL) or dataset (BigQuery). */
+export function withDatabase(params: ConnectParams, database: string | undefined): ConnectParams {
+  if (params.engine === 'bigquery') return { ...params, ...(database ? { defaultDataset: database } : {}) };
+  return { ...params, ...(database ? { database } : {}) };
 }
 
 export interface DbSessionError {
@@ -25,13 +52,51 @@ export interface DbSessionError {
   errno?: number;
   sqlState?: string;
   fatal?: boolean;
+  /** `message` quotes the server's own text (which can hold row values). */
+  serverText?: boolean;
 }
 
 export interface Driver {
   engine: Engine;
+  /** `introspect` reads the columns of one database only when asked for it (`scope.database`), not all at once. */
+  lazyColumns?: boolean;
   open(params: ConnectParams): Promise<DbSession>;
-  introspect(params: ConnectParams): Promise<SchemaTree>; // own short connection
+  /**
+   * Own short connection. Without a scope: databases and tables. With `{ database }`: also the columns of that
+   * database, for engines that read them on demand. MySQL ignores the scope and returns everything.
+   */
+  introspect(params: ConnectParams, scope?: { database?: string }): Promise<SchemaTree>;
   test(params: ConnectParams): Promise<{ serverVersion: string }>;
+}
+
+/** What `execute` takes. MySQL reads `maxRows` and `stopAtCap`; the other fields are for engines that bill or cache reads. */
+export interface ExecuteOptions {
+  maxRows: number;
+  stopAtCap?: boolean;
+  /** Upper bound of bytes the engine may bill for this statement. */
+  maxBytesBilled?: number;
+  /**
+   * Refuse to run (code `bytes_over_approved`, nothing billed) when the dry run of this very run estimates more than
+   * this: the estimate someone approved has grown since. Agents' reads only.
+   */
+  estimateCeiling?: number;
+  /**
+   * Refuse to run (code `routine_not_approved`) when the dry run of this very run reports any routine: nobody saw one
+   * when the request was decided. Agents' reads only; also the net for a dry run that failed earlier.
+   */
+  refuseRoutines?: boolean;
+  /** Read more rows of the result already computed by the previous run of the same statement, without running it again. */
+  refetch?: boolean;
+}
+
+/** What `prepare` learned about a statement without running it. */
+export interface PrepareResult {
+  /** The kind of statement as the server reads it (for a second look at read-only). */
+  serverKind?: string;
+  bytesEstimated?: number;
+  /** Routines the server lists for the statement (views: unconfirmed live), each as "datasetId.routineId": never with the project. */
+  routines?: string[];
+  error?: StatementError;
 }
 
 export interface DbSession {
@@ -42,7 +107,19 @@ export interface DbSession {
    * `stopAtCap: false`: past maxRows the remaining rows are read and dropped instead of killing the query
    * (a procedure must not be cut between its SELECT and its writes).
    */
-  execute(sql: string, opts: { maxRows: number; stopAtCap?: boolean }): Promise<StatementResult>;
+  execute(sql: string, opts: ExecuteOptions): Promise<StatementResult>;
+  /** Switches the session's current database and answers like a statement (`sql` is what the trail records). */
+  useDatabase(name: string): Promise<StatementResult>;
+  /**
+   * Asks the server what it makes of a statement without running it. Optional: engines with no such step leave it out.
+   * Not used by the SessionManager yet.
+   */
+  prepare?(sql: string): Promise<PrepareResult>;
+  /**
+   * Whether a transaction is open on the server right now, or undefined when it cannot tell. Optional: an engine
+   * without it leaves the SessionManager with the state it had.
+   */
+  transactionProbe?(): Promise<boolean | undefined>;
   cancel(): Promise<void>; // KILL QUERY <threadId> through a control connection
   commit(): Promise<void>;
   rollback(): Promise<void>;

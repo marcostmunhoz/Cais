@@ -4,11 +4,12 @@ import type { Dialect } from '@shared/dialects/types';
 import type { Classification } from '@shared/dialects/types';
 import { noStatementMessage, statementAtCursor } from '@shared/dialects/registry';
 import type { PendingTransaction, RunRequest, RunResponse, SetModeResponse } from '@shared/ipc';
-import type { SessionState, StatementResult } from '@shared/results';
-import { m } from '@shared/i18n';
+import type { SessionState, StatementError, StatementResult, StatementStats } from '@shared/results';
+import { GIB, capabilitiesOf, initialModeFor, type EngineCapabilities } from '@shared/engines';
+import { fmt, m } from '@shared/i18n';
 import { CaisError } from './errors';
 import { realScheduler, type Scheduler } from './scheduler';
-import type { ConnectParams, DbSession, DbSessionError, Driver } from './drivers/types';
+import type { ConnectParams, DbSession, DbSessionError, Driver, PrepareResult } from './drivers/types';
 import { DriverError } from './drivers/types';
 
 /** One line of the person's side of the trail. The trail adds who, when and the environment's name. */
@@ -30,7 +31,14 @@ export interface PersonTrailLine {
   errno?: number;
   inTransaction?: boolean;
   detail?: string;
+  /** BigQuery: the job and what it cost. Never result data. */
+  jobId?: string;
+  bytesEstimated?: number;
+  bytesBilled?: number;
 }
+
+/** Bytes rounded up to a whole GiB: what a confirmed estimate is allowed to bill. */
+const ceilGib = (bytes: number): number => Math.ceil(bytes / GIB) * GIB;
 
 /** The mode's name for trail details, in the app locale of the moment the line is written. */
 function modeLabel(mode: SessionMode): string {
@@ -43,6 +51,8 @@ export interface SessionDeps {
   resolveConnectParams(environment: Environment): Promise<ConnectParams>;
   getDriver(engine: Environment['engine']): Driver;
   getDialect(engine: Environment['engine']): Dialect;
+  /** What the engine accepts (modes, grid edit). The registry in `@shared/engines` when absent; tests inject restricted engines. */
+  capabilitiesOf?(engine: Environment['engine']): EngineCapabilities;
   emit(state: SessionState): void;
   now(): number;
   /** The trail. Never throws into a run; absent in tests that do not look at it. */
@@ -94,8 +104,23 @@ export class SessionManager {
     this.idleMs = deps.idleMs ?? IDLE_MS;
   }
 
-  static initialMode(environment: Pick<Environment, 'production'>): SessionMode {
-    return environment.production ? 'read-only' : 'autocommit';
+  /** Read-only in production; elsewhere Auto-commit when the engine takes it, else the engine's first mode. */
+  static initialMode(environment: Pick<Environment, 'production' | 'engine'>, caps: EngineCapabilities = capabilitiesOf(environment.engine)): SessionMode {
+    return initialModeFor(caps, environment.production);
+  }
+
+  private initialModeOf(environment: Environment): SessionMode {
+    return SessionManager.initialMode(environment, this.capabilities(environment.engine));
+  }
+
+  private capabilities(engine: Environment['engine']): EngineCapabilities {
+    return (this.deps.capabilitiesOf ?? capabilitiesOf)(engine);
+  }
+
+  private assertModeSupported(engine: Environment['engine'], mode: SessionMode): void {
+    if (!this.capabilities(engine).modes.includes(mode)) {
+      throw new CaisError(m().mainSessions.modeNotSupported({ mode: modeLabel(mode), engine: this.deps.getDialect(engine).displayName }), 'mode-not-supported');
+    }
   }
 
   private record(entry: Entry, line: Omit<PersonTrailLine, 'environment' | 'mode'> & { mode?: SessionMode }): void {
@@ -122,6 +147,10 @@ export class SessionManager {
       ...(result.error?.code ? { errorCode: result.error.code } : {}),
       ...(result.error?.errno !== undefined ? { errno: result.error.errno } : {}),
       ...(result.inTransaction !== undefined ? { inTransaction: result.inTransaction } : {}),
+      ...(result.stats?.jobId ? { jobId: result.stats.jobId } : {}),
+      // a re-read of a job that already ran points at the job, with no bytes: it was billed once
+      ...(result.stats?.bytesEstimated !== undefined && !result.stats.reread ? { bytesEstimated: result.stats.bytesEstimated } : {}),
+      ...(result.stats?.bytesBilled !== undefined && !result.stats.reread ? { bytesBilled: result.stats.bytesBilled } : {}),
       ...(result.error?.code === 'REFUSED'
         ? { detail: result.error.message }
         : result.notice || extra.detail
@@ -234,7 +263,8 @@ export class SessionManager {
 
     // The mode belongs to the tab: it survives reconnects. A newly requested production
     // autocommit needs the confirmation; one the tab already had does not.
-    const mode = opts.mode ?? previousMode ?? SessionManager.initialMode(environment);
+    const mode = opts.mode ?? previousMode ?? this.initialModeOf(environment);
+    this.assertModeSupported(environment.engine, mode);
     if (mode === 'autocommit' && environment.production && mode !== previousMode && !opts.confirmed) {
       throw new CaisError(m().mainSessions.autocommitNeedsConfirmation, 'confirmation-required');
     }
@@ -291,7 +321,7 @@ export class SessionManager {
     delete entry.state.error;
     if (mode === 'autocommit' && environment.production && mode !== previousMode) {
       this.record(entry, { event: 'mode', sql: '', state: 'ok', detail: m().mainSessions.trail.openedAutocommitProduction });
-    } else if (mode !== (previousMode ?? SessionManager.initialMode(environment))) {
+    } else if (mode !== (previousMode ?? this.initialModeOf(environment))) {
       this.record(entry, { event: 'mode', sql: '', state: 'ok', detail: m().mainSessions.trail.openedIn({ mode: modeLabel(mode) }) });
     }
     const current = session;
@@ -364,6 +394,7 @@ export class SessionManager {
     const entry = this.requireConnected(tabId);
     if (entry.state.status === 'running') throw new CaisError(m().mainSessions.setModeRunning);
     if (mode === entry.state.mode) return { session: structuredClone(entry.state) };
+    this.assertModeSupported(entry.environment.engine, mode);
     if (entry.state.transaction.open) {
       throw new CaisError(m().mainSessions.setModeTransaction, 'transaction-open');
     }
@@ -391,6 +422,15 @@ export class SessionManager {
     });
     this.touch(entry);
     return { session: this.publish(entry) };
+  }
+
+  /** The engine's dry run failed, or read the statement as something other than a query: the error to show, or null. */
+  private prepareFailure(prep: PrepareResult): StatementError | null {
+    if (prep.error) return prep.error;
+    const t = m().mainSessions;
+    if (!prep.serverKind) return { message: t.serverRefusedUnknown, code: 'REFUSED' };
+    if (prep.serverKind !== 'SELECT') return { message: t.serverRefusedType({ type: prep.serverKind }), code: 'REFUSED' };
+    return null;
   }
 
   /** Why the statement cannot run in the current mode, or null. */
@@ -453,6 +493,80 @@ export class SessionManager {
       }
     }
 
+    // 1b. the engine's own look (BigQuery dry run): second layer of read-only, and the cost of each statement
+    const session = entry.session;
+    const prepared: (PrepareResult | undefined)[] = [];
+    const limit = entry.environment.engine === 'bigquery' ? entry.environment.maxBytesBilled : undefined;
+    /** Per statement: the most bytes the job may bill, and the confirmation text for the trail. */
+    const bounds: ({ maxBytesBilled: number; detail?: string } | undefined)[] = [];
+    if (session.prepare && !req.refetch) {
+      entry.state.status = 'running';
+      entry.cancelRequested = false;
+      this.publish(entry);
+      try {
+        for (let i = 0; i < plan.length; i++) {
+          const item = plan[i]!;
+          let prep: PrepareResult;
+          try {
+            prep = await session.prepare(item.text);
+          } catch (error) {
+            prep = { error: error instanceof DriverError ? error.info : { message: toCaisError(error).message } };
+          }
+          prepared.push(prep);
+          const failure = this.prepareFailure(prep);
+          if (failure || entry.cancelRequested) {
+            const result: StatementResult = {
+              index: i,
+              sql: item.text,
+              kind: item.c.kind,
+              verb: item.c.verb,
+              durationMs: 0,
+              error: failure ?? { message: m().mainMisc.driver.cancelled, code: 'CANCELLED' },
+            };
+            this.recordResult(entry, result, entry.state.database);
+            // the dry-run phase is over: the state the reply and the event carry is the idle one, not "running"
+            entry.state.status = 'idle';
+            await this.recycleIfStale(entry);
+            this.touch(entry);
+            return { results: [result], session: this.publish(entry) };
+          }
+        }
+        if (entry.stale && !entry.state.transaction.open) {
+          // the limit (or anything else) was edited during the dry run: nothing runs under the old settings
+          entry.state.status = 'idle';
+          await this.recycleIfStale(entry);
+          this.publish(entry);
+          throw new CaisError(m().mainSessions.changedWhilePreparing, 'not-connected');
+        }
+        if (limit !== undefined) {
+          const over: { index: number; sql: string; bytesEstimated: number }[] = [];
+          for (let i = 0; i < plan.length; i++) {
+            const estimate = prepared[i]?.bytesEstimated ?? 0;
+            // a confirmation counts only for the very text it was asked about
+            const accepted = req.confirmedBytes?.filter((c) => c.sql === plan[i]!.text).map((c) => c.bytes) ?? [];
+            const confirmed = accepted.length > 0 ? Math.max(...accepted) : undefined;
+            if (estimate > limit && (confirmed === undefined || estimate > confirmed)) {
+              over.push({ index: i, sql: plan[i]!.text, bytesEstimated: estimate });
+            } else {
+              bounds[i] = {
+                maxBytesBilled: Math.max(limit, confirmed === undefined ? 0 : ceilGib(confirmed)),
+                ...(estimate > limit ? { detail: m().mainSessions.trail.overLimitConfirmed({ limit: fmt().formatBytes(limit), bytes: fmt().formatBytes(estimate) }) } : {}),
+              };
+            }
+          }
+          if (over.length > 0) {
+            // nothing runs: every statement over the limit is asked about together
+            entry.state.status = 'idle';
+            this.touch(entry);
+            this.publish(entry);
+            return { results: [], session: structuredClone(entry.state), needsConfirmation: { reason: 'bytes', statements: over, limit } };
+          }
+        }
+      } finally {
+        if (entry.state.status === 'running') entry.state.status = 'idle';
+      }
+    }
+
     // 2. confirmations are asked before any statement runs
     if (mode === 'transaction' && !req.confirmed) {
       let open = entry.state.transaction.open;
@@ -493,8 +607,9 @@ export class SessionManager {
           results.push(cancelled);
           this.recordResult(entry, cancelled, entry.state.database);
           if (entry.state.mode === 'transaction') {
-            const probe = await entry.session.execute('DO 0', { maxRows: 1 }).catch(() => undefined);
-            if (probe?.inTransaction === false) entry.state.transaction = idleTransaction();
+            // an engine with no probe keeps the state it had
+            const open = await entry.session.transactionProbe?.().catch(() => undefined);
+            if (open === false) entry.state.transaction = idleTransaction();
           }
           this.publish(entry);
           break;
@@ -510,12 +625,21 @@ export class SessionManager {
         }
         let result: StatementResult;
         try {
-          result = await entry.session.execute(text, { maxRows: req.maxRows, stopAtCap: c.kind === 'read' });
+          result = await entry.session.execute(text, {
+            maxRows: req.maxRows,
+            stopAtCap: c.kind === 'read',
+            ...(req.refetch ? { refetch: true } : {}),
+            ...(bounds[i] ? { maxBytesBilled: bounds[i]!.maxBytesBilled } : {}),
+          });
         } catch (error) {
           const info = error instanceof DriverError ? error.info : { message: toCaisError(error).message };
           result = { index: i, sql: text, kind: c.kind, verb: c.verb, durationMs: 0, error: info };
         }
         result = { ...result, index: i, sql: text, kind: c.kind, verb: c.verb };
+        const estimated = prepared[i]?.bytesEstimated;
+        if (estimated !== undefined && result.stats?.bytesEstimated === undefined && (result.stats || !result.error)) {
+          result.stats = { ...result.stats, bytesEstimated: estimated } satisfies StatementStats;
+        }
         if (result.error?.fatal && transactionWasOpen) {
           // the driver's ref (if any) described the old message: drop it with the rewrite
           const { ref: _ref, ...rest } = result.error as typeof result.error & { ref?: unknown };
@@ -524,7 +648,13 @@ export class SessionManager {
         results.push(result);
         this.recordResult(entry, result, databaseBefore, {
           ...(lineId ? { id: lineId } : {}),
-          ...(req.refetch ? { detail: m().mainSessions.trail.refetch({ n: 50_000 }) } : req.origin === 'grid' ? { detail: m().mainSessions.gridEdit } : {}),
+          ...(req.refetch
+            ? { detail: m().mainSessions.trail.refetch({ n: 50_000 }) }
+            : req.origin === 'grid'
+              ? { detail: m().mainSessions.gridEdit }
+              : bounds[i]?.detail
+                ? { detail: bounds[i]!.detail }
+                : {}),
         });
         if (!result.error?.fatal) this.applyTransactionState(entry, c, result);
         if (result.error) {
@@ -639,13 +769,12 @@ export class SessionManager {
   async useDatabase(tabId: string, database: string): Promise<SessionState> {
     const entry = this.requireConnected(tabId);
     if (entry.state.status === 'running') throw new CaisError(m().mainSessions.waitStatement);
-    const dialect = this.deps.getDialect(entry.environment.engine);
-    const sql = `USE ${dialect.quoteIdent(database)}`;
     const session = entry.session;
-    const result = await session.execute(sql, { maxRows: 1 });
+    const result = await session.useDatabase(database);
     // dropped meanwhile (idle timer, Desconectar, environment edited): nothing to update
     if (entry.session !== session) throw new CaisError(m().mainSessions.notConnected, 'not-connected');
-    this.recordResult(entry, { ...result, sql, verb: 'USE', kind: 'session' }, entry.state.database);
+    // the trail keeps the line of always: the driver's own text ("USE `db`"), verb USE, kind session
+    this.recordResult(entry, { ...result, verb: result.verb || 'USE', kind: 'session' }, entry.state.database);
     if (result.error) throw new CaisError(result.error.message, result.error.code);
     const current = await session.currentDatabase().catch(() => database);
     if (entry.session !== session) throw new CaisError(m().mainSessions.notConnected, 'not-connected');

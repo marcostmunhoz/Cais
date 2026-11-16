@@ -1,7 +1,7 @@
 /** Area "sidebar", pt-BR (the reference catalog: `en.ts` must follow its shape). */
 export const ptBR = {
   envTitle: 'Clique foca uma aba deste ambiente · duplo clique abre outra',
-  scriptsEmpty: 'Nenhum script. Salve uma aba com Salvar (⌘S).',
+  scriptsEmpty: (p: { save: string }) => `Nenhum script. Salve uma aba com Salvar (${p.save}).`,
   duplicateEnvironment: 'Duplicar',
   projectMenu: (p: { name: string }) => `Menu do projeto ${p.name}`,
   newEnvironment: 'Novo ambiente',
@@ -23,8 +23,12 @@ export const ptBR = {
   newTab: 'Nova aba',
   editEnvironment: 'Editar',
   refreshSchema: 'Atualizar schema',
-  collapseDatabases: 'Recolher bancos',
-  expandDatabases: 'Expandir bancos',
+  collapseDatabases: { database: 'Recolher bancos', dataset: 'Recolher datasets' },
+  expandDatabases: { database: 'Expandir bancos', dataset: 'Expandir datasets' },
+  loadingColumns: 'Carregando colunas…',
+  loadingDatasetColumns: 'Lendo…',
+  /** What kind of BigQuery table or view a row is, next to its name. */
+  subtype: { 'materialized-view': 'view materializada', external: 'tabela externa', snapshot: 'snapshot' },
   environmentMenu: (p: { name: string }) => `Menu do ambiente ${p.name}`,
   loadingSchema: 'Carregando schema…',
   newEnvironmentIn: (p: { name: string }) => `Novo ambiente em ${p.name}`,

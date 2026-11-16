@@ -31,6 +31,12 @@ export interface RunRequest {
   selection?: { from: number; to: number };
   maxRows: number;
   confirmed?: boolean;
+  /**
+   * BigQuery: the estimate in bytes the person accepted, tied to the text of the statement it was asked about (the
+   * answer to `needsConfirmation` with reason 'bytes'). A statement with another text, or whose new estimate passes
+   * the accepted one, is asked about again.
+   */
+  confirmedBytes?: { sql: string; bytes: number }[];
   /** "Buscar até 50.000": run one read again with more rows. Main refuses anything that is not a plain read. */
   refetch?: boolean;
   /** "Aplicar" of the grid edits: main accepts it only for UPDATEs and labels them on the trail. */
@@ -40,7 +46,10 @@ export interface RunRequest {
 export interface RunResponse {
   results: StatementResult[];
   session: SessionState;
-  needsConfirmation?: { reason: 'implicit-commit'; statements: string[] };
+  needsConfirmation?:
+    | { reason: 'implicit-commit'; statements: string[] }
+    /** Statements estimated above the environment's byte limit, nothing ran. `index` is the place in the run. */
+    | { reason: 'bytes'; statements: { index: number; sql: string; bytesEstimated: number }[]; limit: number };
 }
 
 export interface SetModeResponse {
@@ -93,7 +102,11 @@ export interface CaisApi {
     state(tabId: string): Promise<SessionState>;
   };
   schema: {
-    get(environmentId: string, opts?: { refresh?: boolean }): Promise<SchemaTree>;
+    /**
+     * The schema tree. `database`, for engines that read columns on demand (BigQuery): the tree comes back with the
+     * columns of that database (dataset) filled in; MySQL ignores it and always returns everything.
+     */
+    get(environmentId: string, opts?: { refresh?: boolean; database?: string }): Promise<SchemaTree>;
   };
   scripts: {
     list(): Promise<SavedScript[]>;

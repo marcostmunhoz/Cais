@@ -9,5 +9,5 @@ export const en: Shape<typeof ptBR> = {
   transactionOpen: 'Transaction open',
   close: (p) => `Close tab ${p.label}`,
   newTab: 'New tab',
-  newTabTitle: 'New tab (Cmd+T)',
+  newTabTitle: (p) => `New tab (${p.shortcut})`,
 };

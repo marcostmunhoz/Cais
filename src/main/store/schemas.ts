@@ -2,22 +2,29 @@ import { z } from 'zod';
 
 const id = z.string().min(1);
 
+const environmentBase = {
+  id,
+  projectId: id,
+  name: z.string(),
+  defaultDatabase: z.string().optional(),
+  credentialId: id,
+  production: z.boolean(),
+  agentLevel: z.enum(['approve-all', 'free-reads', 'free-reads-writes']).optional(),
+};
+
 export const catalogSchema = z.object({
   version: z.literal(1),
   projects: z.array(z.object({ id, name: z.string(), order: z.number() })),
   environments: z.array(
-    z.object({
-      id,
-      projectId: id,
-      name: z.string(),
-      engine: z.literal('mysql'),
-      host: z.string(),
-      port: z.number().int(),
-      defaultDatabase: z.string().optional(),
-      credentialId: id,
-      production: z.boolean(),
-      agentLevel: z.enum(['approve-all', 'free-reads', 'free-reads-writes']).optional(),
-    }),
+    z.discriminatedUnion('engine', [
+      z.object({ ...environmentBase, engine: z.literal('mysql'), host: z.string(), port: z.number().int() }),
+      z.object({
+        ...environmentBase,
+        engine: z.literal('bigquery'),
+        gcpProject: z.string().min(1),
+        maxBytesBilled: z.number().int().positive().optional(),
+      }),
+    ]),
   ),
   credentials: z.array(
     z.discriminatedUnion('kind', [

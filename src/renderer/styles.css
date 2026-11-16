@@ -1,6 +1,6 @@
 :root {
   --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, 'DejaVu Sans Mono', 'Liberation Mono', monospace;
   --text-primary: #1f1f1e;
   --text-secondary: #5f5e5a;
   --text-muted: #888780;
@@ -1261,6 +1261,48 @@ kbd {
   white-space: pre-wrap;
 }
 
+.tree-row .subtype {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  color: var(--text-muted);
+}
+
+.bytes-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.bytes-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  background: var(--surface-1);
+  border-radius: 6px;
+}
+
+.bytes-list .bytes-estimate {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-warning, var(--text-secondary));
+}
+
+.bytes-list code {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 3.6em;
+  overflow: hidden;
+}
+
 .picker {
   width: 440px;
 }
@@ -1878,6 +1920,12 @@ kbd {
   align-items: center;
   gap: 6px;
   margin-bottom: 3px;
+}
+
+.stmt-head .bytes-estimate {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
 }
 
 .stmt-n {

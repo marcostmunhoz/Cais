@@ -1,6 +1,6 @@
 ---
 name: cais
-description: Consulta e corrige dados de bancos MySQL pelo Cais (cliente SQL de desktop) com o CLI `cais llm`, com aprovação da pessoa no app e sem receber senha, token nem host do Cais. Use sempre que precisar ler um banco de dev, hml ou produção, conferir dado de um incidente, rodar um UPDATE/INSERT/DELETE em transação, ver tabelas e colunas, ou guardar uma consulta como script, mesmo que o pedido não cite o Cais. Prefira esta skill a abrir o cliente `mysql`, montar conexão com credencial ou ler arquivos do Cais. Não use para rodar DDL (CREATE, ALTER, DROP), que agentes não fazem, nem para desenvolver o próprio projeto Cais, que tem seu AGENTS.md.
+description: Consulta e corrige dados de bancos MySQL e consulta o BigQuery (só leitura) pelo Cais (cliente SQL de desktop) com o CLI `cais llm`, com aprovação da pessoa no app e sem receber senha, token nem host do Cais. Use sempre que precisar ler um banco de dev, hml ou produção, conferir dado de um incidente, rodar um UPDATE/INSERT/DELETE em transação, ver tabelas e colunas, ou guardar uma consulta como script, mesmo que o pedido não cite o Cais. Prefira esta skill a abrir o cliente `mysql`, montar conexão com credencial ou ler arquivos do Cais. Não use para rodar DDL (CREATE, ALTER, DROP), que agentes não fazem, nem para desenvolver o próprio projeto Cais, que tem seu AGENTS.md.
 ---
 
 # Cais: acesso a bancos pelo CLI `cais llm`
@@ -40,6 +40,18 @@ Permissão sugerida no Claude Code: `Bash(cais llm:*)`.
 7. Scripts do projeto: `cais llm scripts`, `cais llm script <id>`, `cais llm script-save --project loja --name "Pedidos duplicados por cliente" --sql "..."`. Você cria; não edita nem apaga. O script nasce marcado como "agente" até a pessoa salvar. O SQL do script segue as regras de um pedido com `--write` (sem DDL nem administração) e tem no máximo duas linhas em branco seguidas.
 
 Use `--client "<seu nome>"` (ou `CAIS_CLIENT`) para a pessoa ver quem pede. Para SQL grande: `--file consulta.sql` ou `-` (entrada padrão). Cada comando tem 30 s no servidor e corte em 35 s; um pedido de leitura tem 60 s no total e uma escrita aprovada, 60 s até a segunda decisão; escrita espera no máximo 10 s por lock. Escrita que falha devolve só o erro e `statement_index`, sem linhas. Se o SQL cita uma tabela não transacional (MyISAM), o Rollback não a desfaz: a escrita que grava fora da transação para com `non_transactional_write` e a resposta traz `rollback_incomplete: true` quando algo ficou gravado. `commit_unknown` quer dizer que a conexão caiu depois do Commit: confira o dado antes de repetir. O que o seu próprio SQL devolve (`CURRENT_USER()`, `@@hostname`) é dado consultado, não é escondido. Limites: 100 KB de SQL, `--max-rows` de 1 a 1000 (padrão 200).
+
+## BigQuery (só leitura)
+
+Um ambiente com `engine: "bigquery"` em `cais llm envs` é lido em GoogleSQL, sem escrita. O `default_database` é o dataset padrão; o projeto do Google Cloud nunca aparece, nem nas mensagens de erro (`<projeto>`, `<conta>`).
+
+- **Escrita:** `--write` volta com `engine_read_only` (saída 2). Não há DML, DDL, `CREATE TEMP`, script (`DECLARE`, `BEGIN ... END`, `IF`, `LOOP`), `CALL`, `EXECUTE IMMEDIATE`, `EXPORT DATA` nem `LOAD DATA`.
+- **SQL:** nomes entre crases e `dataset.tabela` (`projeto.dataset.tabela` só para outro projeto). `--database` é o dataset padrão do pedido. `schema <env>` lista datasets e tabelas; `schema <env> --database ds` traz as colunas com o tipo completo.
+- **Custo:** o BigQuery cobra pelo que lê, e `LIMIT` não reduz isso. Selecione só as colunas de que precisa, filtre pela coluna de partição e evite `SELECT *` em tabela grande. Cada resultado traz `bytes_estimated`, `bytes_processed` e `bytes_billed`.
+- **Leitura grande:** acima de 10 GiB estimados (ou do limite do ambiente, se for menor) o pedido espera a aprovação da pessoa, mesmo em `free-reads` e com a liberação de 15 minutos, e precisa de `--reason`. `approval_reason` traz a estimativa; use `--wait`. Conta a soma das estimativas do pedido. O job roda com teto de 10 GiB (ou do limite do ambiente, se for menor) ou da estimativa aprovada (em GiB, para cima). Se a estimativa crescer depois da aprovação e passar do teto, o comando não roda: `bytes_over_approved`, e vale pedir de novo.
+- **Também esperam a pessoa (`approval_reason`):** qualquer rotina do projeto que o servidor aponte no dry run (pode ser remota e rodar código fora do BigQuery), função sem qualificador que não é nativa, e as de IA generativa e de modelo (`ML.*`, `AI.*`), que custam fora dos bytes lidos.
+- **Recusados:** o comando que o servidor lê como outra coisa que não `SELECT` (`writes_in_read`); `EXTERNAL_QUERY` e `OBJ.*` (`function_not_allowed`); chamada encadeada, como `(x).f()` (`ambiguous_text`); `INFORMATION_SCHEMA.JOBS*`, `JOBS_BY_*` e `SESSIONS*`, que mostram o SQL de outras pessoas do projeto (`system_schema`); as diretivas `#legacySQL` e `#standardSQL` (`ambiguous_text` ou `executable_comment`); strings de três aspas (`'''` e `"""`) e comentário com `/*` dentro (`ambiguous_text`); o resto de `hidden_text` como no MySQL.
+- **Limites:** o job tem 30 s no servidor e corte em 35 s (`jobs.cancel`, `agent_timeout`); `--max-rows` como sempre.
 
 ## Saídas
 

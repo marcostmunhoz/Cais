@@ -7,6 +7,7 @@ import {
   CloseDirtyDialog,
   CloseTransactionDialog,
   ConfirmDialog,
+  BytesConfirmDialog,
   QuitDialog,
   ProjectNameDialog,
   ScriptNameDialog,
@@ -28,7 +29,7 @@ import logoMark from '../../resources/logo-mark.png';
 
 function anyDialogOpen(): boolean {
   const s = getState();
-  return !!(s.registry || s.picker || s.scriptPicker || s.scriptName || s.projectName || s.closeDirty || s.confirm || s.closeTx || s.quit || s.agentPanel || s.trailPanel || currentAgentModal(s));
+  return !!(s.registry || s.picker || s.scriptPicker || s.scriptName || s.projectName || s.closeDirty || s.confirm || s.bytesConfirm || s.closeTx || s.quit || s.agentPanel || s.trailPanel || currentAgentModal(s));
 }
 
 function useGlobalShortcuts() {
@@ -141,7 +142,7 @@ export function App({ platform }: { platform: string }) {
     main = (
       <>
         <TabBar />
-        <SessionBar tabId={activeTab.id} />
+        <SessionBar tabId={activeTab.id} platform={platform} />
         <div className="workspace" ref={workspace}>
           <div className="editor-wrap" style={{ height: editorH, flex: 'none' }}>
             <Editor
@@ -210,6 +211,7 @@ export function App({ platform }: { platform: string }) {
       <ProjectNameDialog />
       <CloseDirtyDialog />
       <ConfirmDialog />
+      <BytesConfirmDialog />
       <CloseTransactionDialog />
       <QuitDialog />
       <Toast />

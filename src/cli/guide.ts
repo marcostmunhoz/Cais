@@ -62,6 +62,30 @@ Regras
   - Fechar a saída antes do fim (| head) não é erro: o comando sai em silêncio com o mesmo código.
   - Dado pessoal em produção: peça só as colunas que precisa.
 
+BigQuery (ambiente com "engine": "bigquery"; "default_database" é o dataset padrão; o projeto do Google Cloud não aparece)
+  - Só leitura nesta versão. --write volta com code engine_read_only (saída 2), em qualquer ambiente BigQuery.
+  - GoogleSQL: nomes entre crases e \`dataset.tabela\` (\`projeto.dataset.tabela\` se for de outro projeto). --database é o dataset
+    padrão do pedido. schema lista datasets e tabelas; com --database, as colunas com o tipo completo (STRUCT<...>, ARRAY<...>).
+  - Cada comando passa por uma estimativa (dry run) antes de decidir. O BigQuery cobra pelo que lê, e LIMIT não reduz isso:
+    prefira filtrar por partição, selecionar só as colunas de que precisa e evitar SELECT *.
+  - Leitura estimada acima de 10 GiB (ou acima do limite do ambiente, se for menor) espera a aprovação da pessoa, mesmo em
+    free-reads e com a liberação de 15 minutos, e precisa de --reason. A soma das estimativas do pedido é que conta, não só
+    a maior. A resposta traz "approval_reason" com a estimativa. O job roda com teto de 10 GiB (ou do limite do ambiente, se
+    for menor), ou da estimativa aprovada arredondada para cima em GiB. Se a estimativa crescer depois e passar do teto, o
+    comando não roda: code bytes_over_approved (peça de novo).
+  - Também esperam a aprovação (com "approval_reason"): função definida no projeto (pode ser remota e rodar código fora do
+    BigQuery), função sem qualificador que não é nativa e funções de IA generativa e de modelo (ML.*, AI.*), que custam fora
+    dos bytes lidos.
+  - Recusados: tudo o que não é consulta (INSERT, UPDATE, DELETE, MERGE, DDL, CREATE TEMP, scripts como DECLARE, BEGIN ... END,
+    IF e LOOP, CALL, EXECUTE IMMEDIATE, EXPORT DATA, LOAD DATA) com writes_in_read ou ddl_or_transaction; o comando que o servidor
+    lê como outra coisa que não SELECT (writes_in_read); EXTERNAL_QUERY e OBJ.* (function_not_allowed); chamada encadeada, como (x).f() (ambiguous_text); INFORMATION_SCHEMA.JOBS*, JOBS_BY_*
+    e SESSIONS* (system_schema: mostram o SQL de outras pessoas do projeto); #legacySQL e #standardSQL (ambiguous_text ou
+    executable_comment); strings de três aspas e comentário com /* dentro (ambiguous_text). Strings simples e cruas sem barra
+    invertida passam.
+  - Cada resultado traz "bytes_estimated", "bytes_processed" e "bytes_billed". Com "result_withheld", só contagens.
+  - Erros saem sem o id do projeto (<projeto>) e sem e-mails de conta (<conta>). O job tem 30 s no servidor e corte em 35 s
+    (jobs.cancel); a saída do MySQL não muda.
+
 Saídas (o código vale mesmo com a saída cortada por | head)
   0  sucesso (succeeded, committed, ou pedido pendente sem --wait)
   1  failed (inclui não conseguir conectar no ambiente)

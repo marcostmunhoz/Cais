@@ -1,14 +1,18 @@
 import { useRef, useState } from 'react';
-import { Bot, ChevronDown, ChevronRight, Database, Eye, FileCode, History, Key, MoreHorizontal, Plus, Table2 } from 'lucide-react';
+import { Bot, Camera, ChevronDown, ChevronRight, Database, ExternalLink, Eye, FileCode, History, Key, Layers, MoreHorizontal, Plus, Table2 } from 'lucide-react';
 import type { Environment, Project, SavedScript } from '@shared/model';
 import { lastRunText, sortByRecency } from '@shared/scripts';
+import { shortcutText } from '@shared/shortcuts';
 import type { SchemaTable } from '@shared/results';
+import { capabilitiesOf } from '@shared/engines';
+import { getDialect } from '@shared/dialects/registry';
 import {
   deleteScript,
   duplicateProject,
   duplicateScript,
   environmentHasTab,
   focusOrOpenEnvironment,
+  loadDatasetColumns,
   loadSchema,
   openScript,
   openTab,
@@ -21,7 +25,19 @@ import { setState, useStore } from '../lib/store';
 import { ContextMenu, type MenuEntry } from './ui';
 import logoMark from '../../../resources/logo-mark.png';
 
-function TableNode({ env, database, table, depth }: { env: Environment; database: string; table: SchemaTable; depth: number }) {
+function TableNode({
+  env,
+  database,
+  table,
+  depth,
+  columnsLoading,
+}: {
+  env: Environment;
+  database: string;
+  table: SchemaTable;
+  depth: number;
+  columnsLoading: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const Icon = table.type === 'view' ? Eye : Table2;
   return (
@@ -42,14 +58,31 @@ function TableNode({ env, database, table, depth }: { env: Environment; database
         </span>
         <Icon size={13} />
         <span className="label">{table.name}</span>
+        {table.subtype && (
+          // a small icon with the kind as its text: the sidebar is narrow and long table names need the room
+          <span
+            className="subtype"
+            role="img"
+            aria-label={m().sidebar.subtype[table.subtype]}
+            title={m().sidebar.subtype[table.subtype]}
+            data-testid={`subtype-${table.name}`}
+          >
+            {table.subtype === 'materialized-view' ? <Layers size={11} /> : table.subtype === 'external' ? <ExternalLink size={11} /> : <Camera size={11} />}
+          </span>
+        )}
       </div>
+      {open && columnsLoading && table.columns.length === 0 && (
+        <div className="tree-loading" style={{ paddingLeft: 6 + (depth + 1) * 12 + 14 }}>
+          {m().sidebar.loadingColumns}
+        </div>
+      )}
       {open &&
         table.columns.map((c) => (
           <div key={c.name} className="tree-row" style={{ paddingLeft: 6 + (depth + 1) * 12 + 14 }}>
             <span className="label" style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5 }}>
               {c.name}
             </span>
-            <span className="detail">
+            <span className="detail" title={c.type}>
               {c.type}
               {c.key === 'PRI' ? ' · PK' : c.key === 'UNI' ? ' · UQ' : ''}
             </span>
@@ -61,15 +94,40 @@ function TableNode({ env, database, table, depth }: { env: Environment; database
 
 function DatabaseNode({ env, db }: { env: Environment; db: { name: string; tables: SchemaTable[] } }) {
   const [open, setOpen] = useState(false);
+  // engines that read columns per dataset do it when the dataset is opened
+  const lazy = !!capabilitiesOf(env.engine).lazyColumns;
+  const columns = useStore((s) => s.schemas[env.id]?.datasets?.[db.name]);
+  const toggle = (): void => {
+    if (!open && lazy) void loadDatasetColumns(env.id, db.name);
+    setOpen((o) => !o);
+  };
   return (
     <>
-      <div className="tree-row" style={{ paddingLeft: 6 + 2 * 12 }} onClick={() => setOpen((o) => !o)}>
+      <div
+        className="tree-row"
+        style={{ paddingLeft: 6 + 2 * 12 }}
+        onClick={toggle}
+        data-testid={`database-${db.name}`}
+        aria-busy={lazy && columns?.status === 'loading' ? true : undefined}
+      >
         <span className="chev">{open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}</span>
         <Database size={13} />
         <span className="label">{db.name}</span>
+        {lazy && columns?.status === 'loading' && (
+          <span className="detail" data-testid={`database-loading-${db.name}`}>
+            {m().sidebar.loadingDatasetColumns}
+          </span>
+        )}
       </div>
       {open &&
-        db.tables.map((t) => <TableNode key={t.name} env={env} database={db.name} table={t} depth={3} />)}
+        db.tables.map((t) => (
+          <TableNode key={t.name} env={env} database={db.name} table={t} depth={3} columnsLoading={lazy && (!columns || columns.status === 'loading')} />
+        ))}
+      {open && lazy && columns?.status === 'error' && (
+        <div className="tree-error" style={{ paddingLeft: 6 + 3 * 12 }}>
+          {columns.error}
+        </div>
+      )}
       {open && db.tables.length === 0 && <div className="tree-loading">{m().sidebar.noTables}</div>}
     </>
   );
@@ -161,7 +219,7 @@ function ScriptsGroup({ env }: { env: Environment }) {
       {open && scripts.map((script) => <ScriptNode key={script.id} env={env} script={script} />)}
       {open && scripts.length === 0 && (
         <div className="tree-loading" style={{ paddingLeft: 6 + 3 * 12 + 14 }}>
-          {m().sidebar.scriptsEmpty}
+          {m().sidebar.scriptsEmpty({ save: shortcutText('save', window.cais.platform) })}
         </div>
       )}
     </>
@@ -177,6 +235,7 @@ function EnvNode({ env, expanded, onToggle }: { env: Environment; expanded: bool
   const hadTab = useRef(false);
 
   const text = m().sidebar;
+  const term = getDialect(env.engine).databaseTerm;
   const items: MenuEntry[] = [
     { label: text.newTab, onSelect: () => openTab(env.id) },
     { label: text.editEnvironment, onSelect: () => setState({ registry: { section: 'environments', editId: env.id } }) },
@@ -213,7 +272,7 @@ function EnvNode({ env, expanded, onToggle }: { env: Environment; expanded: bool
         <span
           className="chev"
           role="button"
-          aria-label={expanded ? text.collapseDatabases : text.expandDatabases}
+          aria-label={expanded ? text.collapseDatabases[term] : text.expandDatabases[term]}
           onClick={(e) => {
             e.stopPropagation();
             onToggle();

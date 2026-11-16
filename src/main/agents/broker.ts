@@ -2,6 +2,7 @@ import type { Dialect } from '@shared/dialects/types';
 import { agentLevelOf, type Engine, type Environment, type Project, type SavedScript } from '@shared/model';
 import type { CellValue, SchemaTree, StatementResult } from '@shared/results';
 import {
+  AGENT_BYTES_APPROVAL,
   AGENT_DEFAULT_ROWS,
   AGENT_MAX_ROWS,
   AUTO_COMMIT_MAX_ROWS,
@@ -24,12 +25,14 @@ import {
   type RollbackReason,
 } from '@shared/agents';
 import { AGENT_LOCALE, m, ref, render, renderRef, type MessageRef } from '@shared/i18n';
+import { GIB, capabilitiesOf, sameTarget } from '@shared/engines';
 import { hiddenTextProblem, stripInvisible } from '@shared/text';
 import { CaisError } from '../errors';
 import { AgentError, agentText, bothWays, refOf } from './errors';
+import type { TrailStatement } from '@shared/trail';
 import type { AuditEntry, AuditSink } from './audit';
 import { decide, MESSAGES, type ClassifiedStatement, type Decision } from './policy';
-import type { AgentExecutor, PlannedStatement, Scheduler, WriteRun } from './sessions';
+import type { AgentExecutor, PlannedStatement, PreparedStatement, Scheduler, WriteRun } from './sessions';
 
 export interface BrokerDeps {
   now(): number;
@@ -94,7 +97,7 @@ interface Rec {
   rollbackReason?: RollbackReason;
   rollbackIncomplete?: boolean;
   /** `message` in the app locale (the person's view); `ref`, when present, is what the agent reads. */
-  error?: { message: string; code?: string; statementIndex?: number; ref?: MessageRef };
+  error?: { message: string; code?: string; statementIndex?: number; ref?: MessageRef; serverText?: boolean };
   results?: StatementResult[];
   finishedAt?: number;
   timer?: unknown;
@@ -107,6 +110,10 @@ interface Rec {
   underGrant?: boolean;
   /** A write of a free-reads-writes environment that the policy let run: it commits by itself within the limits. */
   autoCommit?: boolean;
+  /** Dry-run estimate per command (engines that bill by bytes read), as seen when the request came in. */
+  estimates?: (number | undefined)[];
+  /** Why the request waits for the person whatever the level says (big read, a call that runs outside the engine). */
+  forcedReason?: MessageRef;
   /** Rendered per audience: the app locale in `view()`, AGENT_LOCALE in `response()`. */
   approvalReason?: MessageRef;
   commitReason?: MessageRef;
@@ -123,8 +130,8 @@ const clamp = (n: number, lo: number, hi: number): number => Math.min(hi, Math.m
 const clean = (text: string, max: number): string => stripInvisible(text).trim().slice(0, max);
 /** Slugs compare NFC-normalized, with ASCII-only case folding (no Unicode lookalikes through case rules). */
 const fold = (text: string): string => text.normalize('NFC').replace(/[A-Z]/g, (c) => c.toLowerCase());
-/** MySQL identifiers are at most 64 characters; anything else in --database is refused before it reaches a modal. */
-const MAX_DATABASE_NAME = 64;
+/** Names (database, table) that go into a trail label or a modal are cut here; the dialect refuses a longer --database before. */
+const MAX_LABEL_NAME = 64;
 
 /** SQL from an agent that cannot be shown honestly to the person: refused before classification (agent-facing, pt-BR). */
 function agentSqlProblem(sql: string, dialect: Dialect): { code: string; message: string } | null {
@@ -138,9 +145,9 @@ function agentSqlProblem(sql: string, dialect: Dialect): { code: string; message
   return null;
 }
 
-/** --database from an agent: a plain name, no hidden text, no system schema for writes (checked by the policy). */
-const badDatabase = (database: string): boolean =>
-  database.length > MAX_DATABASE_NAME || hiddenTextProblem(database) !== null || /[\r\n`]/.test(database);
+/** --database from an agent: a plain name the engine accepts (the dialect's rule), no system schema for writes (checked by the policy). */
+const MAX_SCOPED_SCHEMAS = 5;
+const badDatabase = (database: string, dialect: Dialect): boolean => !dialect.agentRules.isValidDatabaseName(database);
 
 const firstLine = (sql: string, max: number): string => {
   const line = sql.trim().split('\n')[0] ?? '';
@@ -250,9 +257,13 @@ export class AgentBroker {
     this.assertEnabled();
     const env = this.resolveEnv(p.env);
     const client = clean(p.client ?? 'agente', 60) || 'agente';
+    // a name the engine could not have: nothing is read for it
+    if (p.database !== undefined && badDatabase(p.database, this.deps.getDialect(env.engine))) {
+      throw new AgentError('Nome de banco inválido.', 'invalid_database');
+    }
     // what the agent typed goes to the trail cleaned (no bidi, no line breaks) and short
-    const db = p.database ? clean(p.database, MAX_DATABASE_NAME) : undefined;
-    const label = `schema${db ? ` ${db}` : ''}${p.table ? ` ${clean(p.table, MAX_DATABASE_NAME)}` : ''}`;
+    const db = p.database ? clean(p.database, MAX_LABEL_NAME) : undefined;
+    const label = `schema${db ? ` ${db}` : ''}${p.table ? ` ${clean(p.table, MAX_LABEL_NAME)}` : ''}`;
     const id = this.deps.newId();
     const audit = (state: string, errorCode?: string): boolean =>
       this.deps.audit.append({
@@ -264,8 +275,20 @@ export class AgentBroker {
       throw new AgentError('A trilha do Cais não pôde ser gravada: nada de agente roda enquanto isso.', 'trail_unavailable');
     }
     let tree: SchemaTree;
+    // columns an engine reads on demand (BigQuery): the tree without a scope has none, so --table asks per dataset
+    const scoped = new Map<string, SchemaTree['databases'][number]>();
+    let beyondCap = false;
     try {
-      tree = await this.deps.executor.schema(env);
+      tree = await this.deps.executor.schema(env, db ? { database: db } : undefined);
+      if (p.table && !p.database && capabilitiesOf(env.engine).lazyColumns) {
+        const wanted = p.table.toLowerCase();
+        const needs = tree.databases.filter((d) => d.tables.some((t) => t.name.toLowerCase() === wanted && t.columns.length === 0));
+        beyondCap = needs.length > MAX_SCOPED_SCHEMAS;
+        for (const d of needs.slice(0, MAX_SCOPED_SCHEMAS)) {
+          const one = (await this.deps.executor.schema(env, { database: d.name })).databases.find((x) => x.name === d.name);
+          if (one) scoped.set(d.name, one);
+        }
+      }
     } catch (error) {
       audit('failed', error instanceof AgentError ? error.code : 'internal_error');
       throw error;
@@ -281,10 +304,19 @@ export class AgentBroker {
     if (p.table) {
       const wanted = p.table.toLowerCase();
       const found = dbs
-        .map((d) => ({ name: d.name, tables: d.tables.filter((t) => t.name.toLowerCase() === wanted).map((t) => shape(t, true)) }))
+        .map((d) => ({
+          name: d.name,
+          tables: (scoped.get(d.name) ?? d).tables
+            .filter((t) => t.name.toLowerCase() === wanted && (!scoped.has(d.name) || t.columns.length > 0))
+            .map((t) => shape(t, true)),
+        }))
         .filter((d) => d.tables.length > 0);
       if (found.length === 0) throw new AgentError('Tabela não encontrada.', 'not_found');
-      return { environment: this.slugOf(env), databases: found };
+      return {
+        environment: this.slugOf(env),
+        databases: found,
+        ...(beyondCap ? { note: `A tabela existe em mais de ${MAX_SCOPED_SCHEMAS} bancos: só vêm os primeiros. Use --database para um banco específico.` } : {}),
+      };
     }
     const withColumns = !!p.database;
     return {
@@ -309,25 +341,39 @@ export class AgentBroker {
     const refuse = (code: string, message: string): never => {
       this.deps.audit.append({
         id: this.deps.newId(), client, environment: this.slugOf(env), environmentId: env.id, production: env.production, mode,
-        ...(reason ? { reason } : {}), ...(database ? { database: clean(database, MAX_DATABASE_NAME) } : {}),
+        ...(reason ? { reason } : {}), ...(database ? { database: clean(database, MAX_LABEL_NAME) } : {}),
         sql: sql.slice(0, 500), sqlLength: sql.length, state: 'refused', errorCode: code,
       });
       throw new AgentError(message, code);
     };
+    // an engine that cannot write (BigQuery in this version) takes no write from an agent, whatever the text says
+    if (p.write && !capabilitiesOf(env.engine).modes.includes('transaction')) {
+      refuse('engine_read_only', 'O BigQuery só lê nesta versão: escrita de agente (--write) não é aceita neste ambiente.');
+    }
     const textProblem = agentSqlProblem(sql, dialect);
     if (textProblem) refuse(textProblem.code, textProblem.message);
-    if (database !== undefined && badDatabase(database)) refuse('invalid_database', 'Nome de banco inválido.');
+    if (database !== undefined && badDatabase(database, dialect)) refuse('invalid_database', 'Nome de banco inválido.');
 
     const statements: ClassifiedStatement[] = dialect
       .splitStatements(sql)
       .map((s) => ({ text: s.text, c: dialect.classify(s.text), ids: dialect.identifiers(s.text) }));
+    // a read that calls what runs outside the engine waits for the person, at any level and under any grant
+    let forced: MessageRef | undefined = mode === 'read' ? (functionApprovalRef(statements, dialect) ?? undefined) : undefined;
+    const plan: PlannedStatement[] = statements.map((s) => ({
+      text: s.text,
+      verb: s.c.verb,
+      kind: s.c.kind,
+      ...(s.c.changesDatabase ? { changesDatabase: true } : {}),
+    }));
     const decideFor = (target: Environment): Decision =>
       decide({
         mode,
+        ...(forced ? { forceApproval: true } : {}),
         production: target.production,
         level: agentLevelOf(target),
         trailOk: this.trailOk(),
         statements,
+        rules: dialect.agentRules,
         ...(reason ? { reason } : {}),
         ...(database ? { database } : {}),
         pendingCount: this.countPending() + this.reserving,
@@ -335,6 +381,40 @@ export class AgentBroker {
       });
     let decision = decideFor(env);
     if (decision.action === 'refuse') refuse(decision.code, decision.message);
+
+    // engines with a dry run (BigQuery): ask the server what each command is and what it would read, before deciding
+    let estimates: (number | undefined)[] | undefined;
+    if (mode === 'read' && this.deps.executor.prepare && capabilitiesOf(env.engine).dryRun) {
+      const prepared = await this.deps.executor.prepare(env, { ...(database ? { database } : {}), statements: plan });
+      if (!this.enabled) throw accessOff();
+      if (prepared) {
+        // the person may have changed the environment while the dry run was out: decide on what holds now
+        const fresh = this.deps.catalog.environments().find((e) => e.id === env.id);
+        if (!fresh || !sameTarget(fresh, env) || fresh.defaultDatabase !== env.defaultDatabase) throw new AgentError(environmentChanged(), 'invalid_state');
+        env = fresh;
+        const wrong = prepared.findIndex((p) => !p.failed && p.serverKind !== 'SELECT');
+        if (wrong !== -1) refuse('writes_in_read', MESSAGES.serverNotQuery(prepared[wrong]!.serverKind));
+        estimates = prepared.map((p) => p.bytesEstimated);
+        const bytesRef = bytesApprovalRef(env, prepared);
+        // the ceiling of each job: the approval threshold (10 GiB or the environment's limit when lower); a request
+        // the person approves because of its bytes lifts it to the approved estimate rounded up to the GiB. A dry run
+        // that failed knows nothing, so its job keeps the threshold and the driver refuses what grew past it.
+        const threshold = bytesThreshold(env);
+        plan.forEach((p, i) => {
+          const est = prepared[i]?.failed ? undefined : estimates![i];
+          p.maxBytesBilled = bytesRef && est !== undefined ? Math.max(threshold, Math.ceil(est / GIB) * GIB) : threshold;
+        });
+        // a routine the server found (the classifier cannot see inside a view; whether the server lists those is still to confirm live) waits like a remote call
+        const routine = prepared.find((p) => !p.failed && p.routines && p.routines.length > 0)?.routines?.[0];
+        const routinesRef = routine ? ref('agentsUi.approval.remoteFunction', { name: shortName(routine) }) : null;
+        // the function warning stays when both apply: the bytes of each command show in the modal anyway
+        forced = forced ?? routinesRef ?? bytesRef ?? undefined;
+        // no routine was shown to the person: the driver refuses one that only its own dry run finds
+        if (!routinesRef) for (const p of plan) p.refuseRoutines = true;
+        decision = decideFor(env);
+        if (decision.action === 'refuse') refuse(decision.code, decision.message);
+      }
+    }
 
     let nonTransactional: string[] = [];
     let tree: SchemaTree | null = null;
@@ -359,7 +439,7 @@ export class AgentBroker {
       env = fresh;
     }
     const warnings = [...new Set(statements.flatMap((s) => dialect.warnings(s.text))), ...nonTransactional];
-    let approvalReason: MessageRef | undefined;
+    let approvalReason: MessageRef | undefined = forced;
     if (decision.action === 'run' && mode === 'write') {
       // a write the level lets run goes to the person when anything could take it past what the Cais can
       // count or undo: an alert, a trigger, a cascading foreign key, a view, a stored function
@@ -390,7 +470,7 @@ export class AgentBroker {
       ...(database ? { database } : {}),
       maxRows: clamp(Math.floor(p.maxRows ?? AGENT_DEFAULT_ROWS), 1, AGENT_MAX_ROWS),
       sql,
-      plan: statements.map((s) => ({ text: s.text, verb: s.c.verb, kind: s.c.kind, ...(s.c.changesDatabase ? { changesDatabase: true } : {}) })),
+      plan,
       views: statements.map((s) => ({ sql: s.text, verb: s.c.verb, kind: s.c.kind })),
       warnings,
       status: 'pending_approval',
@@ -399,6 +479,8 @@ export class AgentBroker {
       ...(decision.action === 'run' && mode === 'read' && agentLevelOf(env) === 'approve-all' ? { underGrant: true } : {}),
       ...(decision.action === 'run' && mode === 'write' ? { autoCommit: true } : {}),
       ...(approvalReason ? { approvalReason } : {}),
+      ...(forced ? { forcedReason: forced } : {}),
+      ...(estimates ? { estimates } : {}),
       resolving: false,
     };
     this.records.set(rec.id, rec);
@@ -524,18 +606,29 @@ export class AgentBroker {
       throw new AgentError(message, 'invalid_script');
     };
     // a script is SQL the person may run later in their own tab: no more than an agent could ask to run itself
-    const engine = this.deps.catalog.environments().find((e) => e.projectId === project.id)?.engine ?? 'mysql';
-    const dialect = this.deps.getDialect(engine);
-    const textProblem = agentSqlProblem(p.sql, dialect);
-    if (textProblem) refuseScript(textProblem.message, textProblem.code);
+    // a project may mix engines: the text must be fine for every dialect it has, and run in at least one of them
+    const engines = [...new Set(this.deps.catalog.environments().filter((e) => e.projectId === project.id).map((e) => e.engine))];
+    if (engines.length === 0) engines.push('mysql');
     const scriptDatabase = p.database?.trim() || undefined;
-    if (scriptDatabase !== undefined && badDatabase(scriptDatabase)) refuseScript('Nome de banco inválido.', 'invalid_database');
-    const statements = dialect.splitStatements(p.sql).map((s) => ({ text: s.text, c: dialect.classify(s.text), ids: dialect.identifiers(s.text) }));
-    const verdict = decide({
-      mode: 'write', production: false, statements, reason: 'script', pendingCount: 0, grantActive: false,
-      ...(scriptDatabase ? { database: scriptDatabase } : {}),
-    });
-    if (verdict.action === 'refuse' && verdict.code !== 'empty_sql') refuseScript(verdict.message, verdict.code);
+    let verdictProblem: { code: string; message: string } | null = null;
+    let accepted = false;
+    for (const engine of engines) {
+      const dialect = this.deps.getDialect(engine);
+      const textProblem = agentSqlProblem(p.sql, dialect);
+      if (textProblem) refuseScript(textProblem.message, textProblem.code);
+      if (scriptDatabase !== undefined && badDatabase(scriptDatabase, dialect)) {
+        verdictProblem ??= { code: 'invalid_database', message: 'Nome de banco inválido.' };
+        continue;
+      }
+      const statements = dialect.splitStatements(p.sql).map((s) => ({ text: s.text, c: dialect.classify(s.text), ids: dialect.identifiers(s.text) }));
+      const verdict = decide({
+        mode: 'write', production: false, statements, rules: dialect.agentRules, reason: 'script', pendingCount: 0, grantActive: false,
+        ...(scriptDatabase ? { database: scriptDatabase } : {}),
+      });
+      if (verdict.action === 'refuse' && verdict.code !== 'empty_sql') verdictProblem ??= { code: verdict.code, message: verdict.message };
+      else accepted = true;
+    }
+    if (!accepted && verdictProblem) refuseScript(verdictProblem.message, verdictProblem.code);
     if (/\n[ \t]*\n[ \t]*\n[ \t]*\n/.test(p.sql.replace(/\r\n/g, '\n'))) {
       refuseScript('O script tem linhas em branco demais em sequência. Use no máximo duas.', 'blank_lines');
     }
@@ -592,7 +685,7 @@ export class AgentBroker {
     const current = this.deps.catalog.environments().find((e) => e.id === rec.environment.id);
     const before = rec.environment;
     if (
-      !current || current.host !== before.host || current.port !== before.port || current.credentialId !== before.credentialId ||
+      !current || !sameTarget(current, before) ||
       current.defaultDatabase !== before.defaultDatabase || current.production !== before.production ||
       // renamed or moved, even only in case: the modal showed the old project/environment name. The
       // store changes the catalog before the IPC path calls environmentChanged, so check here too.
@@ -926,6 +1019,7 @@ export class AgentBroker {
       ...(rec.secondDecision ? { secondDecidedBy: rec.secondDecision.by } : {}),
       ...(rec.autoCommit ? { autoCommit: true } : {}),
       ...(rec.results ? { statements: rec.results.map(trailCounts) } : {}),
+      ...trailBytes(rec),
       shareResult: rec.shareResult,
       ...(rec.rollbackReason ? { rollbackReason: rec.rollbackReason } : {}),
       ...(rec.rollbackIncomplete ? { rollbackIncomplete: true } : {}),
@@ -990,6 +1084,8 @@ export class AgentBroker {
       state: 'running',
       decidedBy: rec.decidedBy ?? (rec.underGrant ? 'grant' : 'policy'),
       ...(rec.autoCommit ? { autoCommit: true } : {}),
+      ...trailBytes(rec),
+      ...(rec.forcedReason ? { detail: render(rec.forcedReason) } : {}),
     });
     return written !== false;
   }
@@ -1044,11 +1140,14 @@ export class AgentBroker {
 
   private statementViews(rec: Rec): AgentStatementView[] {
     return rec.views.map((v, i) => {
+      const estimate = rec.estimates?.[i];
       const r = rec.results?.[i];
-      if (!r) return v;
+      if (!r) return estimate !== undefined ? { ...v, bytesEstimated: estimate } : v;
+      v = estimate !== undefined ? { ...v, bytesEstimated: estimate } : v;
       return {
         ...v,
         ...(r.columns ? { rows: r.rows?.length ?? 0 } : {}),
+        ...(r.stats?.bytesBilled !== undefined && !r.stats.reread ? { bytesBilled: r.stats.bytesBilled } : {}),
         ...(!r.columns && r.affectedRows !== undefined ? { affectedRows: r.affectedRows } : {}),
         ...(r.error ? { error: r.error.message } : {}),
       };
@@ -1112,10 +1211,10 @@ export class AgentBroker {
     if (rec.rollbackReason) out.rollback_reason = rec.rollbackReason;
     if (rec.rollbackIncomplete) out.rollback_incomplete = true;
     if (rec.error) {
-      const { statementIndex, ref: _ref, ...rest } = rec.error;
+      const { statementIndex, ref: _ref, serverText, ...rest } = rec.error;
       const error = { ...rest, message: agentText(rec.error) };
       out.error = {
-        ...(rec.shareResult ? error : withheldError(error)),
+        ...(rec.shareResult ? error : withheldError({ ...error, ...(serverText ? { serverText } : {}) })),
         ...(statementIndex !== undefined ? { statement_index: statementIndex } : {}),
       };
     }
@@ -1164,6 +1263,10 @@ function shareable(r: StatementResult): Record<string, unknown> {
     ...(r.affectedRows !== undefined ? { affected_rows: r.affectedRows } : {}),
     ...(r.insertId !== undefined ? { insert_id: r.insertId } : {}),
     ...(r.warnings ? { warnings: r.warnings } : {}),
+    // engines that bill by bytes read: what the job read and was billed (MySQL has no stats: its output does not change)
+    ...(r.stats?.bytesEstimated !== undefined ? { bytes_estimated: r.stats.bytesEstimated } : {}),
+    ...(r.stats?.bytesProcessed !== undefined ? { bytes_processed: r.stats.bytesProcessed } : {}),
+    ...(r.stats?.bytesBilled !== undefined ? { bytes_billed: r.stats.bytesBilled } : {}),
     ...(r.error ? { error: shareableError(r.error) } : {}),
   };
 }
@@ -1177,9 +1280,12 @@ const shareableError = (e: { message: string; code?: string }): { message: strin
  * Server errors can quote row values ("Duplicate entry 'x'"): without the person's yes, only the code travels.
  * Agent-facing: fixed pt-BR.
  */
-function withheldError(e: { message: string; code?: string }): { message: string; code?: string } {
-  if (e.code?.startsWith('ER_')) return { message: 'O servidor recusou o comando. Os detalhes foram omitidos.', code: e.code };
-  return e;
+function withheldError(e: { message: string; code?: string; serverText?: boolean }): { message: string; code?: string } {
+  if (e.code?.startsWith('ER_') || e.serverText) {
+    return { message: 'O servidor recusou o comando. Os detalhes foram omitidos.', ...(e.code ? { code: e.code } : {}) };
+  }
+  const { serverText: _quoted, ...own } = e;
+  return own;
 }
 
 /** Result with the person's "no" on sharing: only how many rows, never which. */
@@ -1192,14 +1298,25 @@ function counts(r: StatementResult): Record<string, unknown> {
     ...(r.columns ? { row_count: r.rows?.length ?? 0 } : {}),
     ...(r.truncated ? { truncated: true } : {}),
     ...(r.affectedRows !== undefined ? { affected_rows: r.affectedRows } : {}),
-    ...(r.error ? { error: withheldError({ message: agentText(r.error), ...(r.error.code ? { code: r.error.code } : {}) }) } : {}),
+    ...(r.error
+      ? {
+          error: withheldError({
+            message: agentText(r.error),
+            ...(r.error.code ? { code: r.error.code } : {}),
+            ...(r.error.serverText ? { serverText: true } : {}),
+          }),
+        }
+      : {}),
   };
 }
 
 /** Counts of one command for the trail: never which rows. */
-function trailCounts(r: StatementResult): { verb: string; rows?: number; affectedRows?: number; errorCode?: string } {
+function trailCounts(r: StatementResult): TrailStatement {
   return {
     verb: r.verb,
+    ...(r.stats?.jobId ? { jobId: r.stats.jobId } : {}),
+    ...(r.stats?.bytesEstimated !== undefined && !r.stats.reread ? { bytesEstimated: r.stats.bytesEstimated } : {}),
+    ...(r.stats?.bytesBilled !== undefined && !r.stats.reread ? { bytesBilled: r.stats.bytesBilled } : {}),
     ...(r.columns ? { rows: r.rows?.length ?? 0 } : {}),
     ...(!r.columns && r.affectedRows !== undefined ? { affectedRows: r.affectedRows } : {}),
     ...(r.error?.code ? { errorCode: r.error.code } : {}),
@@ -1230,6 +1347,61 @@ function affectedOf(results: StatementResult[]): number {
 }
 
 const AUTO_VERBS = new Set(['INSERT', 'REPLACE', 'UPDATE', 'DELETE']);
+
+/** The most that `name` shows in a message: a function name comes from the text the agent wrote. */
+const shortName = (name: string): string => (name.length > 80 ? `${name.slice(0, 80)}…` : name);
+
+/**
+ * A read that calls what the person should look at first (BigQuery): a generative AI or model function (`ML.`, `AI.`),
+ * a function defined in the project (it may be remote and run code outside the engine) or an unqualified function that
+ * is not a built-in. Null for everything else, and always null for MySQL.
+ */
+function functionApprovalRef(statements: ClassifiedStatement[], dialect: Dialect): MessageRef | null {
+  const remote = statements.flatMap((s) => s.c.remoteCalls ?? []);
+  const bare = (name: string): string => name.replace(/^SAFE\./, '');
+  const ai = remote.find((n) => /^(ML|AI)\./.test(bare(n)));
+  if (ai) return ref('agentsUi.approval.generativeAi', { name: shortName(ai) });
+  if (remote.length > 0) return ref('agentsUi.approval.remoteFunction', { name: shortName(remote[0]!) });
+  const isUnknown = dialect.agentRules.isUnknownFunction;
+  const unknown = isUnknown ? statements.flatMap((s) => s.c.functions ?? []).find((f) => isUnknown(f)) : undefined;
+  return unknown ? ref('agentsUi.approval.unknownFunction', { name: shortName(unknown) }) : null;
+}
+
+/**
+ * A read estimated above what an agent may take without the person (10 GiB, fixed, or the environment's limit when
+ * lower): the reason it waits, with the estimate summed over the request. Null otherwise.
+ */
+function bytesApprovalRef(env: Environment, prepared: PreparedStatement[]): MessageRef | null {
+  const limit = env.engine === 'bigquery' ? env.maxBytesBilled : undefined;
+  const threshold = bytesThreshold(env);
+  // the whole request: several commands under the threshold each may be over it together
+  const total = prepared.reduce((n, p) => n + (p.failed ? 0 : (p.bytesEstimated ?? 0)), 0);
+  if (total <= threshold) return null;
+  return limit !== undefined && total > limit
+    ? ref('agentsUi.approval.overLimit', { bytes: total, limit })
+    : ref('agentsUi.approval.bigRead', { bytes: total, threshold });
+}
+
+/** What an agent may read without the person: 10 GiB, or the environment's limit when that is lower. */
+function bytesThreshold(env: Environment): number {
+  const limit = env.engine === 'bigquery' ? env.maxBytesBilled : undefined;
+  return Math.min(AGENT_BYTES_APPROVAL, limit ?? Number.POSITIVE_INFINITY);
+}
+
+/** What a trail line of a request says about bytes and jobs (BigQuery): sums over the commands. Empty for MySQL. */
+function trailBytes(rec: { estimates?: (number | undefined)[]; results?: StatementResult[] }): Pick<AuditEntry, 'jobId' | 'bytesEstimated' | 'bytesBilled'> {
+  const fresh = (rec.results ?? []).filter((r) => r.stats && !r.stats.reread);
+  const estimated = fresh.length > 0 ? fresh.map((r) => r.stats?.bytesEstimated) : (rec.estimates ?? []);
+  const sum = (values: (number | undefined)[]): number | undefined => (values.some((v) => v !== undefined) ? values.reduce<number>((n, v) => n + (v ?? 0), 0) : undefined);
+  const est = sum(estimated);
+  const billed = sum(fresh.map((r) => r.stats?.bytesBilled));
+  const jobs = fresh.map((r) => r.stats?.jobId).filter((j): j is string => !!j);
+  return {
+    ...(jobs.length === 1 ? { jobId: jobs[0]! } : {}),
+    ...(est !== undefined ? { bytesEstimated: est } : {}),
+    ...(billed !== undefined ? { bytesBilled: billed } : {}),
+  };
+}
 
 /**
  * Why a write the level lets run must still go to the person, before running: what the Cais

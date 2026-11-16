@@ -2,7 +2,7 @@ import type mysql from 'mysql2/promise';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { getDialect } from '@shared/dialects/registry';
 import { ROLLBACK_AFTER_MS } from '@shared/agents';
-import type { Environment } from '@shared/model';
+import type { MysqlEnvironment as Environment } from '@shared/model';
 import { AgentBroker } from '@main/agents/broker';
 import { AgentSessions } from '@main/agents/sessions';
 import { mysqlDriver } from '@main/drivers/mysql';
@@ -41,7 +41,7 @@ beforeAll(async () => {
   pro = { ...base, id: 'e-pro', name: 'pro', production: true };
   deadPort = { ...base, id: 'e-dead', name: 'hml', port: 1 }; // nothing listens there
   clock = new FakeClock();
-  sessions = new AgentSessions({ getDriver: () => mysqlDriver, getDialect, resolveConnectParams: async (e) => params({ host: e.host, port: e.port }), scheduler: clock });
+  sessions = new AgentSessions({ getDriver: () => mysqlDriver, resolveConnectParams: async (e) => params({ host: (e as Environment).host, port: (e as Environment).port }), scheduler: clock });
   let seq = 0;
   broker = new AgentBroker({
     now: () => clock.now,

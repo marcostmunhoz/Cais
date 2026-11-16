@@ -1,4 +1,5 @@
 import { getDialect } from '@shared/dialects/registry';
+import { capabilitiesOf, initialModeFor } from '@shared/engines';
 import { DEFAULT_MAX_ROWS, EXTENDED_MAX_ROWS } from '@shared/model';
 import type { AgentsSnapshot, ApproveOptions } from '@shared/agents';
 import type { Environment, SavedScript, SessionMode, TabState } from '@shared/model';
@@ -20,7 +21,7 @@ import {
   type KeyColumn,
   type PendingCells,
 } from '@shared/grid';
-import type { CellValue, StatementResult } from '@shared/results';
+import type { CellValue, SchemaTree, StatementResult } from '@shared/results';
 import { m, render } from './i18n';
 
 const api = (): Window['cais'] => window.cais;
@@ -45,7 +46,8 @@ export function findEnvironment(id: string): Environment | undefined {
 }
 
 export function initialMode(env: Environment | undefined): SessionMode {
-  return env?.production ? 'read-only' : 'autocommit';
+  const engine = env?.engine ?? 'mysql';
+  return initialModeFor(capabilitiesOf(engine), !!env?.production);
 }
 
 export function effectiveMode(tabId: string): SessionMode {
@@ -352,12 +354,42 @@ async function markScriptRun(tabId: string): Promise<void> {
 export async function loadSchema(environmentId: string, refresh = false): Promise<void> {
   const current = getState().schemas[environmentId];
   if (!refresh && (current?.status === 'ready' || current?.status === 'loading')) return;
+  // a refresh forgets the columns read so far: the datasets that were open are read again below
+  const reopen = refresh ? Object.entries(current?.datasets ?? {}).filter(([, d]) => d.status === 'ready').map(([name]) => name) : [];
   setState((s) => ({ schemas: { ...s.schemas, [environmentId]: { status: 'loading', tree: s.schemas[environmentId]?.tree } } }));
   try {
     const tree = await api().schema.get(environmentId, { refresh });
     setState((s) => ({ schemas: { ...s.schemas, [environmentId]: { status: 'ready', tree } } }));
+    for (const name of reopen) void loadDatasetColumns(environmentId, name, true);
   } catch (e) {
     setState((s) => ({ schemas: { ...s.schemas, [environmentId]: { status: 'error', error: errorMessage(e) } } }));
+  }
+}
+
+/**
+ * Engines that read columns on demand (BigQuery): reads the columns of one dataset, when it is opened, and merges
+ * them into the tree the renderer holds. The other datasets keep what they have.
+ */
+export async function loadDatasetColumns(environmentId: string, database: string, refresh = false): Promise<void> {
+  const current = getState().schemas[environmentId]?.datasets?.[database];
+  if (!refresh && (current?.status === 'ready' || current?.status === 'loading')) return;
+  const mark = (state: { status: 'loading' | 'ready' | 'error'; error?: string }, tree?: SchemaTree): void =>
+    setState((s) => {
+      const view = s.schemas[environmentId];
+      if (!view) return {};
+      return { schemas: { ...s.schemas, [environmentId]: { ...view, ...(tree ? { tree } : {}), datasets: { ...view.datasets, [database]: state } } } };
+    });
+  mark({ status: 'loading' });
+  try {
+    const read = await api().schema.get(environmentId, { database, refresh });
+    const scoped = read.databases.find((d) => d.name === database);
+    const held = getState().schemas[environmentId]?.tree;
+    mark(
+      { status: 'ready' },
+      held && scoped ? { ...held, databases: held.databases.map((d) => (d.name === database ? scoped : d)) } : undefined,
+    );
+  } catch (e) {
+    mark({ status: 'error', error: errorMessage(e) });
   }
 }
 
@@ -610,6 +642,27 @@ export async function runTab(
   }
   setSession(response.session);
 
+  if (response.needsConfirmation?.reason === 'bytes') {
+    // nothing ran: the person sees every statement over the limit and decides for the whole run
+    patchRun(tabId, { running: false });
+    const { statements, limit } = response.needsConfirmation;
+    // what was accepted before stays (a second question is only about the statements whose estimate grew)
+    const confirmedBytes = [...(opts.request?.confirmedBytes ?? [])];
+    setState({
+      bytesConfirm: {
+        limit,
+        statements,
+        onConfirm: () => {
+          setState({ bytesConfirm: null });
+          // each acceptance is tied to the text it was asked about: main ignores it for any other text
+          const next = confirmedBytes.filter((c) => !statements.some((s) => s.sql === c.sql));
+          for (const s of statements) next.push({ sql: s.sql, bytes: s.bytesEstimated });
+          void runTab(tabId, scope, { ...opts, request: { ...opts.request, confirmedBytes: next } });
+        },
+      },
+    });
+    return;
+  }
   if (response.needsConfirmation) {
     patchRun(tabId, { running: false });
     const text = m().actions.implicitCommit;
@@ -664,7 +717,11 @@ export async function fetchMore(tabId: string, resultIndex: number, discardEdits
     });
     setSession(response.session);
     const fresh = response.results[0];
-    if (fresh) {
+    if (fresh?.error?.code === 'RESULT_EXPIRED') {
+      // the job result is gone: the rows on screen stay, nothing ran again
+      patchRun(tabId, { running: false });
+      showToast(fresh.error.message);
+    } else if (fresh) {
       const results = run.results.map((r, i) => (i === resultIndex ? { ...fresh, index: r.index } : r));
       patchRun(tabId, { running: false, results, edits: undefined, editNotice: undefined });
     } else {
@@ -787,7 +844,7 @@ export async function cancelQuit(): Promise<void> {
 
 export function openTableTab(environmentId: string, database: string, table: string): void {
   const dialect = getDialect(findEnvironment(environmentId)?.engine ?? 'mysql');
-  const sql = `SELECT * FROM ${dialect.quoteIdent(database)}.${dialect.quoteIdent(table)} LIMIT 100;`;
+  const sql = dialect.tablePreviewSql(database, table);
   openTab(environmentId, { sql, database, run: true });
 }
 
@@ -827,7 +884,11 @@ export function editabilityOf(tabId: string, result: StatementResult): Editabili
   const tab = s.tabs.find((t) => t.id === tabId);
   const env = tab ? findEnvironment(tab.environmentId) : undefined;
   const schema = env ? s.schemas[env.id] : undefined;
-  return gridEditability(result, schema?.status === 'ready' ? schema.tree : undefined, getDialect(env?.engine ?? 'mysql').valueKind);
+  const engine = env?.engine ?? 'mysql';
+  return gridEditability(result, schema?.status === 'ready' ? schema.tree : undefined, getDialect(engine).valueKind, {
+    gridEdit: capabilitiesOf(engine).gridEdit,
+    name: getDialect(engine).displayName,
+  });
 }
 
 /** Sets (or, with `undefined`, removes) the new value of one cell. Typing the original value back removes the edit. */

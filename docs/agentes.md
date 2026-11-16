@@ -7,7 +7,7 @@ O modelo de segurança por trás disso, com os limites conhecidos, está em [seg
 ## Ligar e instalar
 
 1. No Cais, abra **Agentes** (rodapé da barra lateral) e ligue **Acesso de agentes**. O acesso começa desligado e só a pessoa liga, no app; desligado, o socket nem existe. A barra de status mostra "Agentes ligado".
-2. Menu **Cais › Instalar comando cais no terminal** (no Linux e no Windows, menu **Arquivo**). O Cais cria um link `cais` para o `cais.mjs` do app em `/usr/local/bin` se der para escrever lá, senão em `~/.local/bin`, e avisa se a pasta não está no PATH. Nunca sobrescreve um arquivo ou link que não seja do próprio Cais. No Windows o item fica desabilitado: use `node <caminho>/cais.mjs`. O comando roda no Node do sistema, 20 ou mais novo.
+2. Menu **Cais › Instalar comando cais no terminal** (no Linux e no Windows, menu **Arquivo**). O Cais cria um link `cais` para o `cais.mjs` do app em `/usr/local/bin` se der para escrever lá, senão em `~/.local/bin`, e avisa se a pasta não está no PATH. No deb do Linux o comando não vem no pacote: este menu é o jeito de instalá-lo, e na prática cria o link em `~/.local/bin` (o `/usr/local/bin` costuma ser do root). Nunca sobrescreve um arquivo ou link que não seja do próprio Cais. No Windows o item fica desabilitado: use `node <caminho>/cais.mjs`. O comando roda no Node do sistema, 20 ou mais novo.
 3. Em desenvolvimento, sem instalar: `npm run cli -- llm envs` (recompila o CLI e roda; precisa do Cais aberto com `npm run dev` e o acesso ligado).
 4. Dê ao agente a skill [skills/cais/SKILL.md](../skills/cais/SKILL.md). No Claude Code, a permissão sugerida é `Bash(cais llm:*)`.
 
@@ -59,9 +59,9 @@ Opções de `query`:
 |---|---|
 | `<env>` | O id ou o slug `projeto/ambiente`. O slug compara em NFC, com minúsculas só em ASCII. |
 | `--sql`, `--file`, `-` | O SQL, por exatamente uma das três (`-` lê a entrada padrão). Até 100 KB. |
-| `--write` | Pede escrita. Sem ela, um SQL que escreve é recusado (`writes_in_read`). |
+| `--write` | Pede escrita. Sem ela, um SQL que escreve é recusado (`writes_in_read`). Num ambiente BigQuery, com ela, o pedido é recusado (`engine_read_only`). |
 | `--reason` | O motivo, em uma frase. Obrigatório em toda escrita e em todo pedido que precisa de aprovação. Vai para o modal e para a Trilha. |
-| `--database` | Roda `USE` antes. |
+| `--database` | Roda `USE` antes. No BigQuery é o dataset padrão do pedido. |
 | `--max-rows` | Linhas por comando, de 1 a 1000 (padrão 200). Fora disso é erro de uso, não é cortado em silêncio. |
 | `--wait` | Espera o estado final (`awaiting_commit` é intermediário). Sem ela, um pedido que precisa de aprovação volta na hora com `{ "request_id": "...", "status": "pending_approval" }`. |
 | `--timeout` | Segundos de espera com `--wait`, de 1 a 3600 (padrão 600). Esgotado, sai com código 5 e o pedido segue valendo. |
@@ -79,14 +79,14 @@ Resposta de `query` e `status`:
 | `rollback_at` | `awaiting_commit` | Quando acontece o rollback automático |
 | `decided_by` | Pedido decidido | `person` (a pessoa aprovou ou recusou no modal) ou `policy` (o nível do ambiente ou a liberação de 15 minutos deixou rodar sem a pessoa ver aquele pedido). Pedido expirado não traz. |
 | `auto_commit` | Escrita `committed` | `true` se o Cais fez o commit sozinho, `false` se a pessoa deu o Commit |
-| `approval_reason` | Pedido que o nível liberaria, mas espera a pessoa | Por que espera (alerta, view, trigger, Trilha fora do ar...) |
+| `approval_reason` | Pedido que espera a pessoa por um motivo além do nível | Por que espera (alerta, view, trigger, Trilha fora do ar; no BigQuery, leitura estimada acima de 10 GiB ou do limite do ambiente, função do projeto, função não nativa, `ML.*`/`AI.*`) |
 | `commit_reason` | Escrita automática que parou antes do commit | Por que espera o Commit da pessoa (linhas demais, aviso do servidor...) |
 | `rejection_reason` | `rejected` ou `expired` | O motivo digitado pela pessoa, ou o motivo do Cais (por exemplo, "O ambiente mudou.") |
 | `rollback_reason` | `rolled_back` | `timeout`, `user`, `shutdown`, `access_off` ou `unexpected_commit` |
 | `rollback_incomplete` | Rollback que não desfez tudo | O servidor avisou que tabelas não transacionais ficaram com o que foi gravado |
 | `error` | `failed` | `message`, `code` e, numa escrita, `statement_index` (o comando que falhou) |
 | `timed_out` | `--wait` esgotado | O pedido segue valendo |
-| `results` | `succeeded`, `committed` e leitura `failed` | Um item por comando: `index`, `sql`, `verb`, `kind`, `duration_ms`, `columns` (`name` e `type`), `rows`, `row_count`, `truncated`, `affected_rows`, `insert_id`, `warnings`, `error` |
+| `results` | `succeeded`, `committed` e leitura `failed` | Um item por comando: `index`, `sql`, `verb`, `kind`, `duration_ms`, `columns` (`name` e `type`), `rows`, `row_count`, `truncated`, `affected_rows`, `insert_id`, `warnings`, `error`; no BigQuery, também `bytes_estimated`, `bytes_processed` e `bytes_billed` (não vêm com `result_withheld`) |
 | `result_withheld` | A pessoa desmarcou "O agente pode ver o resultado" | `results` traz só contagens (`row_count`, `affected_rows`), sem colunas nem valores, e erros do servidor só com o código |
 
 O resultado de uma escrita só chega depois do Commit. Escrita que falha devolve só o erro e o índice do comando; em rollback, recusa ou expiração não chega resultado nenhum. Erros de conexão chegam genéricos: sem host, IP, usuário do banco nem texto do `gcloud`.
@@ -106,7 +106,7 @@ pending_approval ──▶ rejected | expired
 - Um pedido pendente expira em **10 minutos**. Com mais de **20** pendentes, o próximo é recusado (`queue_full`).
 - Uma escrita roda todos os comandos numa transação, na conexão própria do agente (nunca nas abas da pessoa), e para no primeiro erro, com rollback. Sem erro e com transação aberta, vira `awaiting_commit`: a pessoa vê, por comando, as linhas afetadas e escolhe **Commit** ou **Rollback**. O Rollback é o padrão e é **automático em 2 minutos**, para não segurar lock.
 - `commit_unknown` quer dizer que a conexão caiu depois do envio do Commit: confira no banco antes de repetir.
-- Editar ou apagar um ambiente (host, porta, credencial, banco padrão, produção, nome ou projeto) ou a credencial que ele usa revoga as liberações dele, expira os pedidos pendentes ("O ambiente mudou.") e fecha as conexões dos agentes nele.
+- Editar ou apagar um ambiente (host, porta, credencial, banco padrão, produção, nome ou projeto do Cais; no BigQuery, também o projeto do Google Cloud e o limite de bytes) ou a credencial que ele usa revoga as liberações dele, expira os pedidos pendentes ("O ambiente mudou.") e fecha as conexões dos agentes nele.
 
 ## Níveis por ambiente
 
@@ -154,14 +154,15 @@ O processo principal reclassifica cada comando com o dialeto; nada do que o clie
 | Opção desconhecida, valor fora do intervalo, `--sql` vazio ou só com espaços, mais de uma fonte de SQL | `usage` |
 | Arquivo de `--file` que não abre | `file_unreadable` |
 | SQL sem nenhum comando (por exemplo, só comentários) | `empty_sql` |
-| Leitura (`query` sem `--write`) com algo que não é permitido em somente leitura | `writes_in_read` |
+| Leitura (`query` sem `--write`) com algo que não é permitido em somente leitura (no BigQuery, também um comando que o dry run do servidor não lê como `SELECT`) | `writes_in_read` |
+| `--write` num ambiente de motor só de leitura (o BigQuery) | `engine_read_only` |
 | DDL, comando com commit implícito, controle de transação (`BEGIN`, `COMMIT`, `ROLLBACK`, `SET autocommit`...) | `ddl_or_transaction` |
 | Em escrita, algo além de `INSERT`, `REPLACE`, `UPDATE`, `DELETE` e leituras seguras (`CALL`, `LOAD`, `SELECT … FOR UPDATE`, `INTO OUTFILE`, `KILL`, `DO`...) | `command_not_allowed` |
-| Comentário executável (`/*! … */`, `/*M! … */`) | `executable_comment` |
-| `GET_LOCK`, `RELEASE_LOCK`, `RELEASE_ALL_LOCKS`, `SLEEP`, `BENCHMARK`, `LOAD_FILE`, funções que mudam o estado do servidor, hints `SET_VAR` e `MAX_EXECUTION_TIME` | `function_not_allowed` |
-| Escrita em `mysql`, `performance_schema`, `sys` ou `information_schema`; leitura do esquema `mysql` ou `SHOW CREATE USER` | `system_schema` |
+| Comentário executável (`/*! … */`, `/*M! … */`); no BigQuery, a diretiva `#legacySQL` ou `#standardSQL` quando chega à política | `executable_comment` |
+| `GET_LOCK`, `RELEASE_LOCK`, `RELEASE_ALL_LOCKS`, `SLEEP`, `BENCHMARK`, `LOAD_FILE`, funções que mudam o estado do servidor, hints `SET_VAR` e `MAX_EXECUTION_TIME`; no BigQuery, `EXTERNAL_QUERY` e `OBJ.*` | `function_not_allowed` |
+| Escrita em `mysql`, `performance_schema`, `sys` ou `information_schema`; leitura do esquema `mysql` ou `SHOW CREATE USER`; no BigQuery, escrita no `INFORMATION_SCHEMA` e leitura de `INFORMATION_SCHEMA.JOBS*` e `SESSIONS*` | `system_schema` |
 | SQL com caractere invisível, de direção de texto, espaço que não seja o espaço comum, quebra de linha que não seja `\n` (CR sozinho, U+2028, VT, FF) ou de controle | `hidden_text` |
-| Texto que o servidor e a revisão leriam diferente: caractere não ASCII fora de strings, de nomes entre crases e de comentários; nome de variável ou de função fora do ASCII; comentário com outro `/*` dentro; `--` sem espaço logo depois; variável entre aspas (`@'x'`) | `ambiguous_text` |
+| Texto que o servidor e a revisão leriam diferente: caractere não ASCII fora de strings, de nomes entre crases e de comentários; nome de variável ou de função fora do ASCII; comentário com outro `/*` dentro; `--` sem espaço logo depois; variável entre aspas (`@'x'`); no BigQuery, também string de três aspas, string crua com barra invertida (escreva `'\\d+'` no lugar de `r'\d+'`), string de bytes, letra `x` colada numa string, nome entre crases com barra invertida, `--` sem espaço depois, parâmetro entre aspas e a diretiva `#legacySQL` ou `#standardSQL` | `ambiguous_text` |
 | `SET NAMES`/`SET CHARACTER SET` que não seja utf8mb4 | `writes_in_read` ou `command_not_allowed` |
 | Falta `--reason` | `reason_required` |
 | Mais de 20 pendentes | `queue_full` |
@@ -171,7 +172,7 @@ O processo principal reclassifica cada comando com o dialeto; nada do que o clie
 
 Emoji com junção (ZWJ) ou seletor de variação também cai em `hidden_text`: use `CHAR()` ou `X'…'` para gravar esses valores.
 
-Um script criado por agente segue as mesmas regras de um pedido com `--write` e não pode ter mais de duas linhas em branco seguidas (`invalid_script`).
+Um script criado por agente segue as mesmas regras de um pedido com `--write` e não pode ter mais de duas linhas em branco seguidas (`invalid_script`). Num projeto com ambientes MySQL e BigQuery, o script precisa passar nas regras de texto de todos os motores do projeto e ser aceito por pelo menos um deles.
 
 ## O que a pessoa vê
 
@@ -179,20 +180,36 @@ Um script criado por agente segue as mesmas regras de um pedido com `--write` e 
 - **"O agente pode ver o resultado"** vem marcado; desmarcado, a resposta traz `result_withheld: true` e só contagens.
 - **Nada decide por tecla solta:** Recusar e Rollback têm o foco, Aprovar e Commit ficam desabilitados por 600 ms depois que o modal aparece, Enter não aprova e Esc deixa o pedido pendente (ele volta por "Revisar" no painel). Os modais esperam qualquer outro diálogo aberto fechar.
 - **Modal do Commit:** cada comando inteiro, com as linhas afetadas, o contador do rollback automático, Rollback e Commit.
-- **Notificação do sistema** e, no macOS, o ícone pulando no Dock, no máximo uma vez a cada 30 segundos, dizendo quantos pedidos esperam. Também avisa quando uma escrita automática ficou esperando o Commit.
+- **Notificação do sistema** e, com a janela sem foco, o aviso de atenção (no macOS o ícone pulando no Dock; no Linux e no Windows a janela pisca, `flashFrame`, até ganhar o foco), no máximo uma vez a cada 30 segundos, dizendo quantos pedidos esperam. Também avisa quando uma escrita automática ficou esperando o Commit.
 - O painel Agentes e a Trilha mostram o commit automático como "commit feito (automático)".
+
+## BigQuery
+
+Um ambiente com `engine: "bigquery"` é só leitura nesta versão. `cais llm envs` mostra `default_database` como o dataset padrão e nunca o projeto do Google Cloud. `schema` lista datasets e tabelas; com `--database`, as colunas com o tipo completo. `--database` em `query` é o dataset padrão do pedido.
+
+- **`--write`:** recusado com `engine_read_only` (saída 2), em qualquer ambiente BigQuery.
+- **Dry run antes de decidir:** cada comando passa por um dry run no servidor (`jobs.insert` com `dryRun`), que dá o tipo do comando, os bytes estimados e as rotinas usadas. Um comando que o servidor lê como outra coisa que não `SELECT` é recusado (`writes_in_read`), mesmo que o classificador do app tenha deixado passar. Um dry run que falha (tabela que não existe, permissão, tempo) não decide nada: o pedido segue e o erro vem na execução. Se o dry run da execução achar uma rotina que ninguém aprovou, o comando não roda (`routine_not_approved`; peça de novo).
+- **Leitura grande:** com mais de **10 GiB** estimados (fixo, somando os comandos do pedido) o pedido espera a aprovação da pessoa, mesmo em *Leitura liberada*, sob a liberação de 15 minutos e em ambiente sem limite. Acima do limite do ambiente, quando é menor que 10 GiB, também. `approval_reason` traz a estimativa, o modal mostra a estimativa de cada comando, e o pedido precisa de `--reason`. A liberação de 15 minutos continua valendo para as leituras pequenas.
+- **Teto do job:** o job do agente roda com `maximumBytesBilled` de 10 GiB, ou do limite do ambiente quando é menor; um pedido que a pessoa aprovou por causa dos bytes sobe o teto para a estimativa aprovada arredondada para cima em GiB. Um dry run que falhou não dá estimativa, e o job fica no teto menor. Nunca sem teto. Na hora de rodar, o Cais repete o dry run: se a estimativa passou do teto, o comando não roda e o pedido falha com `bytes_over_approved`, sem cobrança.
+- **Também esperam a pessoa (`approval_reason`):** qualquer rotina que o dry run do servidor aponte (função definida no projeto; a rotina chamada por dentro de uma view deve aparecer, mas isso ainda não foi conferido contra o servidor real, veja o limite em [seguranca.md](seguranca.md#bigquery-só-leitura); pode ser remota e rodar código fora do BigQuery; o motivo cita `dataset.rotina`, sem o projeto), chamada de função definida no projeto que o classificador vê, função sem qualificador que não é nativa do GoogleSQL (nome não revisado, talvez um built-in novo que chama fora do BigQuery) e as de IA generativa e de modelo (`ML.*`, `AI.*`), que custam além dos bytes lidos.
+- **Recusados:** `INFORMATION_SCHEMA.JOBS*` e `SESSIONS*`, que mostram o SQL de outras pessoas do projeto (`system_schema`); `EXTERNAL_QUERY` e `OBJ.*` (`function_not_allowed`: o `OBJ.GET_ACCESS_URL` entrega uma URL assinada, que serve de credencial); chamada encadeada como `(x).f()` ou `(x).(ds.f)()` (`ambiguous_text`: a revisão não vê qual função roda); `#legacySQL` e `#standardSQL` (`ambiguous_text`, ou `executable_comment` quando chega à política); strings de três aspas e comentário com `/*` dentro (`ambiguous_text`); caracteres escondidos (`hidden_text`). O resto do que não é consulta cai nas recusas de sempre (`writes_in_read`, `ddl_or_transaction`). Um agente que lê um ambiente BigQuery recebe, na saída, os campos `bytes_estimated`, `bytes_processed` e `bytes_billed` por comando (veja [Saída](#saída)). Os motivos de recusa ficam em português fixo, como no MySQL.
+- **Redação:** erros e textos que vão ao agente saem sem o id do projeto (`<projeto>`) e sem e-mails de conta ou de service account (`<conta>`). O texto do servidor, que pode citar valores de linhas, só chega com "O agente pode ver o resultado".
+- **Saída:** no BigQuery, cada item de `results` traz também `bytes_estimated`, `bytes_processed` e `bytes_billed`. Com o resultado retido, só contagens. A saída do MySQL não tem esses campos.
+- **Limites:** `jobTimeoutMs` de 30 s e corte em 35 s por `jobs.cancel`, 60 s por pedido, `--max-rows` como no MySQL. O job leva o rótulo `cais: agent`.
+- **Trilha:** as linhas do agente levam o id do job e os bytes estimados e faturados, por comando; na linha do pedido, os bytes somados e o id do job só quando houve um job.
 
 ## Limites
 
 | Limite | Valor |
 |---|---|
-| Tempo de cada comando | 30 s no servidor (`max_execution_time`) e corte em 35 s pelo Cais (`KILL QUERY`), que cobre o que o `max_execution_time` não cobre (DML, `SET @x = (SELECT …)`, `SHOW … WHERE`) |
+| Tempo de cada comando | 30 s no servidor (`max_execution_time`; no BigQuery, `jobTimeoutMs`) e corte em 35 s pelo Cais (`KILL QUERY`; no BigQuery, `jobs.cancel`), que cobre o que o `max_execution_time` não cobre (DML, `SET @x = (SELECT …)`, `SHOW … WHERE`) |
 | Pedido de leitura | 60 s no total |
 | Escrita aprovada | 60 s no total até a segunda decisão |
 | Espera por lock numa escrita | 10 s (`innodb_lock_wait_timeout`) |
 | Conexões de leitura por ambiente | Até 3, fechadas depois de 5 minutos ociosas, zeradas entre pedidos (`COM_RESET_CONNECTION`) |
 | Linhas por comando | 1 a 1000 (padrão 200) |
 | SQL | 100 KB |
+| Leitura grande no BigQuery | Estimada acima de 10 GiB (`AGENT_BYTES_APPROVAL`, fixo) ou do limite do ambiente, o que for menor: espera a pessoa. O job leva `maximumBytesBilled` de 10 GiB, do limite do ambiente (se menor) ou do valor aprovado |
 | Pedidos pendentes | 20, cada um expira em 10 minutos |
 | Decisão do Commit | Rollback automático em 2 minutos |
 | Liberação de leituras | 15 minutos |
@@ -212,7 +229,7 @@ Cada sessão de agente fala só utf8mb4, com `sql_mode` sem `NO_BACKSLASH_ESCAPE
 | 4 | Cais fechado ou acesso de agentes desligado: `cais_unavailable` (sem socket, ou o Cais não respondeu) ou `agent_access_off` (o acesso foi desligado durante o pedido) | Pede para a pessoa abrir o Cais e ligar o acesso. |
 | 5 | Tempo de espera esgotado | O pedido segue valendo: `cais llm status <id> --wait`. |
 
-Outros códigos de erro que o agente pode ver: `env_not_found` e `env_ambiguous` (use `cais llm envs` e o slug exato ou o id), `not_found`, `project_not_found`, `invalid_state`, `invalid_database`, `trail_unavailable` (a Trilha não pode ser gravada; nada de agente roda enquanto isso), `non_transactional_write` (a escrita gravou fora da transação e o pedido parou), `commit_unknown`, `invalid_params` (o servidor recusou os parâmetros) e `invalid_script`. Dentro de `error.code` de um pedido `failed` também aparecem `agent_timeout` (o Cais cortou um comando em 35 s ou o pedido passou do tempo total) e `commit_failed` (o Commit falhou e o servidor desfez a transação).
+Outros códigos de erro que o agente pode ver: `env_not_found` e `env_ambiguous` (use `cais llm envs` e o slug exato ou o id), `not_found`, `project_not_found`, `invalid_state`, `invalid_database`, `engine_read_only` (`--write` num ambiente de motor só de leitura, o BigQuery; saída 2), `trail_unavailable` (a Trilha não pode ser gravada; nada de agente roda enquanto isso), `non_transactional_write` (a escrita gravou fora da transação e o pedido parou), `commit_unknown`, `invalid_params` (o servidor recusou os parâmetros) e `invalid_script`. Dentro de `error.code` de um pedido `failed` também aparecem `bytes_over_approved` (BigQuery: a estimativa de uma leitura passou do teto aprovado antes de rodar; nada foi cobrado, peça de novo), `agent_timeout` (o Cais cortou um comando em 35 s ou o pedido passou do tempo total) e `commit_failed` (o Commit falhou e o servidor desfez a transação).
 
 ## O que o agente não deve fazer
 

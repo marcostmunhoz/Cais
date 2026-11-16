@@ -6,14 +6,14 @@ import { AGENT_LEVEL_LABEL, agentLevelOf, type Environment, type EnvironmentDraf
 import { TRAIL_RETENTION_DAYS } from '@shared/agents';
 import { m } from '@shared/i18n';
 import type { SchemaTree } from '@shared/results';
-import { resolveCredential, toConnectParams } from './auth/credentials';
+import { connectParamsFor, type CredentialSources } from './auth/credentials';
 import type { GcloudTokenProvider } from './auth/gcloud';
 import type { AgentAccess } from './agents/access';
 import type { AgentBroker } from './agents/broker';
 import { AgentError } from './agents/errors';
 import { CaisError } from './errors';
 import { getDriver } from './drivers/registry';
-import { DriverError, type ConnectParams } from './drivers/types';
+import { DriverError } from './drivers/types';
 import { SessionManager } from './sessions';
 import { changedForAgents, type CatalogStore } from './store/catalog';
 import type { ScriptStore } from './store/scripts';
@@ -26,6 +26,10 @@ export interface Services {
   scripts: ScriptStore;
   agents: { access: AgentAccess; broker: AgentBroker };
   gcloud: GcloudTokenProvider;
+  /** Accounts the registry offers for Google IAM; the gcloud provider's when absent (the e2e hook replaces it with a fixed list). */
+  listGcloudAccounts?: () => ReturnType<GcloudTokenProvider['listAccounts']>;
+  /** BigQuery access token; the gcloud provider when absent (the e2e hook replaces it with a fixed fake). */
+  getAccessToken?: CredentialSources['getAccessToken'];
   sessions: SessionManager;
   /** Called after a session closes, to continue a pending quit. */
   afterSessionClose(): void;
@@ -42,18 +46,24 @@ const mode = z.enum(['read-only', 'transaction', 'autocommit']);
 
 // creating only: renaming goes through catalogRenameProject (trail, agents); an id here is ignored
 const projectInput = z.object({ name });
-const environmentInput = z.object({
+const environmentBase = {
   id: id.optional(),
   projectId: id,
   name,
-  engine: z.literal('mysql'),
-  host: z.string().max(255),
-  port: z.number().int().min(1).max(65535),
   defaultDatabase: z.string().max(200).optional(),
   credentialId: id,
   production: z.boolean(),
   agentLevel: z.enum(['approve-all', 'free-reads', 'free-reads-writes']).optional(),
-});
+};
+const environmentInput = z.discriminatedUnion('engine', [
+  z.object({ ...environmentBase, engine: z.literal('mysql'), host: z.string().max(255), port: z.number().int().min(1).max(65535) }),
+  z.object({
+    ...environmentBase,
+    engine: z.literal('bigquery'),
+    gcpProject: z.string().max(100),
+    maxBytesBilled: z.number().int().positive().safe().optional(),
+  }),
+]);
 const credentialInput = z.discriminatedUnion('kind', [
   z.object({
     id: id.optional(),
@@ -71,13 +81,22 @@ const credentialInput = z.discriminatedUnion('kind', [
     dbUsername: z.string().max(200),
   }),
 ]);
-const environmentDraft = z.object({
-  engine: z.literal('mysql'),
-  host: z.string().min(1).max(255),
-  port: z.number().int().min(1).max(65535),
-  defaultDatabase: z.string().max(200).optional(),
-  credentialId: id,
-});
+const environmentDraft = z.discriminatedUnion('engine', [
+  z.object({
+    engine: z.literal('mysql'),
+    host: z.string().min(1).max(255),
+    port: z.number().int().min(1).max(65535),
+    defaultDatabase: z.string().max(200).optional(),
+    credentialId: id,
+  }),
+  z.object({
+    engine: z.literal('bigquery'),
+    gcpProject: z.string().min(1).max(100),
+    defaultDatabase: z.string().max(200).optional(),
+    credentialId: id,
+    maxBytesBilled: z.number().int().positive().safe().optional(),
+  }),
+]);
 const runRequest = z.object({
   sql: z.string().max(5_000_000),
   scope: z.enum(['current', 'all']),
@@ -85,6 +104,7 @@ const runRequest = z.object({
   selection: z.object({ from: z.number().int().min(0), to: z.number().int().min(0) }).optional(),
   maxRows: z.number().int().min(1).max(50_000),
   confirmed: z.boolean().optional(),
+  confirmedBytes: z.array(z.object({ sql: z.string().max(5_000_000), bytes: z.number().int().min(0).safe() })).max(10_000).optional(),
   refetch: z.boolean().optional(),
   origin: z.literal('grid').optional(),
 });
@@ -130,6 +150,10 @@ function describeError(error: unknown): { message: string; code?: string } {
 export function registerIpc(services: Services): void {
   const { store, tabs, scripts, gcloud, sessions, agents } = services;
   const schemaCache = new Map<string, SchemaTree>();
+  /** Forgets the environment's schema, the per-dataset reads included (their keys start with the environment id). */
+  const dropSchema = (envId: string): void => {
+    for (const key of [...schemaCache.keys()]) if (key === envId || key.startsWith(`${envId}\u0000`)) schemaCache.delete(key);
+  };
 
   /** Registers a handler that validates its arguments with zod and never throws across the wire. */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -145,18 +169,13 @@ export function registerIpc(services: Services): void {
     });
   }
 
-  const connectParamsFor = async (
-    environment: Pick<Environment, 'host' | 'port' | 'credentialId'>,
-    database?: string,
-  ): Promise<ConnectParams> => {
-    const credential = store.getCredential(environment.credentialId);
-    if (!credential) throw new CaisError(m().mainMisc.credentialNotFound);
-    const resolved = await resolveCredential(credential, {
-      getPassword: (credentialId) => store.getPassword(credentialId),
-      getToken: (account, sa) => gcloud.getToken(account, sa),
-    });
-    return toConnectParams({ host: environment.host, port: environment.port, database }, resolved);
+  const sources: CredentialSources = {
+    getPassword: (credentialId) => store.getPassword(credentialId),
+    getToken: (account, sa) => gcloud.getToken(account, sa),
+    getAccessToken: services.getAccessToken ?? ((account, sa, opts) => gcloud.getAccessToken(account, sa, opts)),
   };
+  const paramsFor = (target: Parameters<typeof connectParamsFor>[0], database?: string) =>
+    connectParamsFor(target, database, { getCredential: (credentialId) => store.getCredential(credentialId), sources, origin: 'person' });
 
   const t = (...items: z.ZodType[]) => z.tuple(items as [z.ZodType, ...z.ZodType[]]) as unknown as z.ZodType<unknown[]>;
   const none = z.tuple([]) as unknown as z.ZodType<unknown[]>;
@@ -192,7 +211,7 @@ export function registerIpc(services: Services): void {
     const before = input.id ? store.getEnvironment(input.id as string) : undefined;
     const wasBlocked = before ? store.isBlocked(before.id) : false;
     const env = await store.saveEnvironment(input as z.infer<typeof environmentInput>);
-    schemaCache.delete(env.id);
+    dropSchema(env.id);
     const tr = m().mainIpc.trail;
     if (!before) {
       const level = AGENT_LEVEL_LABEL[agentLevelOf(env)];
@@ -222,7 +241,7 @@ export function registerIpc(services: Services): void {
     const gone = store.getEnvironment(envId as string);
     await store.deleteEnvironment(envId as string);
     if (gone) services.recordConfig(m().mainIpc.trail.environmentDeleted, gone);
-    schemaCache.delete(envId as string);
+    dropSchema(envId as string);
     await agents.broker.environmentChanged(envId as string);
   });
   handle(CHANNELS.catalogSaveCredential, t(credentialInput), async (raw) => {
@@ -243,7 +262,7 @@ export function registerIpc(services: Services): void {
     return saved;
   });
   handle(CHANNELS.catalogDeleteCredential, t(id), (credentialId) => store.deleteCredential(credentialId as string));
-  handle(CHANNELS.catalogGcloudAccounts, none, () => gcloud.listAccounts());
+  handle(CHANNELS.catalogGcloudAccounts, none, () => (services.listGcloudAccounts ?? (() => gcloud.listAccounts()))());
 
   handle(CHANNELS.connectionTest, t(environmentDraft), async (raw) => {
     const draft = raw as EnvironmentDraft;
@@ -253,7 +272,7 @@ export function registerIpc(services: Services): void {
       return { ok: false as const, error: m().mainIpc.blockedCredentialTest };
     }
     try {
-      const params = await connectParamsFor(draft, draft.defaultDatabase?.trim() || undefined);
+      const params = await paramsFor(draft, draft.defaultDatabase?.trim() || undefined);
       const result = await getDriver(draft.engine).test(params);
       return { ok: true as const, serverVersion: result.serverVersion };
     } catch (error) {
@@ -292,18 +311,34 @@ export function registerIpc(services: Services): void {
 
   handle(
     CHANNELS.schemaGet,
-    t(id, z.object({ refresh: z.boolean().optional() }).optional()),
+    t(id, z.object({ refresh: z.boolean().optional(), database: z.string().max(1024).optional() }).optional()),
     async (envId, opts) => {
       const key = envId as string;
-      const refresh = (opts as { refresh?: boolean } | undefined)?.refresh;
-      const cached = schemaCache.get(key);
-      if (cached && !refresh) return cached;
+      const { refresh, database } = (opts ?? {}) as { refresh?: boolean; database?: string };
       const environment = store.getEnvironment(key);
       if (!environment) throw new CaisError(m().mainSessions.environmentNotFound);
-      store.requireTrusted(environment.id);
-      const params = await connectParamsFor(environment);
-      const tree = await getDriver(environment.engine).introspect(params);
-      schemaCache.set(key, tree);
+      const driver = getDriver(environment.engine);
+      const read = async (scope?: { database: string }): Promise<SchemaTree> => {
+        store.requireTrusted(environment.id);
+        const params = await paramsFor(environment);
+        return driver.introspect(params, scope);
+      };
+      const names = async (): Promise<SchemaTree> => {
+        const cached = schemaCache.get(key);
+        if (cached && !refresh) return cached;
+        const tree = await read();
+        schemaCache.set(key, tree);
+        return tree;
+      };
+      if (!driver.lazyColumns || !database) return names();
+      // the columns of one dataset: only a name the dataset list knows opens a read (and a cache entry) of its own
+      const known = (await names()).databases.find((d) => d.name.toLowerCase() === database.toLowerCase());
+      if (!known) return names();
+      const scopedKey = `${key}\u0000${known.name.toLowerCase()}`;
+      const cached = schemaCache.get(scopedKey);
+      if (cached && !refresh) return cached;
+      const tree = await read({ database: known.name });
+      schemaCache.set(scopedKey, tree);
       return tree;
     },
   );

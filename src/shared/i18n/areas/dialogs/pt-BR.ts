@@ -15,6 +15,15 @@ export const ptBR = {
       `Copia todos os ambientes de ${p.source}, com a mesma credencial. Os scripts não são copiados.`,
     renameHint: 'Liberações de agentes deste projeto são revogadas e pedidos pendentes expiram, porque o endereço projeto/ambiente muda.',
   },
+  /** BigQuery: statements estimated above the environment's byte limit, asked before anything runs. */
+  bytesConfirm: {
+    title: 'Consulta acima do limite de bytes',
+    heading: 'Esta execução passa do limite de bytes do ambiente',
+    body: (p: { limit: string; cap: string }) =>
+      `Nada rodou ainda. O limite do ambiente é ${p.limit}. Se você rodar mesmo assim, o teto de bytes faturados sobe para ${p.cap} só nesta execução.`,
+    estimate: (p: { bytes: string }) => `estimativa ${p.bytes}`,
+    confirm: 'Rodar mesmo assim',
+  },
   cancel: 'Cancelar',
   commit: 'Commit',
   rollback: 'Rollback',

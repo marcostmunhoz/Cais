@@ -51,4 +51,38 @@ export const ptBR = {
     nonAsciiCode: (p: { marker: string; char: string }) =>
       `Caractere fora do ASCII no código (${p.marker} "${p.char}"), fora de string e de nome entre crases: o MySQL o lê como parte de um nome. Escreva o nome entre crases ou o valor entre aspas.`,
   },
+  /** GoogleSQL (BigQuery) dialect: read-only refusals shown to the person (after "Somente leitura: ") and agent code problems. */
+  bigquery: {
+    classify: {
+      changesData: (p: { verb: string }) => `${p.verb} não é permitido: o BigQuery só lê nesta versão.`,
+      changesStructure: (p: { verb: string }) => `${p.verb} não é permitido: o BigQuery só lê nesta versão.`,
+      transaction: 'o BigQuery roda só consultas: não há transação nesta versão.',
+      script: 'scripts e blocos (DECLARE, SET, BEGIN ... END, IF, LOOP, WHILE, FOR...) não são permitidos. Rode uma consulta por vez.',
+      other: (p: { verb: string }) => `${p.verb} não é uma consulta. Só SELECT, WITH e FROM (sintaxe pipe) são permitidos.`,
+      empty: 'não há comando para rodar.',
+      multiple: 'mais de um comando no mesmo texto não é permitido. Rode um por vez.',
+      mixed: (p: { verb: string }) => `a consulta mistura outro comando (${p.verb}). Rode um por vez.`,
+      legacyDirective: 'a diretiva #legacySQL ou #standardSQL não é permitida.',
+      externalQuery: 'EXTERNAL_QUERY não é permitido: ele roda uma consulta em outro banco.',
+      unreadable:
+        'o texto tem string, nome entre crases ou comentário sem fim, ou algo que o servidor pode ler de outro jeito (barra invertida em string crua ou entre crases).',
+    },
+    agentCode: {
+      nestedComment:
+        'Comentário com /* dentro: o GoogleSQL termina o comentário no primeiro */ e a revisão pode mostrar outra coisa. Tire o /* de dentro.',
+      carriageReturn: 'Comentário de linha com retorno de carro (CR) dentro: o servidor e a revisão podem achar o fim da linha em lugares diferentes. Use só quebra de linha.',
+      quotedVariable: 'Nome de parâmetro entre aspas ou crases: use @nome, só com letras ASCII, dígitos e _.',
+      nonAsciiFunction: (p: { name: string }) => `Nome de função com caractere fora do ASCII (${p.name}).`,
+      nonAsciiCode: (p: { marker: string; char: string }) =>
+        `Caractere fora do ASCII no código (${p.marker} "${p.char}"), fora de string, de nome entre crases e de comentário. Escreva o nome entre crases ou o valor entre aspas.`,
+      tripleQuote: 'String de três aspas (\'\'\'...\'\'\' ou """...""") não é permitida: a revisão não a lê como o servidor. Use uma string de aspas simples ou duplas.',
+      legacyDirective: 'A diretiva #legacySQL ou #standardSQL não é permitida.',
+      rawBackslash: 'String crua (r\'...\') com barra invertida: recusada por precaução, porque a documentação do BigQuery não registra a regra do servidor. Use uma string normal, dobrando as barras.',
+      backslashIdent: 'Nome entre crases com barra invertida: o servidor e a revisão podem achar o fim do nome em lugares diferentes. Tire a barra.',
+      dashComment: 'Comentário -- colado no texto seguinte: sem espaço depois dos dois traços, a revisão pode lê-lo como código. Ponha um espaço depois de --.',
+      bytesPrefix: 'String de bytes (b\'...\'): a revisão pode lê-la como número binário e perder o fim da string. Use uma string normal ou FROM_BASE64.',
+      chainedCall: 'Chamada encadeada ((expressão).função(...) ou (expressão).(nome)(...)): a revisão não vê qual função roda. Escreva a chamada direta, função(expressão).',
+      hexPrefix: 'Letra x colada numa string (x\'...\'): a revisão a lê como número hexa. Separe com espaço ou use outro nome.',
+    },
+  },
 };

@@ -6,8 +6,8 @@ Como o Cais se comporta e por quê. Cada regra traz o motivo quando ele não é 
 
 - **Produção não escreve por acidente.** Um ambiente de produção abre em Somente leitura; para escrever é preciso trocar o modo da aba, e o Auto-commit em produção pede confirmação.
 - **Segredo não sai do processo principal.** A interface envia a senha uma vez, ao salvar, e nunca a recebe de volta. Nada de senha ou token em log.
-- **A interface não conhece o motor.** Tudo o que depende do banco (dialeto, palavras-chave, introspecção, classificação de comandos) vem do driver e do dialeto. MySQL é o primeiro motor.
-- **O app não altera o `gcloud`.** Só lista as contas logadas e gera o token de login.
+- **A interface não conhece o motor.** Tudo o que depende do banco (dialeto, palavras-chave, introspecção, classificação de comandos) vem do driver e do dialeto. MySQL é o primeiro motor e o BigQuery, o segundo (só leitura).
+- **O app não altera o `gcloud`.** Só lista as contas logadas e gera tokens: o de login do Cloud SQL e o de acesso do BigQuery.
 - **Poucas opções.** Um padrão seguro vale mais que uma configuração. Os valores fixos deste documento (limites de linhas, tempo de inatividade, níveis de agentes) são fixos de propósito; uma opção nova só entra com o motivo registrado aqui.
 
 ## Telas
@@ -26,7 +26,7 @@ A interface segue o tema claro ou escuro do sistema e usa as fontes do sistema. 
 - **Projeto › ambientes.** Um ambiente tem nome, host, porta, banco padrão opcional, credencial, marcação de produção e o nível de acesso de agentes. **Produção** vem marcado quando o nome é `pro`, `prod` ou `production`, e pode ser trocado.
 - **Credencial é um cadastro próprio**, usado por quantos ambientes precisar, para não repetir usuário e senha ambiente a ambiente. O cadastro mostra em quantos ambientes ela é usada. Apagar uma credencial em uso é recusado, com a lista de ambientes; apagar um projeto que ainda tem ambientes ou scripts também é recusado.
 - **Dois tipos de credencial:**
-  - *Usuário e senha.* A senha é cifrada pelo cofre do sistema (`safeStorage`, Keychain no macOS). Sem o cofre disponível, o Cais recusa salvar a senha: nunca grava senha em texto puro. No formulário, senha vazia mantém a atual.
+  - *Usuário e senha.* A senha é cifrada pelo cofre do sistema (`safeStorage`, Keychain no macOS, Secret Service no Linux). Sem o cofre disponível, o Cais recusa salvar a senha: nunca grava senha em texto puro. No Linux o cofre só vale com um chaveiro de verdade (GNOME Keyring, KWallet): se o Chromium cair no armazenamento sem chaveiro (`basic_text`, que usa uma chave fixa no código) ou não souber qual usou (`unknown`), o Cais trata como indisponível e a recusa acrescenta como instalar ou desbloquear o chaveiro e a opção `--password-store=gnome-libsecret`. Credencial Google IAM não usa o cofre e segue funcionando. No formulário, senha vazia mantém a atual.
   - *Google IAM via gcloud.* Conta escolhida entre as logadas no `gcloud` (ou digitada), impersonação de service account opcional e usuário do banco derivado do e-mail e editável: conta de usuário vira a parte antes do `@`; service account vira o e-mail sem `.gserviceaccount.com`.
 - **Testar conexão** confere host, porta e credencial antes de salvar.
 - **Nomes de projeto e de ambiente** são aparados, normalizados em NFC e sem caracteres invisíveis, únicos sem diferenciar maiúsculas, e não têm `/`, porque o endereço `projeto/ambiente` usado pelos agentes ficaria ambíguo.
@@ -42,9 +42,54 @@ A interface segue o tema claro ou escuro do sistema e usa as fontes do sistema. 
 - O TLS cifra sem verificar o certificado (`ssl-mode=REQUIRED`), porque o Cloud SQL usa uma CA própria.
 - **O que a instância precisa:** a flag `cloudsql_iam_authentication=on`; a conta (ou a service account) cadastrada na instância como usuário IAM do banco, com os privilégios do MySQL de que o trabalho precisa; o papel Cloud SQL Instance User (`roles/cloudsql.instanceUser`) ou equivalente para a conta que gera o token (a impersonada, quando há impersonação); e uma rota de rede até o IP e a porta da instância.
 - O token fica em memória por 50 minutos por conta e service account, e nunca vai para log.
-- **Achar o `gcloud`:** um app aberto pelo Finder não herda o PATH do shell. O Cais procura no PATH atual, depois pelo shell de login (`$SHELL -lc 'command -v gcloud'`, uma vez) e depois em `/usr/local/bin/gcloud`, `/opt/homebrew/bin/gcloud`, `~/google-cloud-sdk/bin/gcloud` e `/opt/homebrew/share/google-cloud-sdk/bin/gcloud`.
+- **Achar o `gcloud`:** um app aberto pelo Finder (macOS) ou pelo menu de aplicativos (Linux) não herda o PATH do shell. O Cais procura no PATH atual, depois pelo shell de login (`$SHELL -lc 'command -v gcloud'`, uma vez) e depois em `/usr/local/bin/gcloud`, `/opt/homebrew/bin/gcloud`, `~/google-cloud-sdk/bin/gcloud` e `/opt/homebrew/share/google-cloud-sdk/bin/gcloud` (macOS), e `/usr/bin/gcloud`, `/snap/bin/gcloud` e `/usr/lib/google-cloud-sdk/bin/gcloud` (Linux).
 - Quando a conta precisa entrar de novo, o erro diz o comando: `gcloud auth login <conta>`.
-- O app só roda `gcloud auth list` e `gcloud sql generate-login-token`. Nenhum comando que altera o `gcloud`.
+- O app só roda três comandos: `gcloud auth list`, `gcloud sql generate-login-token` e `gcloud auth print-access-token --account=<conta>` (com `--impersonate-service-account` quando configurado; é o token do BigQuery, guardado em memória por 50 minutos, separado do token de login). Nenhum comando que altera o `gcloud`.
+
+## BigQuery (só leitura)
+
+O BigQuery é o segundo motor, e nesta versão só lê: para a pessoa e para agentes. O que está fora desta versão, e o que cada item exige, está em [roadmap.md](roadmap.md). A interface não muda de forma: o que depende do motor (dialeto, termo, capacidades) vem do dialeto e do driver, e a tela diz **dataset** onde o MySQL diz banco.
+
+### Ambiente
+
+- **Campos:** projeto do Google Cloud (o id onde os jobs rodam e são cobrados), dataset padrão opcional (é o "banco padrão") e limite de bytes por consulta, opcional. Não há host nem porta. Não há campo de localização: o BigQuery a infere pela consulta (o dataset padrão resolve a região de uma consulta sem tabela, que sem ele cairia em US), e o Cais repete a localização do job nas leituras seguintes (páginas, cancelamento). Uma consulta que mistura datasets de regiões diferentes é recusada pelo servidor ("Not found: Dataset … in location").
+- **Credencial:** tem de ser "Google IAM via gcloud"; usuário e senha são recusados ao salvar. O Cais pede o token de acesso ao `gcloud` (`gcloud auth print-access-token --account=<conta>`, com `--impersonate-service-account` quando configurado), guarda-o em memória por 50 minutos e, se o servidor responder 401, pede outro uma vez e repete. O que a conta precisa: `roles/bigquery.jobUser` no projeto e `roles/bigquery.dataViewer` nos datasets lidos; a recusa do servidor chega com essa dica.
+- **Testar conexão** confere o token, lista os datasets e faz o dry run de um `SELECT 1`, que confere a permissão de criar jobs no projeto.
+- **Por que o campo de limite:** o BigQuery cobra pelo que lê, e uma consulta sem filtro numa tabela de terabytes custa caro antes de qualquer sinal de problema. Por isso o limite é por ambiente, e não um valor fixo do app: um projeto com tabelas de TB quer um teto baixo, enquanto um projeto com reserva de slots (capacidade paga à parte) não paga por byte lido e pode não precisar dele. Um ambiente novo já vem com 100 GiB (unidades binárias, GiB = 2^30 bytes), um teto que barra o erro caro e deixa passar o trabalho comum. Vazio é sem limite: nenhuma pergunta e nenhum `maximumBytesBilled`. O campo é um número inteiro de GiB, de 1 para cima. O limite protege os bytes lidos, e só eles (veja [seguranca.md](seguranca.md#bigquery-só-leitura)).
+- Mudar o projeto, a credencial ou o limite conta como mudança do ambiente, como mudar host e porta no MySQL: as liberações de agentes são revogadas e os pedidos pendentes expiram, e a assinatura do cadastro cobre os campos novos.
+- **Cais antigo:** um Cais sem o motor BigQuery que abrir um `catalog.json` com ambiente BigQuery o aparta como corrompido (`.corrupt-<data>.json`, nada se perde). Depois de cadastrar um ambiente BigQuery numa máquina, não se volta para uma versão anterior nela.
+
+### Aba e árvore
+
+- **Sempre Somente leitura**, em qualquer ambiente, produção ou não. Transação e Auto-commit aparecem desabilitados na barra, com o motivo; não há Commit, Rollback nem edição na grade. A barra de status diz BigQuery.
+- **Seletor de dataset:** trocar de dataset confere que ele existe (`datasets.get`) e vira o padrão das consultas seguintes (nomes sem qualificador). A Trilha grava a linha com o verbo `DATASET`. O dataset atual fica na memória da aba: o BigQuery não guarda sessão nesta versão.
+- **Árvore:** datasets › tabelas e views (view materializada e tabela externa levam marca própria) › colunas com o tipo completo (`STRUCT<…>`, `ARRAY<…>`, `NUMERIC(10, 2)`). As colunas de um dataset são lidas quando ele é aberto, por `tables.get` de cada tabela: não custa bytes (ler `INFORMATION_SCHEMA` custaria, com um mínimo por consulta). Enquanto as colunas chegam, a linha do dataset mostra "Lendo…" à direita; não há contagem, porque ela pediria um canal novo do processo principal para alguns segundos de espera. **Atualizar schema** lê de novo.
+- **Editor:** realce de GoogleSQL (crases, `#` e `--` como comentário, aspas duplas como string) e autocomplete de `dataset.tabela` e de colunas, a partir da árvore.
+- **Duplo clique numa tabela** roda `` SELECT * FROM `dataset`.`tabela` LIMIT 100; `` pelo caminho normal. No BigQuery o `LIMIT` não reduz os bytes lidos, então a estimativa e o limite do ambiente valem aqui também.
+
+### Rodar
+
+Cada comando passa por duas camadas, e uma recusa em qualquer uma o impede de rodar:
+
+1. **O classificador do app** (mesmo dialeto no renderer e no main) só deixa passar consulta: `SELECT`, `WITH`, sintaxe pipe começando em `FROM` e consulta entre parênteses. Na dúvida, recusa.
+2. **O dry run** (`jobs.insert` com `dryRun`, o único caminho que também traz as rotinas usadas) devolve o tipo que o servidor leu e os bytes que leria. Se o servidor não lê o comando como `SELECT` (ou não diz o tipo), o comando não roda. O driver repete o dry run dentro de `execute`, então a segunda camada vale também para quem o chama sem passar pelo `SessionManager`.
+
+- **Regra de confirmação:** com limite, a estimativa até o limite roda, com o limite como `maximumBytesBilled` do job: o BigQuery recusa, sem cobrar, o que passar dele. Estimativa acima do limite pergunta antes de rodar qualquer comando; em "Rodar todos" a pergunta lista cada comando acima do limite com a estimativa. Quem confirma autoriza aquela estimativa: o job roda com o maior valor entre o limite e a estimativa confirmada arredondada para cima ao GiB. A confirmação vale só para o texto do comando sobre o qual foi dada. Se o texto mudar, ou a estimativa nova passar do que foi confirmado (a tabela cresceu entre a pergunta e a execução), o Cais pergunta de novo. Se o ambiente for editado durante o dry run, nada roda com os dados antigos: a pessoa roda de novo.
+- **Sem limite**, o Cais não pergunta e não manda `maximumBytesBilled`; a estimativa aparece no rodapé mesmo assim.
+- **Cada job** leva o rótulo `cais: person` (ou `cais: agent`), que separa no faturamento o que a pessoa e os agentes leram, e `jobTimeoutMs` de 30 s só nos pedidos de agente.
+- **Recusado para a pessoa:** DML (`INSERT`, `UPDATE`, `DELETE`, `MERGE`), DDL (inclusive `CREATE TEMP`), scripts (`DECLARE`, `SET`, `BEGIN … END`, `IF`, `LOOP`...), controle de transação, `CALL`, `EXECUTE IMMEDIATE`, `EXPORT DATA`, `LOAD DATA`, `GRANT`, `REVOKE`, `ASSERT`, mais de um comando por vez, a diretiva `#legacySQL` (e `#standardSQL`) e `EXTERNAL_QUERY`, que roda uma consulta em outro banco e cuja leitura só em transação de leitura não foi conferida (veja [roadmap.md](roadmap.md#a-conferir)). Texto com string, nome entre crases ou comentário sem fim também é recusado. O motivo aparece depois de "Somente leitura:".
+- **Erros** do BigQuery viram mensagens da interface com o `reason` como código e o texto original recolhido: acesso negado (com a dica de papel), não encontrado, consulta inválida, limite de bytes, cota, taxa, resultado grande demais, serviço indisponível. Sem rede, "Sem resposta de bigquery.googleapis.com", lembrando da VPN e do proxy.
+
+### Resultado
+
+- A grade de sempre, sem edição. O rodapé mostra linhas, tempo, bytes estimados, processados e faturados e se veio do cache. Números do BigQuery (`INT64`, `NUMERIC`, `BIGNUMERIC`, `FLOAT64`) ficam à direita. Inteiros, `NUMERIC` e `BIGNUMERIC` chegam como texto (sem perder precisão); `TIMESTAMP` em UTC com microssegundos; `DATE`, `DATETIME`, `TIME`, `INTERVAL`, `RANGE`, `GEOGRAPHY` (WKT) e `JSON` como texto; `STRUCT` e `ARRAY` como JSON, que o painel lateral formata; `BYTES` em hexadecimal, cortado em 256 bytes.
+- **"Buscar até 50.000" lê o mesmo job:** o Cais guarda o job do último resultado e lê mais páginas dele, sem dry run, sem pergunta e sem nova cobrança. Se o resultado não existir mais (o BigQuery o guarda por 24 horas, ou o texto ou o dataset mudaram depois), o Cais avisa "O resultado dessa consulta não está mais disponível" e não roda a consulta de novo, porque um job novo cobraria outra vez sem estimativa e sem pergunta.
+- **Cancelar** usa `jobs.cancel`; fechar a aba cancela o job em andamento. Um job que o servidor já criou e a pessoa cancelou antes da resposta também é cancelado.
+
+### Trilha e idioma
+
+- As linhas do BigQuery levam o id do job, os bytes estimados e os faturados (uma releitura do mesmo job aponta o job, sem bytes: já foi cobrado) e, no detalhe, a confirmação de um comando acima do limite do ambiente (a estimativa e o limite, no idioma de quando a linha foi escrita).
+- Os textos são os dos catálogos, nos dois idiomas, com o termo do motor ("dataset") como chave. O que vai para agentes continua em português (veja [agentes.md](agentes.md#bigquery)).
 
 ## Modos da sessão
 
@@ -61,7 +106,7 @@ Uma aba é uma sessão, que é uma conexão. O modo e a transação são da aba.
 
 ### Somente leitura
 
-Duas camadas: uma lista do que é permitido no app, que recusa o resto antes de sair, e a sessão em `READ ONLY` no servidor, reafirmada antes de cada comando.
+Duas camadas: uma lista do que é permitido no app, que recusa o resto antes de sair, e a sessão em `READ ONLY` no servidor, reafirmada antes de cada comando. No BigQuery as camadas são outras (veja [BigQuery](#bigquery-só-leitura)).
 
 - **Permitido:** `SELECT` (também por `WITH`, `TABLE` e `VALUES`), `SHOW`, `DESCRIBE`/`DESC`, `HELP`, `USE`, `EXPLAIN` de uma leitura (`EXPLAIN ANALYZE` só de leitura, porque ele executa o comando), `SET @variável = …` e `SET NAMES`/`SET CHARACTER SET` com utf8mb4, sozinhos.
 - **Recusado mesmo sendo leitura:** `INTO OUTFILE`, `INTO DUMPFILE` e leituras com lock (`FOR UPDATE`, `FOR SHARE`, `LOCK IN SHARE MODE`).
@@ -103,6 +148,7 @@ Duas camadas: uma lista do que é permitido no app, que recusa o resto antes de 
 
 - CodeMirror 6 com o dialeto MySQL, autocomplete de palavras-chave, bancos, tabelas, colunas e apelidos, a partir do schema do ambiente (o banco atual é o padrão).
 - Cmd+Enter roda o comando sob o cursor (ou a seleção), que fica levemente destacado; Cmd+Shift+Enter roda todos.
+- **Atalhos por sistema:** os atalhos deste documento estão escritos como no macOS (Cmd). No Linux e no Windows, Ctrl faz o papel de Cmd (Ctrl+Enter, Ctrl+Shift+Enter, Ctrl+., Ctrl+T, Ctrl+W, Ctrl+S, Ctrl+Shift+S, Ctrl+O), e a interface mostra o atalho do sistema em que está rodando. O Cancelar é Ctrl+.; no GNOME com IBus o emoji usa Super+. e Super+;, então não colide.
 - O separador de comandos entende strings, crases, comentários (`-- `, `#`, `/* */`) e linhas `DELIMITER`, que são do cliente e não vão ao servidor.
 
 ## Resultados
@@ -150,7 +196,7 @@ Duas camadas: uma lista do que é permitido no app, que recusa o resto antes de 
 
 ## Idioma
 
-- **A interface segue o idioma do sistema, em pt-BR ou inglês.** O primeiro idioma preferido do sistema que começa com `pt` dá pt-BR, com `en` dá inglês; nenhum dos dois dá inglês. Não há opção no app: no macOS, **Ajustes › Geral › Idioma e Região › Aplicativos** troca o idioma só do Cais (o pacote declara as duas localizações).
+- **A interface segue o idioma do sistema, em pt-BR ou inglês.** O primeiro idioma preferido do sistema que começa com `pt` dá pt-BR, com `en` dá inglês; nenhum dos dois dá inglês. Não há opção no app: no macOS, **Ajustes › Geral › Idioma e Região › Aplicativos** troca o idioma só do Cais (o pacote declara as duas localizações). No Linux a lista vem do ambiente da sessão (`LANGUAGE` e `LANG`) e não há escolha por app; para abrir o Cais em outro idioma, inicie-o com `LANGUAGE` ou `LANG` diferente.
 - O idioma vale para a interface inteira: menu do app, diálogos, notificações do sistema, erros e recusas mostrados à pessoa e formatos de número e data. A interface fica num idioma só, o do sistema, sem menus do Electron em outro.
 - **O que vai para agentes é sempre em português** (saída do `cais llm`, `guide`, mensagens das respostas): os códigos são o contrato, e um texto estável não quebra quem já lê a saída.
 - **Não se traduzem:** mensagem crua do servidor, texto do agente (motivo, cliente, nome de script), nomes cadastrados, palavras-chave SQL e marcadores como `⟨U+202E⟩`.
@@ -163,6 +209,7 @@ Duas camadas: uma lista do que é permitido no app, que recusa o resto antes de 
   - **a pessoa:** cada comando rodado numa aba (modo, banco, verbo, linhas, linhas afetadas, tempo e código do erro), a recusa do Somente leitura, o cancelamento, Commit e Rollback (pelos botões e ao fechar a aba), troca de modo (Auto-commit em produção aparece como confirmado), conexão que caiu com transação aberta e o `USE` do seletor de banco;
   - **agentes:** cada pedido (SQL, motivo, cliente, banco, quem decidiu, se o commit foi automático e as contagens por comando), as recusas da política, `schema` e scripts;
   - **configuração:** nível de acesso de agentes e marcação de produção de cada ambiente, ambiente criado ou apagado, acesso de agentes ligado ou desligado, liberações de 15 minutos (criada, revogada, vencida) e o que a proteção do cadastro detectou.
+- **BigQuery:** as linhas da pessoa levam o id do job, os bytes estimados (dry run) e os faturados quando houve, e, no detalhe, a confirmação de um comando acima do limite do ambiente (a estimativa e o limite, no idioma de quando a linha foi escrita).
 - **Nunca entram dados do resultado**, nem a mensagem de erro do servidor, que pode citar valores ("Duplicate entry 'x'"): só o código e o número do erro.
 - **Senha digitada no SQL vira `***`** nas linhas da pessoa: a partir do primeiro `IDENTIFIED` ou `PASSWORD`, tudo entre a primeira e a última aspa. A máscara é grossa de propósito, para nenhuma regra de escape, comentário ou segundo literal deixar escapar um pedaço. As linhas de agente não são mascaradas: um agente não roda esses comandos, e mascarar deixaria o agente esconder texto da Trilha.
 - **Um arquivo por dia (UTC)** em `trail/`, na pasta de dados, com permissão 0600, por **90 dias**. Uma linha tem no máximo 128 KB (o SQL guardado vai até 100.000 caracteres, com o tamanho original anotado), e as linhas de agente de um dia param em 64 MB, para um agente não deixar o arquivo do dia grande demais para ler.
@@ -189,6 +236,7 @@ Um processo que escreve na pasta de dados poderia apontar o host de um ambiente 
 |---|---|
 | Web app hospedado | O navegador não fala o protocolo do MySQL e não acessa o `gcloud` local. |
 | Outros bancos (PostgreSQL etc.) | O contrato de driver e de dialeto é agnóstico; um driver novo entra quando houver uso. |
+| Escrever no BigQuery (DML, DDL, scripts, transação, edição na grade, escrita de agente) | Exige uma sessão do BigQuery por aba, a classificação de script inteiro e o custo da escrita no mesmo limite de bytes. A ordem e o que cada item exige estão em [roadmap.md](roadmap.md#bigquery-depois-da-versão-só-leitura). |
 | Histórico para reabrir queries, scripts como arquivos `.sql` numa pasta, pastas dentro de Scripts, exportar resultado para arquivo | Os scripts salvos ficam no cadastro do app, e a Trilha registra o que rodou. Copiar em TSV, CSV ou JSON cobre a saída de dados. |
 | Servidor MCP | O CLI cobre os agentes com shell. Um adaptador MCP seria uma camada fina sobre o mesmo protocolo local. |
 | DDL e comandos com commit implícito por agentes | Não dá para desfazer. Agente só lê ou faz DML dentro de transação. |

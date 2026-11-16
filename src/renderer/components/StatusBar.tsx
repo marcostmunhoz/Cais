@@ -1,5 +1,6 @@
 import { connectionView } from '@shared/connection';
-import { getDialect } from '@shared/dialects/registry';
+import { shortcutText } from '@shared/shortcuts';
+import { engineVersionLabel } from '@shared/dialects/registry';
 import { EXTENDED_MAX_ROWS } from '@shared/model';
 import { fetchMore } from '../lib/actions';
 import { formatDuration } from '../lib/format';
@@ -15,14 +16,13 @@ export function StatusBar({ tabId, platform }: { tabId: string; platform: string
   const { result, resultIndex } = useActiveResult(tabId);
   const agents = useStore((s) => s.agents);
   const waiting = agents.pending.length + agents.awaitingCommit.length;
-  const mod = platform === 'darwin' ? 'Cmd' : 'Ctrl';
+  const shortcut = shortcutText('run', platform);
 
   const conn = connectionView(session, run);
   const connected = conn.status === 'connected' || conn.status === 'running';
 
   const rows = result?.rows?.length ?? 0;
   const truncated = !!result?.truncated;
-  const engineName = env ? getDialect(env.engine).displayName : '';
   const t = m().statusBar;
 
   return (
@@ -37,6 +37,17 @@ export function StatusBar({ tabId, platform }: { tabId: string; platform: string
             ? t.rows({ n: rows })
             : t.affectedRows({ n: result.affectedRows ?? 0 })}{' '}
           · {formatDuration(result.durationMs)}
+        </span>
+      )}
+      {result?.stats && !result.error && (result.stats.bytesProcessed !== undefined || result.stats.bytesBilled !== undefined) && (
+        <span className="item" data-testid="result-bytes">
+          {[
+            result.stats.bytesProcessed !== undefined ? t.bytesProcessed({ bytes: result.stats.bytesProcessed }) : null,
+            result.stats.bytesBilled !== undefined ? t.bytesBilled({ bytes: result.stats.bytesBilled }) : null,
+            result.stats.cacheHit ? t.cacheHit : null,
+          ]
+            .filter(Boolean)
+            .join(' · ')}
         </span>
       )}
       {truncated && (
@@ -65,12 +76,10 @@ export function StatusBar({ tabId, platform }: { tabId: string; platform: string
           {t.agentsOn}{waiting > 0 ? ` · ${t.requests({ n: waiting })}` : ''}
         </button>
       )}
-      {connected && session?.serverVersion && (
-        <span className="item">
-          {engineName} {session.serverVersion}
-        </span>
+      {connected && session?.serverVersion && env && (
+        <span className="item">{engineVersionLabel(env.engine, session.serverVersion)}</span>
       )}
-      <span className="item">{t.runHint({ mod })}</span>
+      <span className="item">{t.runHint({ shortcut })}</span>
     </footer>
   );
 }

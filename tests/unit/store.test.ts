@@ -9,7 +9,7 @@ import { setLocale } from '@shared/i18n';
 import { duplicateName } from '@shared/scripts';
 import { writeFileAtomic } from '@main/store/atomic';
 import { TabsStore } from '@main/store/tabs';
-import { FakeVault } from '@main/store/vault';
+import { FakeVault, SafeStorageVault, type SafeStorageLike } from '@main/store/vault';
 import { resolveCredential } from '@main/auth/credentials';
 
 let dir: string;
@@ -176,7 +176,7 @@ describe('projects: rename and duplicate', () => {
     writeFileSync(join(dir, 'catalog.json'), JSON.stringify(c));
     const again = new CatalogStore(dir, new FakeVault());
     await again.load();
-    expect((await again.saveEnvironment({ ...env, name: 'old/dev', host: 'h2' })).name).toBe('old/dev');
+    expect((await again.saveEnvironment({ ...env, name: 'old/dev', host: 'h2' } as typeof env & { host: string })).name).toBe('old/dev');
     expect((await again.renameProject(project.id, 'legacy/api')).project.name).toBe('legacy/api');
     expect(await codeOf(again.renameProject(project.id, 'legacy/core'))).toBe('invalid-name');
     expect((await again.renameProject(project.id, 'core')).project.name).toBe('core');
@@ -230,6 +230,7 @@ describe('credential resolution', () => {
     const r = await resolveCredential(
       { id: 'c', name: 'n', kind: 'password', username: 'root' },
       { getPassword: () => 'pw', getToken: async () => 'unused' },
+      'mysql',
     );
     expect(r).toEqual({ user: 'root', password: 'pw', tls: 'off' });
   });
@@ -238,6 +239,7 @@ describe('credential resolution', () => {
     const r = await resolveCredential(
       { id: 'c', name: 'n', kind: 'gcloud-iam', account: 'a@x.com', dbUsername: 'a', impersonateServiceAccount: 'sa@p.iam.gserviceaccount.com' },
       { getPassword: () => undefined, getToken: async (...a) => (calls.push(a), 'TOKEN') },
+      'mysql',
     );
     expect(r).toEqual({ user: 'a', password: 'TOKEN', authPlugin: 'mysql_clear_password', tls: 'required' });
     expect(calls).toEqual([['a@x.com', 'sa@p.iam.gserviceaccount.com']]);
@@ -318,8 +320,58 @@ describe('main store messages in English', () => {
     const error = (await resolveCredential(
       { id: 'c', name: 'root', kind: 'password', username: 'root' },
       { getPassword: () => undefined, getToken: async () => 'x' },
+      'mysql',
     ).catch((e: unknown) => e)) as CaisError;
     expect(error.message).toBe('The credential "root" has no saved password.');
     expect(error.ref).toEqual({ key: 'mainMisc.credentialNoPassword', params: { name: 'root' } });
+  });
+});
+
+describe('SafeStorageVault availability', () => {
+  const safe = (available: boolean, backend?: string): SafeStorageLike => ({
+    isEncryptionAvailable: () => available,
+    encryptString: (v) => Buffer.from(v),
+    decryptString: (b) => b.toString(),
+    ...(backend === undefined ? {} : { getSelectedStorageBackend: () => backend }),
+  });
+
+  it.each([
+    ['basic_text', false],
+    ['unknown', false],
+    ['gnome_libsecret', true],
+    ['kwallet6', true],
+  ])('on linux with backend %s, available is %s', (backend, expected) => {
+    expect(new SafeStorageVault(safe(true, backend), 'linux').isAvailable()).toBe(expected);
+  });
+
+  it('on linux without a backend report, is unavailable', () => {
+    expect(new SafeStorageVault(safe(true), 'linux').isAvailable()).toBe(false);
+  });
+
+  it('on linux, is unavailable when encryption is not available', () => {
+    expect(new SafeStorageVault(safe(false, 'gnome_libsecret'), 'linux').isAvailable()).toBe(false);
+  });
+
+  it('on darwin, ignores the backend', () => {
+    expect(new SafeStorageVault(safe(true), 'darwin').isAvailable()).toBe(true);
+    expect(new SafeStorageVault(safe(true, 'basic_text'), 'darwin').isAvailable()).toBe(true);
+    expect(new SafeStorageVault(safe(false), 'darwin').isAvailable()).toBe(false);
+  });
+
+  it('adds the keyring hint to the refusal only on linux', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cais-vault-'));
+    try {
+      setLocale('pt-BR');
+      const linux = new CatalogStore(dir, new SafeStorageVault(safe(true, 'basic_text'), 'linux'));
+      await expect(linux.saveCredential({ name: 'x', kind: 'password', username: 'u' }, 'pw')).rejects.toThrow(
+        'password-store=gnome-libsecret',
+      );
+      const mac = new CatalogStore(dir, new SafeStorageVault(safe(false), 'darwin'));
+      await expect(mac.saveCredential({ name: 'y', kind: 'password', username: 'u' }, 'pw')).rejects.not.toThrow(
+        'gnome-libsecret',
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

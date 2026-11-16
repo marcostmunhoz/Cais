@@ -42,15 +42,15 @@ function fakeSpawn(handler: (call: Call) => Reply): { spawn: SpawnFn; calls: Cal
 
 function provider(
   handler: (call: Call) => Reply,
-  opts: { existing?: string[]; env?: NodeJS.ProcessEnv; now?: () => number } = {},
+  opts: { existing?: string[]; env?: NodeJS.ProcessEnv; now?: () => number; platform?: NodeJS.Platform } = {},
 ) {
   const { spawn, calls } = fakeSpawn(handler);
   const existing = new Set(opts.existing ?? ['/usr/local/bin/gcloud']);
   const p = new GcloudTokenProvider({
     spawn,
     env: opts.env ?? { PATH: '/usr/local/bin:/usr/bin' },
-    platform: 'darwin',
-    homedir: '/Users/x',
+    platform: opts.platform ?? 'darwin',
+    homedir: opts.platform === 'linux' ? '/home/x' : '/Users/x',
     exists: (path) => existing.has(path),
     now: opts.now ?? (() => 0),
   });
@@ -152,12 +152,13 @@ describe('GcloudTokenProvider: accounts', () => {
     expect(calls[0]!.args).toEqual(['auth', 'list', '--format=json']);
   });
 
-  it('only ever runs the two read-only subcommands', async () => {
+  it('only ever runs the three read-only subcommands', async () => {
     const { p, calls } = provider(() => ({ stdout: '[]' }));
     await p.listAccounts();
     await p.getToken('a@x.com').catch(() => undefined);
+    await p.getAccessToken('a@x.com').catch(() => undefined);
     for (const c of calls) {
-      expect(['auth list', 'sql generate-login-token']).toContain(c.args.slice(0, 2).join(' '));
+      expect(['auth list', 'sql generate-login-token', 'auth print-access-token']).toContain(c.args.slice(0, 2).join(' '));
     }
   });
 });
@@ -198,6 +199,30 @@ describe('GcloudTokenProvider: binary discovery', () => {
     expect(await p.locate()).toBe('/Users/x/google-cloud-sdk/bin/gcloud');
   });
 
+  it.each(['/usr/bin/gcloud', '/snap/bin/gcloud', '/usr/lib/google-cloud-sdk/bin/gcloud'])(
+    'finds %s on Linux when the PATH and the login shell miss it',
+    async (path) => {
+      const { p } = provider(() => ({ code: 1 }), {
+        platform: 'linux',
+        existing: [path],
+        env: { PATH: '/opt/none', SHELL: '/bin/bash' },
+      });
+      expect(await p.locate()).toBe(path);
+    },
+  );
+
+  it('prefers the login shell over the Linux well-known paths', async () => {
+    const { p } = provider(
+      (call) => (call.command === '/bin/bash' ? { stdout: '/home/x/sdk/bin/gcloud\n' } : { stdout: '[]' }),
+      {
+        platform: 'linux',
+        existing: ['/home/x/sdk/bin/gcloud', '/usr/bin/gcloud'],
+        env: { PATH: '/opt/none', SHELL: '/bin/bash' },
+      },
+    );
+    expect(await p.locate()).toBe('/home/x/sdk/bin/gcloud');
+  });
+
   it('reports a missing gcloud with the documented message', async () => {
     const { p, calls } = provider(() => ({ code: 1 }), { existing: [], env: { PATH: '/usr/bin', SHELL: '/bin/zsh' } });
     await expect(p.getToken('a@x.com')).rejects.toThrow(
@@ -221,5 +246,70 @@ describe('GcloudTokenProvider messages in English', () => {
     await expect(reauth.getToken('a@x.com')).rejects.toThrow('The account a@x.com needs to sign in again: run `gcloud auth login a@x.com` in the terminal.');
     const missing = provider(() => ({}), { existing: [], env: { PATH: '/nowhere' } }).p;
     await expect(missing.listAccounts()).rejects.toThrow('gcloud not found. Install the Google Cloud SDK or open Cais from the terminal.');
+  });
+});
+
+describe('GcloudTokenProvider: access tokens (BigQuery)', () => {
+  it('runs auth print-access-token with exactly the account', async () => {
+    const { p, calls } = provider(() => ({ stdout: 'ya29.tok\n' }));
+    expect(await p.getAccessToken('maria@empresa.com')).toBe('ya29.tok');
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.args).toEqual(['auth', 'print-access-token', '--account=maria@empresa.com']);
+  });
+
+  it('adds the impersonated service account', async () => {
+    const { p, calls } = provider(() => ({ stdout: 'tok' }));
+    await p.getAccessToken('maria@empresa.com', ' sa@p.iam.gserviceaccount.com ');
+    expect(calls[0]!.args).toEqual([
+      'auth',
+      'print-access-token',
+      '--account=maria@empresa.com',
+      '--impersonate-service-account=sa@p.iam.gserviceaccount.com',
+    ]);
+  });
+
+  it('keeps its own cache for 50 minutes, apart from the login tokens', async () => {
+    let now = 0;
+    let n = 0;
+    const { p, calls } = provider((call) => ({ stdout: `${call.args[0] === 'auth' ? 'access' : 'login'}-${++n}` }), { now: () => now });
+    expect(await p.getToken('a@x.com')).toBe('login-1');
+    expect(await p.getAccessToken('a@x.com')).toBe('access-2'); // the login token is not reused
+    now = 49 * 60 * 1000;
+    expect(await p.getAccessToken('a@x.com')).toBe('access-2');
+    expect(await p.getToken('a@x.com')).toBe('login-1');
+    expect(calls).toHaveLength(2);
+    now = 51 * 60 * 1000;
+    expect(await p.getAccessToken('a@x.com')).toBe('access-3');
+    expect(await p.getToken('a@x.com')).toBe('login-4');
+  });
+
+  it('force skips the cache (the server refused the token in hand)', async () => {
+    let n = 0;
+    const { p, calls } = provider(() => ({ stdout: `tok-${++n}` }));
+    expect(await p.getAccessToken('a@x.com')).toBe('tok-1');
+    expect(await p.getAccessToken('a@x.com', undefined, { force: true })).toBe('tok-2');
+    expect(await p.getAccessToken('a@x.com')).toBe('tok-2');
+    expect(calls).toHaveLength(2);
+  });
+
+  it('asks for reauthentication, like the login token does', async () => {
+    const { p } = provider(() => ({ code: 1, stderr: 'ERROR: Reauthentication failed. Please run: gcloud auth login' }));
+    await expect(p.getAccessToken('maria@empresa.com')).rejects.toThrow('precisa entrar de novo');
+  });
+
+  it('cleans stderr and does not cache a failure', async () => {
+    const secret = 'ya29.a0AfH6SMBxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx';
+    let n = 0;
+    const { p, calls } = provider(() => (++n === 1 ? { code: 1, stderr: `ERROR: bad ${secret}` } : { stdout: 'ok' }));
+    const error = (await p.getAccessToken('a@x.com').catch((e: Error) => e)) as Error;
+    expect(error.message).toContain('token de acesso');
+    expect(error.message).not.toContain('ya29');
+    expect(await p.getAccessToken('a@x.com')).toBe('ok');
+    expect(calls).toHaveLength(2);
+  });
+
+  it('an empty token is an error', async () => {
+    const { p } = provider(() => ({ stdout: ' \n' }));
+    await expect(p.getAccessToken('a@x.com')).rejects.toThrow('não devolveu um token');
   });
 });

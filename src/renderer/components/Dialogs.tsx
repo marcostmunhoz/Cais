@@ -10,8 +10,10 @@ import {
   submitScriptName,
 } from '../lib/actions';
 import { MAX_SCRIPT_NAME } from '@shared/model';
+import { GIB } from '@shared/engines';
+import { displaySql } from '@shared/text';
 import { MAX_CATALOG_NAME } from '@shared/names';
-import { getLocale, m } from '../lib/i18n';
+import { fmt, getLocale, m } from '../lib/i18n';
 import { sortByRecency } from '@shared/scripts';
 import { getState, setState, useStore } from '../lib/store';
 import { DialogHead, Modal } from './ui';
@@ -43,6 +45,49 @@ export function ConfirmDialog() {
         {confirm.items && (
           <pre className="confirm-list">{confirm.items.join('\n')}</pre>
         )}
+      </div>
+    </Modal>
+  );
+}
+
+/** BigQuery: every statement of the run estimated above the environment's limit, with the estimate. Nothing ran yet. */
+export function BytesConfirmDialog() {
+  const request = useStore((s) => s.bytesConfirm);
+  if (!request) return null;
+  const close = () => setState({ bytesConfirm: null });
+  const t = m().dialogs.bytesConfirm;
+  const format = fmt();
+  // the ceiling the confirmed run gets: the limit, or the largest estimate rounded up to a whole GiB
+  const largest = Math.max(...request.statements.map((s) => s.bytesEstimated));
+  const cap = Math.max(request.limit, Math.ceil(largest / GIB) * GIB);
+  return (
+    <Modal
+      title={t.title}
+      onClose={close}
+      className="confirm"
+      align="center"
+      footer={
+        <>
+          <button className="btn" autoFocus data-testid="bytes-cancel" onClick={close}>
+            {m().dialogs.cancel}
+          </button>
+          <button className="btn accent" data-testid="bytes-confirm" onClick={request.onConfirm}>
+            {t.confirm}
+          </button>
+        </>
+      }
+    >
+      <DialogHead title={t.heading} />
+      <div className="dialog-body" style={{ width: 520 }} data-testid="bytes-dialog">
+        <div>{t.body({ limit: format.formatBytes(request.limit), cap: format.formatBytes(cap) })}</div>
+        <ul className="bytes-list">
+          {request.statements.map((s) => (
+            <li key={s.index} data-testid="bytes-item">
+              <span className="bytes-estimate">{t.estimate({ bytes: format.formatBytes(s.bytesEstimated) })}</span>
+              <code>{displaySql(s.sql)}</code>
+            </li>
+          ))}
+        </ul>
       </div>
     </Modal>
   );

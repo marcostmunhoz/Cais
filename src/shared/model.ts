@@ -2,7 +2,7 @@
 
 import { m } from './i18n';
 
-export type Engine = 'mysql';
+export type Engine = 'mysql' | 'bigquery';
 export type SessionMode = 'read-only' | 'transaction' | 'autocommit';
 
 export interface Project {
@@ -11,19 +11,34 @@ export interface Project {
   order: number;
 }
 
-export interface Environment {
+/** What every engine's environment has. `defaultDatabase` is the default dataset on BigQuery. */
+interface EnvironmentBase {
   id: string;
   projectId: string;
   name: string; // "dev", "hml", "pro"...
-  engine: Engine;
-  host: string;
-  port: number;
   defaultDatabase?: string;
   credentialId: string;
   production: boolean;
   /** What agents may run here without asking. Production is never 'free-reads-writes'. */
   agentLevel?: AgentLevel;
 }
+
+export interface MysqlEnvironment extends EnvironmentBase {
+  engine: 'mysql';
+  host: string;
+  port: number;
+}
+
+export interface BigqueryEnvironment extends EnvironmentBase {
+  engine: 'bigquery';
+  /** The Google Cloud project where jobs run and are billed. */
+  gcpProject: string;
+  /** Most bytes one query may bill (bytes). Absent: no limit. */
+  maxBytesBilled?: number;
+}
+
+/** One environment, by engine. The MySQL shape is what catalog.json has always held. */
+export type Environment = MysqlEnvironment | BigqueryEnvironment;
 
 /**
  * What agents may run in an environment without the person's click:
@@ -114,7 +129,7 @@ export interface TabsFile {
 }
 
 export type ProjectInput = { id?: string; name: string };
-export type EnvironmentInput = Omit<Environment, 'id'> & { id?: string };
+export type EnvironmentInput = (Omit<MysqlEnvironment, 'id'> | Omit<BigqueryEnvironment, 'id'>) & { id?: string };
 export type CredentialInput =
   | { id?: string; name: string; kind: 'password'; username: string }
   | {
@@ -127,13 +142,9 @@ export type CredentialInput =
     };
 
 /** Environment fields needed to test a connection before saving it. */
-export interface EnvironmentDraft {
-  engine: Engine;
-  host: string;
-  port: number;
-  defaultDatabase?: string;
-  credentialId: string;
-}
+export type EnvironmentDraft =
+  | { engine: 'mysql'; host: string; port: number; defaultDatabase?: string; credentialId: string }
+  | { engine: 'bigquery'; gcpProject: string; defaultDatabase?: string; credentialId: string; maxBytesBilled?: number };
 
 export const PRODUCTION_NAMES = ['pro', 'prod', 'production'];
 

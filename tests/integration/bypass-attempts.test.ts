@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { getDialect } from '@shared/dialects/registry';
-import type { Environment } from '@shared/model';
+import type { MysqlEnvironment as Environment } from '@shared/model';
 import { AgentBroker } from '@main/agents/broker';
 import { AgentSessions } from '@main/agents/sessions';
 import { mysqlDriver } from '@main/drivers/mysql';
@@ -23,8 +23,8 @@ function makeRootRig(): Rig {
   const envs = [base, { ...base, id: 'e-pro', name: 'pro', production: true }];
   const clock = new FakeClock();
   const sessions = new AgentSessions({
-    getDriver: () => mysqlDriver, getDialect,
-    resolveConnectParams: async (e) => rootParams({ host: e.host, port: e.port }),
+    getDriver: () => mysqlDriver,
+    resolveConnectParams: async (e) => rootParams({ host: (e as Environment).host, port: (e as Environment).port }),
     scheduler: clock,
   });
   let seq = 0;

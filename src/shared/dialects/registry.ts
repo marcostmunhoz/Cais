@@ -1,14 +1,22 @@
 import type { Engine } from '../model';
 import type { Dialect } from './types';
 import { mysqlDialect } from './mysql';
+import { bigqueryDialect } from './bigquery';
 import { m } from '../i18n';
 
 const dialects: Record<Engine, Dialect> = {
   mysql: mysqlDialect,
+  bigquery: bigqueryDialect,
 };
 
 export function getDialect(engine: Engine): Dialect {
   return dialects[engine];
+}
+
+/** "MySQL 8.4.0"; engines whose server has no version of its own report their name ("BigQuery"), which is shown once. */
+export function engineVersionLabel(engine: Engine, version: string): string {
+  const name = dialects[engine].displayName;
+  return version === name ? name : `${name} ${version}`;
 }
 
 /** "Nenhum comando sob o cursor.", in the current locale. Call it where the text is produced. */
