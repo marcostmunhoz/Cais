@@ -30,6 +30,13 @@ O que está fora da versão atual, com o que cada item exige, e o que ainda falt
 | **`safeStorage` assíncrono** | A API síncrona (`isEncryptionAvailable`, `encryptString`, `decryptString`) sai no Electron 46: o `Vault` precisa virar assíncrono antes de atualizar o Electron. Quando `decryptStringAsync` pedir para cifrar de novo (`shouldReEncrypt`), a senha cifrada muda, e a assinatura dos ambientes que usam a credencial cobre esse texto: cifrar de novo e assinar de novo têm de ir na mesma gravação, ou os ambientes abrem bloqueados. No Linux, conferir como a API assíncrona aponta o provedor sem chaveiro, que a documentação não descreve. |
 | **npm 12** | O npm 12 deixa de rodar scripts de instalação que não estão no `allowScripts`. Cada dependência nova com script precisa ser revisada (`npm install-scripts ls`). |
 
+## Distribuição no macOS
+
+| Item | O que exige |
+|---|---|
+| **Developer ID e notarização** | Uma conta Apple Developer, o certificado Developer ID e uma senha específica de app guardados como segredos do repositório, e um passo do `notarytool` no `release.yml`. Até lá, o dmg leva só a assinatura ad-hoc e a primeira abertura exige liberar o app à mão (README). |
+| **macOS x64 (Intel)** | Os builds de macOS são só arm64. Entra se alguém usar um Mac Intel, e dobra o custo dos minutos de macOS na release. |
+
 ## Linux fora da escolha atual
 
 | Item | Por que está fora |
