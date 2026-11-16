@@ -32,7 +32,8 @@ const corpus: [string, string][] = [
   ['select 1 as a', 'SELECT'],
   ['(SELECT 1)', 'SELECT'],
   ['WITH a AS (SELECT 1 AS x) SELECT x FROM a', 'SELECT'],
-  ['FROM UNNEST([1, 2, 3]) AS n |> WHERE n > 1', 'SELECT'],
+  ['SELECT * FROM UNNEST([1, 2, 3]) AS n |> WHERE n > 1', 'SELECT'],
+  [`FROM ${SHAKESPEARE} |> WHERE word_count > 1 |> SELECT word`, 'SELECT'],
   [`SELECT word FROM ${SHAKESPEARE} LIMIT 3`, 'SELECT'],
   ["SELECT ';' AS semicolon", 'SELECT'],
   ['SELECT 1 -- DROP TABLE t', 'SELECT'],
@@ -41,8 +42,9 @@ const corpus: [string, string][] = [
   [`DELETE FROM \`${dataset}.t\` WHERE TRUE`, 'DELETE'],
   [`MERGE \`${dataset}.t\` T USING \`${dataset}.s\` S ON T.id = S.id WHEN MATCHED THEN DELETE`, 'MERGE'],
   [`TRUNCATE TABLE \`${dataset}.t\``, 'TRUNCATE_TABLE'],
-  [`CREATE TABLE \`${dataset}.t\` (a INT64)`, 'CREATE_TABLE'],
-  ['CREATE TEMP TABLE t AS SELECT 1', 'CREATE_TABLE_AS_SELECT'],
+  [`CREATE TABLE \`${dataset}.cais_live_new\` (a INT64)`, 'CREATE_TABLE'],
+  // outside a script or session the server refuses it in the dry run ("requires a script or session")
+  ['CREATE TEMP TABLE t AS SELECT 1', 'error:invalid'],
   [`DROP TABLE \`${dataset}.t\``, 'DROP_TABLE'],
   ['DECLARE x INT64 DEFAULT 1', 'SCRIPT'],
   ['BEGIN SELECT 1; END', 'SCRIPT'],
@@ -50,11 +52,12 @@ const corpus: [string, string][] = [
   ['SELECT 1; SELECT 2', 'SCRIPT'],
   ['BEGIN TRANSACTION', 'BEGIN_TRANSACTION'],
   ['COMMIT TRANSACTION', 'COMMIT_TRANSACTION'],
-  [`CALL \`${dataset}.p\`()`, 'CALL'],
+  [`CALL \`${dataset}.p\`()`, 'SCRIPT'],
   ["EXECUTE IMMEDIATE 'SELECT 1'", 'SCRIPT'],
   ["EXPORT DATA OPTIONS(uri='gs://nowhere/x*.csv', format='CSV') AS SELECT 1", 'EXPORT_DATA'],
   ['ASSERT 1 = 1', 'ASSERT'],
-  ['#legacySQL\nSELECT 1', 'SELECT'],
+  // the directive against useLegacySql: false is a 400 ("Query text specifies use_legacy_sql:true...")
+  ['#legacySQL\nSELECT 1', 'error:invalid'],
 ];
 
 describe.skipIf(!live)('BigQuery live: what the server says about each statement', () => {
@@ -129,8 +132,10 @@ describe.skipIf(!live)('BigQuery live: reading', () => {
 
   it('refuses a statement the server reads as another type, without running it', async () => {
     const session = await driver.open(params());
-    const r = await session.execute('CREATE TEMP TABLE cais_live_t AS SELECT 1', { maxRows: 10 });
+    // a script the server dry-runs as SCRIPT (a CREATE TEMP TABLE fails the dry run itself, outside a session)
+    const r = await session.execute('SELECT 1; SELECT 2', { maxRows: 10 });
     expect(r.error?.code).toBe('REFUSED');
+    expect(r.error?.message).toContain('SCRIPT');
     await session.close();
   });
 
@@ -185,8 +190,11 @@ describe.skipIf(!live)('BigQuery live: metadata and control', () => {
 
   it('cancel stops a long query', async () => {
     const session = await driver.open(params());
+    // a safety net if the cancel ever fails: the job stops itself after a minute
+    await session.applyLimits!({ maxExecutionMs: 60_000 });
+    // no table, 0 bytes; GENERATE_ARRAY stops at about a million elements, so the length comes from the joins
     const running = session.execute(
-      'SELECT COUNT(*) FROM UNNEST(GENERATE_ARRAY(1, 2000000000)) a CROSS JOIN UNNEST(GENERATE_ARRAY(1, 1000)) b',
+      'SELECT SUM(MOD(a * b + c, 7)) FROM UNNEST(GENERATE_ARRAY(1, 1000000)) a CROSS JOIN UNNEST(GENERATE_ARRAY(1, 1000000)) b CROSS JOIN UNNEST(GENERATE_ARRAY(1, 1000)) c',
       { maxRows: 10 },
     );
     await new Promise((r) => setTimeout(r, 4000));
