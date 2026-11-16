@@ -2,7 +2,7 @@
  * GoogleSQL lexical rules (https://cloud.google.com/bigquery/docs/reference/standard-sql/lexical) shared by the
  * splitter and the classifier, so both see the same strings, comments and names the server does.
  *
- * Two points the documentation does not state (the spike found the server follows one rule in each, but the readings stay as a precaution) are read under both rules by the classifier, which refuses when the
+ * Two points the documentation does not state (checked against the real server, which follows one rule in each, but the readings stay as a precaution) are read under both rules by the classifier, which refuses when the
  * readings differ: whether a backslash still keeps a quote from ending a raw string (`r'\''`), and whether a
  * backslash escapes inside a backtick name. `lex(text, escapes)` takes the rule as a flag.
  */

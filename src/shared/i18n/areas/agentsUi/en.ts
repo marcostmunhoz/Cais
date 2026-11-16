@@ -156,7 +156,7 @@ export const en: Shape<typeof ptBR> = {
     generativeAi: (p) =>
       `The command calls ${p.name}, a generative AI or model function: its cost does not show in the bytes read. The request waits for your approval.`,
     unknownFunction: (p) =>
-      `The command calls the function ${p.name}, which is not a BigQuery built-in and may be a routine of the project (even a remote function). The request waits for your approval.`,
+      `The command calls the function ${p.name}, which is not a BigQuery built-in nor reviewed by Cais (it may be a new built-in that calls outside BigQuery). The request waits for your approval.`,
     triggersHidden: (p) =>
       `This environment allows writes, but the database user cannot see the triggers of ${p.database} (it lacks the TRIGGER privilege): the request waits for your approval.`,
   },

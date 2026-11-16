@@ -8,7 +8,7 @@ Cais é um cliente SQL de desktop para MySQL e, só para leitura, BigQuery, feit
 
 - **Projetos, ambientes e credenciais.** Cada projeto tem seus ambientes (host, porta, banco padrão, marcação de produção). Uma credencial é um cadastro próprio, usado por quantos ambientes precisar: usuário e senha (cifrada no cofre do sistema) ou Google IAM via `gcloud`, com impersonação opcional de service account.
 - **Login IAM no Cloud SQL.** Token de `gcloud sql generate-login-token`, plugin `mysql_clear_password` e TLS obrigatório. O Cais só lista as contas logadas e gera o token; nunca altera o `gcloud`.
-- **BigQuery, só leitura.** Um ambiente BigQuery (projeto do Google Cloud, dataset padrão e limite de bytes opcionais) usa a mesma credencial Google IAM via `gcloud`. Árvore de datasets, tabelas e colunas, editor em GoogleSQL, e cada consulta passa por um dry run que estima os bytes: acima do limite do ambiente o Cais pergunta antes de rodar, e o job de um agente sempre leva um teto de bytes faturados. Sem escrita, transação nem edição na grade nesta versão (veja [o que ficou de fora](docs/roadmap.md)).
+- **BigQuery, só leitura.** Um ambiente BigQuery (projeto do Google Cloud, dataset padrão e limite de bytes opcionais) usa a mesma credencial Google IAM via `gcloud`. Árvore de datasets, tabelas e colunas, editor em GoogleSQL, e cada consulta passa por um dry run que estima os bytes: acima do limite do ambiente o Cais pergunta antes de rodar, e o job de um agente sempre leva um teto de bytes faturados. Sem escrita, transação nem edição na grade nesta versão (veja o [roadmap](docs/roadmap.md)).
 - **Sessão por aba em três modos (MySQL):** Somente leitura, Transação e Auto-commit. Produção abre em Somente leitura, Auto-commit em produção pede confirmação, e fechar uma aba com transação aberta pergunta antes (com Rollback como padrão).
 - **Somente leitura de verdade**, em duas camadas: uma lista do que é permitido no app e, no MySQL, a sessão em `READ ONLY` no servidor, reafirmada antes de cada comando (no BigQuery, um dry run que só deixa passar `SELECT`).
 - **Editor SQL** (CodeMirror 6) com realce do MySQL ou do GoogleSQL e autocomplete de palavras-chave, bancos, tabelas, colunas e apelidos.
@@ -58,7 +58,7 @@ npm run live:bigquery          # opcional, fora do check: confere o servidor do 
 
 O e2e grava capturas de tela em `tests/e2e/screenshots/` (fora do controle de versão; as imagens deste README ficam em `docs/images/`).
 
-Os testes do BigQuery nunca falam com o Google: o driver recebe o `fetch` e o endereço, e `tests/support/bigquery-fake.ts` é um servidor HTTP local. A suíte ao vivo (`npm run live:bigquery`) é à parte, só lê, nunca roda o `gcloud` e pula tudo sem as variáveis `CAIS_BQ_LIVE_PROJECT` (um projeto sandbox) e `CAIS_BQ_LIVE_TOKEN` (por exemplo `$(gcloud auth print-access-token)`); `CAIS_BQ_LIVE_DATASET` é opcional.
+Os testes do BigQuery nunca falam com o Google: o driver recebe o `fetch` e o endereço, e `tests/support/bigquery-fake.ts` é um servidor HTTP local. A suíte ao vivo (`npm run live:bigquery`) é à parte, só lê, nunca roda o `gcloud` e pula tudo sem as variáveis `CAIS_BQ_LIVE_PROJECT` (um projeto sandbox) e `CAIS_BQ_LIVE_TOKEN` (por exemplo `$(gcloud auth print-access-token)`); `CAIS_BQ_LIVE_DATASET`, `CAIS_BQ_LIVE_ROUTINE` e `CAIS_BQ_LIVE_VIEW` são opcionais (veja o cabeçalho de `tests/live/bigquery.test.ts`).
 
 ## Empacotar
 
@@ -154,8 +154,7 @@ O modelo de ameaças, as regras do classificador e os limites conhecidos estão 
 | [docs/agentes.md](docs/agentes.md) | Referência do CLI `cais llm` para agentes |
 | [docs/seguranca.md](docs/seguranca.md) | Modelo de segurança e de ameaças |
 | [docs/arquitetura.md](docs/arquitetura.md) | Processos, módulos, contratos, arquivos e empacotamento |
-| [docs/roadmap.md](docs/roadmap.md) | O que ficou fora do BigQuery só leitura e do Linux, com o motivo |
-| [docs/planos/linux-e-bigquery.md](docs/planos/linux-e-bigquery.md) | O plano de Linux e BigQuery, com o estado de cada fase |
+| [docs/roadmap.md](docs/roadmap.md) | O que está fora da versão atual, com o motivo, e o que falta conferir |
 | [AGENTS.md](AGENTS.md) | Guia para quem contribui com o código (pessoas e agentes) |
 
 ## Estrutura do projeto

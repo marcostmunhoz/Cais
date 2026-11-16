@@ -223,7 +223,7 @@ export class FakeBigquery {
     };
   }
 
-  /** jobs.insert: only the dry run is answered, in the Job resource shape the real server gives (spike B0). */
+  /** jobs.insert: only the dry run is answered, in the Job resource shape the real server gives. */
   private insertJob(req: RecordedRequest, res: ServerResponse, project: string): void {
     const configuration = req.body?.configuration ?? {};
     if (configuration.dryRun !== true) return this.fail(res, { status: 400, reason: 'invalid', message: 'The fake only answers dry runs here' });
@@ -254,7 +254,7 @@ export class FakeBigquery {
     if (body.dryRun === true) {
       const error = this.dryRunError(sql);
       if (error) return this.fail(res, error);
-      // the shape the real server gives (spike B0): a jobReference with no jobId, since a dry run creates no job
+      // the shape the real server gives: a jobReference with no jobId, since a dry run creates no job
       return this.json(res, 200, {
         kind: 'bigquery#queryResponse',
         jobReference: { projectId: 'proj', location: 'US' },

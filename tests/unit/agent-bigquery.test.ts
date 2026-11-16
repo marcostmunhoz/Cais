@@ -67,7 +67,7 @@ describe('what counts as a native function', () => {
       expect(isUnknownUnqualifiedFunction(name), name).toBe(false);
     }
   });
-  it('knows the built-ins the spike B0 found missing (each checked by a dry run on the real server)', () => {
+  it('knows built-ins the real server accepts without a qualifier (each checked by a dry run)', () => {
     for (const name of [
       'BIT_COUNT', 'PARSE_BIGNUMERIC', 'PARSE_NUMERIC', 'REGEXP_EXTRACT_GROUPS', 'SAFE_CONVERT_BYTES_TO_STRING', 'ST_EQUALS',
       'ST_LINEINTERPOLATEPOINT', 'TYPEOF', 'ZSTD_COMPRESS', 'ZSTD_DECOMPRESS_TO_BYTES', 'ZSTD_DECOMPRESS_TO_STRING', 'JSON_FLATTEN',
@@ -76,10 +76,10 @@ describe('what counts as a native function', () => {
       expect(isUnknownUnqualifiedFunction(name), name).toBe(false);
     }
   });
-  it('does not list names the server does not know (spike B0: "Function not found")', () => {
+  it('does not list names the server does not know (the real server says "Function not found")', () => {
     for (const name of ['ARRAY_FILTER', 'ST_GEOGFROMKML']) expect(isUnknownUnqualifiedFunction(name), name).toBe(true);
   });
-  it('flags a name that could be a routine of the default dataset', () => {
+  it('flags a name that is not a reviewed built-in', () => {
     for (const name of ['MY_UDF', 'fn', 'SAFE.MY_UDF', 'ST_MYTHING', 'DLP_DETERMINISTIC_ENCRYPT']) expect(isUnknownUnqualifiedFunction(name), name).toBe(true);
   });
   it('does not judge a qualified name (the classifier does)', () => {

@@ -1,6 +1,6 @@
 /**
  * GoogleSQL built-in functions that are written without a qualifier (https://cloud.google.com/bigquery/docs/reference/standard-sql/functions-all).
- * The server never resolves an unqualified name to a persistent routine (spike B0), so a name outside this list is not
+ * The server never resolves an unqualified name to a persistent routine (checked against the real server), so a name outside this list is not
  * a user function: it is unreviewed, maybe a newer built-in that calls outside BigQuery (like `DLP_*`), and agents'
  * reads that call it wait for the person. The list errs toward leaving a name out: a native function missing here
  * only costs one approval, an unreviewed one in it would not. Routines, however they are reached (also through a
@@ -52,7 +52,7 @@ const NATIVE_SET = new Set(NATIVE);
 
 /**
  * True when `name` (as the classifier lists it: upper case, `SAFE.` prefix allowed) is a call to an unqualified
- * function that is not a GoogleSQL built-in: it may be a routine of the default dataset. A qualified name is not
+ * function that is not a GoogleSQL built-in: it is unreviewed, maybe a new built-in (the server never resolves an unqualified name to a persistent routine). A qualified name is not
  * judged here (the classifier's `remoteCalls` does).
  */
 export function isUnknownUnqualifiedFunction(name: string): boolean {

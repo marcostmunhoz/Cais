@@ -165,7 +165,7 @@ export const ptBR = {
     generativeAi: (p: { name: string }) =>
       `O comando chama ${p.name}, de IA generativa ou de modelo: o custo não aparece nos bytes lidos. O pedido espera a sua aprovação.`,
     unknownFunction: (p: { name: string }) =>
-      `O comando chama a função ${p.name}, que não é nativa do BigQuery e pode ser uma rotina do projeto (até uma função remota). O pedido espera a sua aprovação.`,
+      `O comando chama a função ${p.name}, que não é nativa do BigQuery nem revisada pelo Cais (pode ser um built-in novo que chama fora do BigQuery). O pedido espera a sua aprovação.`,
     triggersHidden: (p: { database: string }) =>
       `Este ambiente libera escrita, mas o usuário do banco não enxerga os triggers de ${p.database} (falta o privilégio TRIGGER): o pedido espera a sua aprovação.`,
   },

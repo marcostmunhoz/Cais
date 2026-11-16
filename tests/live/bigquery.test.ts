@@ -1,12 +1,25 @@
-// Optional live suite against a real BigQuery project. It is not part of `npm run check`:
+// Optional live suite against a real BigQuery project. It is not part of `npm run check`.
 //
-//   CAIS_BQ_LIVE_PROJECT=<sandbox project id> CAIS_BQ_LIVE_TOKEN=$(gcloud auth print-access-token) npm run live:bigquery
+// How to run (a sandbox project of your own; the token is the one from your own gcloud, which you run; this suite never does):
 //
-// The token comes from the environment: this suite never runs gcloud. It only reads (dry runs, SELECTs on public
-// data, metadata, a cancel). Without both variables every test is skipped. Optional: CAIS_BQ_LIVE_DATASET, a
-// dataset of that project whose statements may be dry-run against (DML and DDL are only ever dry-run, never run), and
-// CAIS_BQ_LIVE_ROUTINE ("dataset.routine"), a persistent scalar function of one INT64 argument, for the routines test, and CAIS_BQ_LIVE_VIEW
-// ("dataset.view"), a view whose definition calls that routine, for the view test.
+//   export CAIS_BQ_LIVE_PROJECT=<project id>
+//   export CAIS_BQ_LIVE_TOKEN=$(gcloud auth print-access-token)
+//   npm run live:bigquery
+//
+// The token lasts about an hour (a 401 means generate another). Without both variables every test is skipped. The account
+// needs roles/bigquery.jobUser on the project (and roles/bigquery.dataViewer on the datasets it reads). It only reads:
+// dry runs and queries without a table (0 bytes), metadata and a cancel; the SELECT on a public table runs only with a
+// 1-byte cap and is refused without charge. DML and DDL are only ever dry-run.
+//
+// Optional variables:
+//   CAIS_BQ_LIVE_DATASET   a dataset of that project (default cais_live_dataset) used by the DML and DDL statements of the
+//                          corpus. It must exist, with tables t (id INT64, a INT64) and s (id INT64) and a procedure p(),
+//                          or the server answers notFound and the test only records it.
+//   CAIS_BQ_LIVE_ROUTINE   "dataset.routine": a persistent scalar function of one INT64 argument, for example created with
+//                          CREATE FUNCTION my_dataset.f(x INT64) AS (x + 1). Turns on the routines test.
+//   CAIS_BQ_LIVE_VIEW      "dataset.view": a view whose definition calls that routine, for example created with
+//                          CREATE VIEW my_dataset.v AS SELECT my_dataset.f(1) AS a. Turns on the test that checks the
+//                          server lists a routine reached only through a view (docs/seguranca.md says why it matters).
 import { describe, expect, it } from 'vitest';
 import { classify } from '@shared/dialects/bigquery';
 import { createBigqueryDriver } from '@main/drivers/bigquery';
@@ -60,7 +73,7 @@ const corpus: [string, string][] = [
   ['ASSERT 1 = 1', 'ASSERT'],
   // the directive against useLegacySql: false is a 400 ("Query text specifies use_legacy_sql:true...")
   ['#legacySQL\nSELECT 1', 'error:invalid'],
-  // spike B0, item 12: in a raw string a backslash does not escape the quote but keeps the next quote from closing it
+  // checked against the real server: in a raw string a backslash does not escape the quote but keeps the next quote from closing it
   // (server text r'\'' is a valid 2-character string; r'\' is "Unclosed raw string literal", a syntax error)
   ["SELECT r'\\''", 'SELECT'],
   ["SELECT r'\\'", 'error:invalidQuery'],
@@ -85,7 +98,7 @@ describe.skipIf(!live)('BigQuery live: what the server says about each statement
     expect(disagreements).toEqual([]);
   });
 
-  it('the raw-string findings of the spike hold, through the same dry run the driver uses (jobs.insert)', async () => {
+  it('the raw-string rule the server follows holds, through the same dry run the driver uses (jobs.insert)', async () => {
     const session = await driver.open(params());
     expect((await session.prepare!("SELECT r'\\''")).serverKind).toBe('SELECT');
     const unclosed = await session.prepare!("SELECT r'\\'");
@@ -104,7 +117,7 @@ describe.skipIf(!live)('BigQuery live: what the server says about each statement
   });
 });
 
-// Optional: CAIS_BQ_LIVE_ROUTINE is a persistent scalar function of one INT64 argument, as "dataset.routine" (for example cais_spike.f).
+// Optional: CAIS_BQ_LIVE_ROUTINE is a persistent scalar function of one INT64 argument, as "dataset.routine" (for example my_dataset.f).
 const routine = process.env.CAIS_BQ_LIVE_ROUTINE;
 
 describe.skipIf(!live || !routine)('BigQuery live: routines in the dry run', () => {
@@ -118,7 +131,7 @@ describe.skipIf(!live || !routine)('BigQuery live: routines in the dry run', () 
   });
 });
 
-// Optional: CAIS_BQ_LIVE_VIEW is "dataset.view", a view whose definition calls CAIS_BQ_LIVE_ROUTINE (for example cais_spike.v).
+// Optional: CAIS_BQ_LIVE_VIEW is "dataset.view", a view whose definition calls CAIS_BQ_LIVE_ROUTINE (for example my_dataset.v).
 const view = process.env.CAIS_BQ_LIVE_VIEW;
 
 describe.skipIf(!live || !routine || !view)('BigQuery live: a routine inside a view', () => {
