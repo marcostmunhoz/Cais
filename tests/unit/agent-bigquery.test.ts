@@ -180,6 +180,21 @@ describe('the broker with a dry run', () => {
     expect(executor.reads[1]!.statements[0]!.maxBytesBilled).toBe(11 * GIB);
   });
 
+  it('a routine the dry run reports waits, named without a project; a failed dry run reports none', async () => {
+    const { q, executor } = bqBroker();
+    executor.prepared = [select({ routines: ['ds.remote_fn'] })];
+    const out = await q({ env: 'api/bq', sql: 'SELECT * FROM ds.v', reason: 'x' });
+    expect(out.status).toBe('pending_approval');
+    expect(out.approval_reason).toContain('ds.remote_fn');
+    expect(executor.reads).toHaveLength(0);
+    executor.prepared = [{ failed: true }];
+    expect((await q({ env: 'api/bq', sql: 'SELECT * FROM ds.v' })).status).toBe('succeeded');
+    // nothing was shown to the person, so the driver must refuse a routine only its own dry run finds
+    expect(executor.reads.at(-1)!.statements[0]!.refuseRoutines).toBe(true);
+    executor.prepared = [select()];
+    expect((await q({ env: 'api/bq', sql: 'SELECT * FROM ds.v' })).status).toBe('succeeded');
+  });
+
   it('the approval reason is a reference: pt-BR for the agent, the app locale for the person', async () => {
     const { q, executor, broker } = bqBroker();
     executor.prepared = [select({ bytesEstimated: 30 * GIB })];

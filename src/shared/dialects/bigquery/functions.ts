@@ -1,8 +1,10 @@
 /**
  * GoogleSQL built-in functions that are written without a qualifier (https://cloud.google.com/bigquery/docs/reference/standard-sql/functions-all).
- * An unqualified call that is not here can be a routine of the default dataset (a persistent function, maybe a
- * remote one that runs code outside BigQuery): agents' reads that call it wait for the person. The list errs toward
- * leaving a name out: a native function missing here only costs one approval, a user function in it would not.
+ * The server never resolves an unqualified name to a persistent routine (spike B0), so a name outside this list is not
+ * a user function: it is unreviewed, maybe a newer built-in that calls outside BigQuery (like `DLP_*`), and agents'
+ * reads that call it wait for the person. The list errs toward leaving a name out: a native function missing here
+ * only costs one approval, an unreviewed one in it would not. Routines, however they are reached (also through a
+ * view), are caught by the dry run's `referencedRoutines`, not here.
  * Namespaced built-ins (`NET.`, `KEYS.`...) are judged by the classifier (`remoteCalls`), `ML.` and `AI.` too.
  */
 const NATIVE = (

@@ -38,6 +38,7 @@ beforeEach(() => {
   fake.reset();
   fake.datasets.clear();
   fake.addDataset('sales', { orders: { schema: [{ name: 'id', type: 'INTEGER', mode: 'REQUIRED' }] } });
+  fake.routinesFor = () => [];
   fake.resultFor = () => ({ schema: [{ name: 'id', type: 'INTEGER' }], rows: [['1'], ['2']] });
   fake.dryRunError = () => undefined;
   fake.runError = () => undefined;
@@ -104,7 +105,7 @@ describe('the dry run decides first', () => {
   it('one dry run per command, each with its own estimate; none for a refused text', async () => {
     await q({ env: 'api/bq', sql: 'SELECT 1; SELECT 2' });
     // the broker's own dry runs come first, one per command; the driver repeats each one right before its job
-    const texts = fake.dryRuns.map((d) => d.body.query);
+    const texts = fake.dryRuns.map((d) => d.body.configuration.query.query);
     expect(texts.slice(0, 2)).toEqual(['SELECT 1', 'SELECT 2']);
     expect(new Set(texts)).toEqual(new Set(['SELECT 1', 'SELECT 2']));
     const before = fake.requests.length;
@@ -217,6 +218,50 @@ describe('what waits for the person whatever the level says', () => {
     expect(covered.status).toBe('succeeded');
     const remote = await q({ env: 'api/pro', sql: 'SELECT sales.f(1)', reason: 'chamar' });
     expect(remote.status).toBe('pending_approval');
+  });
+});
+
+describe('routines found by the dry run', () => {
+  const viaView = (sql: string) => (sql.includes('ds.v') ? [{ datasetId: 'ds', routineId: 'remote_fn' }] : []);
+
+  it('a plain SELECT whose dry run reports a routine waits even with a grant, names it, and leaks no project', async () => {
+    fake.routinesFor = viaView;
+    const first = await q({ env: 'api/pro', sql: 'SELECT 1', reason: 'abrir' });
+    broker.approve(first.request_id, { shareResult: true, grantReads: true });
+    await broker.status({ id: first.request_id, wait: true, timeoutS: 10 });
+    expect((await q({ env: 'api/pro', sql: 'SELECT 2' })).status).toBe('succeeded');
+    const realBefore = fake.realQueries.length;
+    const res = await q({ env: 'api/pro', sql: 'SELECT * FROM ds.v', reason: 'ver a view' });
+    expect(res.status).toBe('pending_approval');
+    expect(res.approval_reason).toContain('ds.remote_fn');
+    expect(fake.realQueries).toHaveLength(realBefore);
+    const done = await approveAndWait(res.request_id);
+    expect(done.status).toBe('succeeded');
+    for (const text of [JSON.stringify(res), JSON.stringify(done), JSON.stringify(audit), JSON.stringify(broker.snapshot())]) {
+      expect(text).not.toContain('my-secret-project-1');
+    }
+  });
+
+  it('waits at the free-reads level too, and the same SELECT with no routines runs freely', async () => {
+    fake.routinesFor = viaView;
+    const waits = await q({ env: 'api/bq', sql: 'SELECT * FROM ds.v', reason: 'ver a view' });
+    expect(waits.status).toBe('pending_approval');
+    expect(waits.approval_reason).toContain('ds.remote_fn');
+    fake.routinesFor = () => [];
+    const free = await q({ env: 'api/bq', sql: 'SELECT * FROM ds.v' });
+    expect(free.status).toBe('succeeded');
+  });
+});
+
+describe('routines found only by the run itself', () => {
+  it('a first dry run that failed does not let a routine through: the run refuses it and nothing is billed', async () => {
+    let calls = 0;
+    fake.dryRunError = () => (++calls === 1 ? { status: 403, reason: 'accessDenied', message: 'denied' } : undefined);
+    fake.routinesFor = () => [{ datasetId: 'ds', routineId: 'remote_fn' }];
+    const res = await q({ env: 'api/bq', sql: 'SELECT * FROM ds.v', reason: 'ver a view' });
+    expect(res.status).not.toBe('succeeded');
+    expect(fake.realQueries).toHaveLength(0);
+    expect(JSON.stringify(res)).toContain('routine_not_approved');
   });
 });
 

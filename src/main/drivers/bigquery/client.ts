@@ -56,6 +56,50 @@ export const jobGet = z.object({
     .optional(),
 });
 
+/** jobs.insert with `dryRun`: the Job resource, with the statistics the dry run fills in (no job is created, so no jobId). */
+export const dryRunResponse = z.object({
+  jobReference: jobReference.optional(),
+  statistics: z
+    .object({
+      totalBytesProcessed: int64.optional(),
+      query: z
+        .object({
+          statementType: z.string().optional(),
+          totalBytesProcessed: int64.optional(),
+          referencedRoutines: z
+            .array(z.object({ projectId: z.string().optional(), datasetId: z.string(), routineId: z.string() }))
+            .optional(),
+          referencedTables: z.array(z.object({ projectId: z.string().optional(), datasetId: z.string().optional(), tableId: z.string().optional() })).optional(),
+        })
+        .optional(),
+    })
+    .optional(),
+});
+export type DryRunResponse = z.infer<typeof dryRunResponse>;
+
+/** What the app uses of a dry run, whichever call produced it. */
+export interface DryRun {
+  statementType?: string;
+  totalBytesProcessed?: number;
+  /** Routines the statement reaches (also through a view); the server resolves them, jobs.query does not report them. */
+  routines: { projectId?: string; datasetId: string; routineId: string }[];
+}
+
+export function toDryRun(r: DryRunResponse): DryRun {
+  const q = r.statistics?.query;
+  const bytes = q?.totalBytesProcessed ?? r.statistics?.totalBytesProcessed;
+  return {
+    ...(q?.statementType ? { statementType: q.statementType } : {}),
+    ...(bytes !== undefined ? { totalBytesProcessed: bytes } : {}),
+    routines: q?.referencedRoutines ?? [],
+  };
+}
+
+/** The body of a dry run through jobs.insert: no jobId, no location, no labels. */
+export function dryRunBody(sql: string, defaultDataset?: { projectId: string; datasetId: string }): unknown {
+  return { configuration: { dryRun: true, query: { query: sql, useLegacySql: false, ...(defaultDataset ? { defaultDataset } : {}) } } };
+}
+
 export const datasetList = z.object({
   datasets: z.array(z.object({ datasetReference: z.object({ datasetId: z.string() }) })).optional(),
   nextPageToken: z.string().optional(),

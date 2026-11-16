@@ -4,7 +4,8 @@
 //
 // The token comes from the environment: this suite never runs gcloud. It only reads (dry runs, SELECTs on public
 // data, metadata, a cancel). Without both variables every test is skipped. Optional: CAIS_BQ_LIVE_DATASET, a
-// dataset of that project whose statements may be dry-run against (DML and DDL are only ever dry-run, never run).
+// dataset of that project whose statements may be dry-run against (DML and DDL are only ever dry-run, never run), and
+// CAIS_BQ_LIVE_ROUTINE ("dataset.routine"), a persistent scalar function of one INT64 argument, for the routines test.
 import { describe, expect, it } from 'vitest';
 import { classify } from '@shared/dialects/bigquery';
 import { createBigqueryDriver } from '@main/drivers/bigquery';
@@ -58,6 +59,10 @@ const corpus: [string, string][] = [
   ['ASSERT 1 = 1', 'ASSERT'],
   // the directive against useLegacySql: false is a 400 ("Query text specifies use_legacy_sql:true...")
   ['#legacySQL\nSELECT 1', 'error:invalid'],
+  // spike B0, item 12: in a raw string a backslash does not escape the quote but keeps the next quote from closing it
+  // (server text r'\'' is a valid 2-character string; r'\' is "Unclosed raw string literal", a syntax error)
+  ["SELECT r'\\''", 'SELECT'],
+  ["SELECT r'\\'", 'error:invalidQuery'],
 ];
 
 describe.skipIf(!live)('BigQuery live: what the server says about each statement', () => {
@@ -79,12 +84,35 @@ describe.skipIf(!live)('BigQuery live: what the server says about each statement
     expect(disagreements).toEqual([]);
   });
 
+  it('the raw-string findings of the spike hold, through the same dry run the driver uses (jobs.insert)', async () => {
+    const session = await driver.open(params());
+    expect((await session.prepare!("SELECT r'\\''")).serverKind).toBe('SELECT');
+    const unclosed = await session.prepare!("SELECT r'\\'");
+    expect(unclosed.serverKind).toBeUndefined();
+    expect(unclosed.error?.code).toBe('invalidQuery');
+    await session.close();
+  });
+
   it('the dry run gives the statementType of a plain SELECT and a byte estimate', async () => {
     const session = await driver.open(params());
     const prepared = await session.prepare!(`SELECT word FROM ${SHAKESPEARE}`);
     expect(prepared.error).toBeUndefined();
     expect(prepared.serverKind).toBe('SELECT');
     expect(prepared.bytesEstimated).toBeGreaterThan(0);
+    await session.close();
+  });
+});
+
+// Optional: CAIS_BQ_LIVE_ROUTINE is a persistent scalar function of one INT64 argument, as "dataset.routine" (for example cais_spike.f).
+const routine = process.env.CAIS_BQ_LIVE_ROUTINE;
+
+describe.skipIf(!live || !routine)('BigQuery live: routines in the dry run', () => {
+  it('prepare() reports the routine a statement calls, as dataset.routine and without the project', async () => {
+    const session = await driver.open(params());
+    const prepared = await session.prepare!(`SELECT \`${routine}\`(1)`);
+    expect(prepared.error).toBeUndefined();
+    expect(prepared.routines).toContain(routine);
+    expect(JSON.stringify(prepared)).not.toContain(project!);
     await session.close();
   });
 });

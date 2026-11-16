@@ -72,7 +72,7 @@ export const en: Shape<typeof ptBR> = {
         `Non-ASCII character in the code (${p.marker} "${p.char}"), outside strings, backtick-quoted names and comments. Put the name in backticks or the value in quotes.`,
       tripleQuote: 'Triple-quoted string (\'\'\'...\'\'\' or """...""") is not allowed: the review does not read it as the server does. Use a single- or double-quoted string.',
       legacyDirective: 'The #legacySQL or #standardSQL directive is not allowed.',
-      rawBackslash: 'Raw string (r\'...\') with a backslash: the server and the review may find the end of the string in different places. Use a normal string and double the backslashes.',
+      rawBackslash: 'Raw string (r\'...\') with a backslash: refused as a precaution, because the BigQuery documentation does not state the rule the server follows. Use a normal string and double the backslashes.',
       backslashIdent: 'Backtick-quoted name with a backslash: the server and the review may find the end of the name in different places. Remove the backslash.',
       dashComment: 'Comment -- glued to the text after it: with no space after the two dashes the review may read it as code. Put a space after --.',
       bytesPrefix: 'Bytes string (b\'...\'): the review may read it as a bit number and lose the end of the string. Use a normal string or FROM_BASE64.',

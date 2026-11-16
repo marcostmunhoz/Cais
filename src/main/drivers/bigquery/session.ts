@@ -6,7 +6,7 @@ import { m, ref } from '@shared/i18n';
 import { quoteIdent } from '@shared/dialects/bigquery';
 import type { BigqueryConnectParams, DbSession, DbSessionError, ExecuteOptions, PrepareResult } from '../types';
 import { DriverError } from '../types';
-import { anything, datasetGet, jobGet, queryResponse, type BigqueryClient, type QueryResponse } from './client';
+import { anything, datasetGet, dryRunBody, dryRunResponse, jobGet, queryResponse, toDryRun, type BigqueryClient, type DryRun, type QueryResponse } from './client';
 import { mapBigqueryError } from './errors';
 import { columnMeta, decodeRow, type SchemaField } from './values';
 
@@ -151,17 +151,21 @@ export class BigquerySession implements DbSession {
       return {
         ...(response.statementType ? { serverKind: response.statementType } : {}),
         ...(response.totalBytesProcessed !== undefined ? { bytesEstimated: response.totalBytesProcessed } : {}),
+        // "dataset.routine", never with the project: agents do not get the Google Cloud project
+        ...(response.routines.length > 0 ? { routines: response.routines.map((r) => `${r.datasetId}.${r.routineId}`) } : {}),
       };
     } catch (error) {
       return { error: mapBigqueryError(error, { cancelled: false }) };
     }
   }
 
-  private dryRun(sql: string, signal: AbortSignal | undefined): Promise<QueryResponse> {
-    return this.client.call(queryResponse, 'POST', `${this.projectPath}/queries`, {
-      body: { query: sql, dryRun: true, useLegacySql: false, ...(this.defaultDataset() ? { defaultDataset: this.defaultDataset() } : {}) },
+  /** jobs.insert with dryRun: unlike jobs.query, it also reports the routines the statement reaches. */
+  private async dryRun(sql: string, signal: AbortSignal | undefined): Promise<DryRun> {
+    const response = await this.client.call(dryRunResponse, 'POST', `${this.projectPath}/jobs`, {
+      body: dryRunBody(sql, this.defaultDataset()),
       ...(signal ? { signal } : {}),
     });
+    return toDryRun(response);
   }
 
   async execute(sql: string, opts: ExecuteOptions): Promise<StatementResult> {
@@ -195,6 +199,15 @@ export class BigquerySession implements DbSession {
           error: { message: m().agentsUi.error.bytesOverApproved(params), ref: ref('agentsUi.error.bytesOverApproved', params), code: 'bytes_over_approved' },
         };
       }
+      if (opts.refuseRoutines && dry.routines && dry.routines.length > 0) {
+        const first = dry.routines[0]!;
+        const params = { name: `${first.datasetId}.${first.routineId}` };
+        return {
+          ...base,
+          durationMs: elapsed(),
+          error: { message: m().agentsUi.error.routineNotApproved(params), ref: ref('agentsUi.error.routineNotApproved', params), code: 'routine_not_approved' },
+        };
+      }
       const stats: StatementStats = { ...(dry.totalBytesProcessed !== undefined ? { bytesEstimated: dry.totalBytesProcessed } : {}) };
       const read = await this.run(sql, opts, active, stats);
       return { ...base, durationMs: elapsed(), ...read };
@@ -209,7 +222,7 @@ export class BigquerySession implements DbSession {
   }
 
   /** The statement must be a SELECT to the server's eyes: anything else (or no answer on it) is refused. */
-  private refusal(dry: QueryResponse): DbSessionError | null {
+  private refusal(dry: DryRun): DbSessionError | null {
     const type = dry.statementType;
     if (type === 'SELECT') return null;
     const t = m().mainMisc.bigquery;

@@ -80,6 +80,11 @@ export interface ExecuteOptions {
    * this: the estimate someone approved has grown since. Agents' reads only.
    */
   estimateCeiling?: number;
+  /**
+   * Refuse to run (code `routine_not_approved`) when the dry run of this very run reports any routine: nobody saw one
+   * when the request was decided. Agents' reads only; also the net for a dry run that failed earlier.
+   */
+  refuseRoutines?: boolean;
   /** Read more rows of the result already computed by the previous run of the same statement, without running it again. */
   refetch?: boolean;
 }
@@ -89,6 +94,8 @@ export interface PrepareResult {
   /** The kind of statement as the server reads it (for a second look at read-only). */
   serverKind?: string;
   bytesEstimated?: number;
+  /** Routines the statement reaches (also through a view), each as "datasetId.routineId": never with the project. */
+  routines?: string[];
   error?: StatementError;
 }
 

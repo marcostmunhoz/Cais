@@ -152,7 +152,7 @@ export const en: Shape<typeof ptBR> = {
     overLimit: (p) =>
       `This read should scan ${f.formatBytes(p.bytes)}, above the environment's limit of ${f.formatBytes(p.limit)}: it waits for your approval, whatever the environment's level.`,
     remoteFunction: (p) =>
-      `The command calls the function ${p.name}, defined in the project: it may be a remote function, which runs code outside BigQuery. The request waits for your approval.`,
+      `The command uses the function ${p.name}, defined in the project (directly or through a view): it may be a remote function, which runs code outside BigQuery. The request waits for your approval.`,
     generativeAi: (p) =>
       `The command calls ${p.name}, a generative AI or model function: its cost does not show in the bytes read. The request waits for your approval.`,
     unknownFunction: (p) =>
@@ -188,6 +188,7 @@ export const en: Shape<typeof ptBR> = {
     timeout: 'Time limit for agents reached.',
     bytesOverApproved: (p) =>
       `The estimate for this read went past ${f.formatBytes(p.ceiling)}, the approved ceiling (now ${f.formatBytes(p.bytes)}): it did not run. Ask again so the person sees the new estimate.`,
+    routineNotApproved: (p) => `This read reaches the routine ${p.name}, which nobody approved: it did not run. Ask again so the person sees it.`,
     accessClosed: 'Agent access was turned off or the environment changed.',
     unexpectedCommit: 'The server ended the transaction during the request.',
     nonTransactionalWrite: 'The statement wrote outside the transaction (non-transactional or system table): Rollback does not undo it.',

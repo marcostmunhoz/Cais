@@ -2,7 +2,7 @@ import { isGcpProjectId } from '@shared/engines';
 import { m, ref } from '@shared/i18n';
 import type { BigqueryConnectParams, ConnectParams, Driver } from '../types';
 import { DriverError } from '../types';
-import { BIGQUERY_BASE_URL, BigqueryClient, anything, queryResponse, type FetchLike } from './client';
+import { BIGQUERY_BASE_URL, BigqueryClient, anything, dryRunBody, dryRunResponse, type FetchLike } from './client';
 import { toDriverError } from './errors';
 import { readSchema } from './introspect';
 import { BigquerySession } from './session';
@@ -61,8 +61,8 @@ export function createBigqueryDriver(options: BigqueryDriverOptions = {}): Drive
         if (!params.accessToken) throw new Error('no token');
         // lists one dataset (the account sees the project) and dry-runs SELECT 1 (it may create jobs there)
         await listDatasets1(client, params.project);
-        await client.call(queryResponse, 'POST', `/projects/${encodeURIComponent(params.project)}/queries`, {
-          body: { query: 'SELECT 1', dryRun: true, useLegacySql: false },
+        await client.call(dryRunResponse, 'POST', `/projects/${encodeURIComponent(params.project)}/jobs`, {
+          body: dryRunBody('SELECT 1'),
         });
         return { serverVersion: 'BigQuery' };
       }),

@@ -61,6 +61,8 @@ export class FakeBigquery {
   statementType: (sql: string) => string = (sql) => (/^\s*\(*\s*(SELECT|WITH|FROM)\b/i.test(sql) ? 'SELECT' : sql.trim().split(/\s+/)[0]!.toUpperCase());
   /** The result of a statement. */
   resultFor: (sql: string) => FakeResult = () => ({ schema: [{ name: 'n', type: 'INTEGER' }], rows: [['1']] });
+  /** Routines the dry run reports as referenced (also through a view); jobs.insert only, as on the real server. */
+  routinesFor: (sql: string) => { datasetId: string; routineId: string; projectId?: string }[] = () => [];
   /** Bytes the dry run estimates. */
   bytesFor: (sql: string) => number = () => 1024;
   /** An error for a statement, at the dry run or at the real run. */
@@ -70,6 +72,8 @@ export class FakeBigquery {
   slow: (sql: string) => boolean = (sql) => /\bSLOW\b/.test(sql);
   /** Datasets, and in each the tables with their kind and schema. */
   datasets = new Map<string, Map<string, { type: string; schema: FakeField[] }>>();
+  /** Delay before tables.get answers (to exercise the loading signal). */
+  tableGetDelayMs = 0;
   /** Page size of the dataset and table lists (to exercise paging). */
   listPageSize = 1000;
   /** The server forgets finished jobs (result expired): getQueryResults answers 404. */
@@ -121,7 +125,13 @@ export class FakeBigquery {
     return this.requests.filter((r) => r.method === 'POST' && r.path.endsWith('/queries') && !r.body?.dryRun);
   }
 
+  /** Dry runs through jobs.insert, the way the app does them. */
   get dryRuns(): RecordedRequest[] {
+    return this.requests.filter((r) => r.method === 'POST' && r.path.endsWith('/jobs') && r.body?.configuration?.dryRun === true);
+  }
+
+  /** Dry runs through jobs.query (the app no longer sends them; the fake still answers them). */
+  get queryDryRuns(): RecordedRequest[] {
     return this.requests.filter((r) => r.method === 'POST' && r.path.endsWith('/queries') && r.body?.dryRun === true);
   }
 
@@ -158,6 +168,7 @@ export class FakeBigquery {
     if (parts[0] !== 'projects' || parts.length < 3) return this.fail(res, { status: 404, reason: 'notFound', message: 'Not found' });
     const rest = parts.slice(2);
 
+    if (rest[0] === 'jobs' && rest.length === 1 && record.method === 'POST') return this.insertJob(record, res, parts[1]!);
     if (rest[0] === 'queries' && rest.length === 1 && record.method === 'POST') return await this.query(record, res, parts[1]!);
     if (rest[0] === 'queries' && rest.length === 2 && record.method === 'GET') return this.results(record, res, parts[1]!, decodeURIComponent(rest[1]!));
     if (rest[0] === 'jobs' && rest[2] === 'cancel' && record.method === 'POST') {
@@ -210,6 +221,31 @@ export class FakeBigquery {
       cacheHit: job.cacheHit,
       statementType: 'SELECT',
     };
+  }
+
+  /** jobs.insert: only the dry run is answered, in the Job resource shape the real server gives (spike B0). */
+  private insertJob(req: RecordedRequest, res: ServerResponse, project: string): void {
+    const configuration = req.body?.configuration ?? {};
+    if (configuration.dryRun !== true) return this.fail(res, { status: 400, reason: 'invalid', message: 'The fake only answers dry runs here' });
+    const sql = String(configuration.query?.query ?? '');
+    const error = this.dryRunError(sql);
+    if (error) return this.fail(res, error);
+    const type = this.statementType(sql);
+    const bytes = String(this.bytesFor(sql));
+    const routines = this.routinesFor(sql);
+    this.json(res, 200, {
+      kind: 'bigquery#job',
+      jobReference: { projectId: project, location: 'US' },
+      status: { state: 'DONE' },
+      statistics: {
+        totalBytesProcessed: bytes,
+        query: {
+          ...(type ? { statementType: type } : {}),
+          totalBytesProcessed: bytes,
+          ...(routines.length > 0 ? { referencedRoutines: routines.map((r) => ({ projectId: project, ...r })) } : {}),
+        },
+      },
+    });
   }
 
   private async query(req: RecordedRequest, res: ServerResponse, _project: string): Promise<void> {
@@ -314,7 +350,10 @@ export class FakeBigquery {
     if (parts[1] === 'tables' && parts.length === 3) {
       const table = tables.get(decodeURIComponent(parts[2]!));
       if (!table) return this.fail(res, { status: 404, reason: 'notFound', message: 'Not found: Table' });
-      return this.json(res, 200, { type: table.type, schema: { fields: table.schema } });
+      const body = { type: table.type, schema: { fields: table.schema } };
+      if (this.tableGetDelayMs > 0) setTimeout(() => this.json(res, 200, body), this.tableGetDelayMs);
+      else this.json(res, 200, body);
+      return;
     }
     this.fail(res, { status: 404, reason: 'notFound', message: 'Not found' });
   }

@@ -161,7 +161,7 @@ export const ptBR = {
     overLimit: (p: { bytes: number; limit: number }) =>
       `Esta leitura deve ler ${f.formatBytes(p.bytes)}, acima do limite de ${f.formatBytes(p.limit)} do ambiente: ela espera a sua aprovação, qualquer que seja o nível do ambiente.`,
     remoteFunction: (p: { name: string }) =>
-      `O comando chama a função ${p.name}, definida no projeto: ela pode ser uma função remota, que roda código fora do BigQuery. O pedido espera a sua aprovação.`,
+      `O comando usa a função ${p.name}, definida no projeto (direto ou por uma view): ela pode ser uma função remota, que roda código fora do BigQuery. O pedido espera a sua aprovação.`,
     generativeAi: (p: { name: string }) =>
       `O comando chama ${p.name}, de IA generativa ou de modelo: o custo não aparece nos bytes lidos. O pedido espera a sua aprovação.`,
     unknownFunction: (p: { name: string }) =>
@@ -199,6 +199,7 @@ export const ptBR = {
     timeout: 'Tempo limite para agentes esgotado.',
     bytesOverApproved: (p: { bytes: number; ceiling: number }) =>
       `A estimativa desta leitura passou de ${f.formatBytes(p.ceiling)}, o teto aprovado (agora ${f.formatBytes(p.bytes)}): ela não rodou. Peça de novo para a pessoa ver a nova estimativa.`,
+    routineNotApproved: (p: { name: string }) => `Esta leitura alcança a rotina ${p.name}, que ninguém aprovou: ela não rodou. Peça de novo para a pessoa ver.`,
     accessClosed: 'O acesso de agentes foi desligado ou o ambiente mudou.',
     unexpectedCommit: 'O servidor encerrou a transação durante o pedido.',
     nonTransactionalWrite: 'O comando gravou fora da transação (tabela não transacional ou do sistema): o Rollback não desfaz.',

@@ -32,6 +32,8 @@ export interface PlannedStatement {
    * by the time it runs does not run (`bytes_over_approved`). Absent: no ceiling (MySQL).
    */
   maxBytesBilled?: number;
+  /** The request was decided without a routine in sight: the driver refuses a run whose own dry run finds one. */
+  refuseRoutines?: boolean;
 }
 
 /** What a dry run said about one statement of a request, before anything is decided. */
@@ -39,6 +41,8 @@ export interface PreparedStatement {
   /** The kind of statement as the server reads it ("SELECT"). */
   serverKind?: string;
   bytesEstimated?: number;
+  /** Routines the statement reaches, as "datasetId.routineId" (no project). */
+  routines?: string[];
   /** The dry run could not be done (connection, bad dataset, invalid text): the run itself reports the error. */
   failed?: boolean;
 }
@@ -368,6 +372,7 @@ export class AgentSessions implements AgentExecutor {
     maxRows: number,
     cutMs: number,
     ceiling?: number,
+    refuseRoutines?: boolean,
   ): Promise<{ result: StatementResult; cut: boolean }> {
     let cut = false;
     let fallback: unknown;
@@ -381,7 +386,7 @@ export class AgentSessions implements AgentExecutor {
       }, 5000);
     }, Math.max(1, cutMs));
     try {
-      const result = await session.execute(text, { maxRows, ...(ceiling !== undefined ? { maxBytesBilled: ceiling, estimateCeiling: ceiling } : {}) });
+      const result = await session.execute(text, { maxRows, ...(ceiling !== undefined ? { maxBytesBilled: ceiling, estimateCeiling: ceiling } : {}), ...(refuseRoutines ? { refuseRoutines: true } : {}) });
       return { result, cut };
     } finally {
       this.scheduler.clear(timer);
@@ -444,6 +449,7 @@ export class AgentSessions implements AgentExecutor {
           out.push({
             ...(one.serverKind ? { serverKind: one.serverKind } : {}),
             ...(one.bytesEstimated !== undefined ? { bytesEstimated: one.bytesEstimated } : {}),
+            ...(one.routines && one.routines.length > 0 ? { routines: one.routines } : {}),
           });
         }
       }
@@ -479,7 +485,8 @@ export class AgentSessions implements AgentExecutor {
         }
         // the estimate may have grown since the person (or the policy) saw it: the ceiling is what was approved
         const ceiling = statement.maxBytesBilled;
-        const { result: raw, cut } = await this.executeWithCut(entry.session, statement.text, args.maxRows, Math.min(READ_HARD_CUT_MS, remaining), ceiling);
+        const refuseRoutines = statement.refuseRoutines === true;
+        const { result: raw, cut } = await this.executeWithCut(entry.session, statement.text, args.maxRows, Math.min(READ_HARD_CUT_MS, remaining), ceiling, refuseRoutines);
         const result = label(raw, statement, index);
         if (cut) {
           recycle = true;

@@ -77,7 +77,7 @@ export const ptBR = {
         `Caractere fora do ASCII no código (${p.marker} "${p.char}"), fora de string, de nome entre crases e de comentário. Escreva o nome entre crases ou o valor entre aspas.`,
       tripleQuote: 'String de três aspas (\'\'\'...\'\'\' ou """...""") não é permitida: a revisão não a lê como o servidor. Use uma string de aspas simples ou duplas.',
       legacyDirective: 'A diretiva #legacySQL ou #standardSQL não é permitida.',
-      rawBackslash: 'String crua (r\'...\') com barra invertida: o servidor e a revisão podem achar o fim da string em lugares diferentes. Use uma string normal, dobrando as barras.',
+      rawBackslash: 'String crua (r\'...\') com barra invertida: recusada por precaução, porque a documentação do BigQuery não registra a regra do servidor. Use uma string normal, dobrando as barras.',
       backslashIdent: 'Nome entre crases com barra invertida: o servidor e a revisão podem achar o fim do nome em lugares diferentes. Tire a barra.',
       dashComment: 'Comentário -- colado no texto seguinte: sem espaço depois dos dois traços, a revisão pode lê-lo como código. Ponha um espaço depois de --.',
       bytesPrefix: 'String de bytes (b\'...\'): a revisão pode lê-la como número binário e perder o fim da string. Use uma string normal ou FROM_BASE64.',

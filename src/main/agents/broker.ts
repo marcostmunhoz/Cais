@@ -404,8 +404,13 @@ export class AgentBroker {
           const est = prepared[i]?.failed ? undefined : estimates![i];
           p.maxBytesBilled = bytesRef && est !== undefined ? Math.max(threshold, Math.ceil(est / GIB) * GIB) : threshold;
         });
+        // a routine the server found (also through a view, which the classifier cannot see) waits like a remote call
+        const routine = prepared.find((p) => !p.failed && p.routines && p.routines.length > 0)?.routines?.[0];
+        const routinesRef = routine ? ref('agentsUi.approval.remoteFunction', { name: shortName(routine) }) : null;
         // the function warning stays when both apply: the bytes of each command show in the modal anyway
-        forced = forced ?? bytesRef ?? undefined;
+        forced = forced ?? routinesRef ?? bytesRef ?? undefined;
+        // no routine was shown to the person: the driver refuses one that only its own dry run finds
+        if (!routinesRef) for (const p of plan) p.refuseRoutines = true;
         decision = decideFor(env);
         if (decision.action === 'refuse') refuse(decision.code, decision.message);
       }

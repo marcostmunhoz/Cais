@@ -2,7 +2,7 @@
  * GoogleSQL lexical rules (https://cloud.google.com/bigquery/docs/reference/standard-sql/lexical) shared by the
  * splitter and the classifier, so both see the same strings, comments and names the server does.
  *
- * Two points the documentation leaves open are read under both rules by the classifier, which refuses when the
+ * Two points the documentation does not state (the spike found the server follows one rule in each, but the readings stay as a precaution) are read under both rules by the classifier, which refuses when the
  * readings differ: whether a backslash still keeps a quote from ending a raw string (`r'\''`), and whether a
  * backslash escapes inside a backtick name. `lex(text, escapes)` takes the rule as a flag.
  */
@@ -122,7 +122,7 @@ export function lex(text: string, escapes = true): Tok[] {
       continue;
     }
     if (c === '`') {
-      const s = scanQuoted(text, i, true, escapes); // like a raw string: whether a backslash escapes is the open question
+      const s = scanQuoted(text, i, true, escapes); // like a raw string: both readings are tried
       out.push({ kind: 'ident', text: text.slice(i, s.end), pos: i, end: s.end, closed: s.closed, backslash: s.backslash });
       i = s.end;
       continue;
@@ -185,7 +185,7 @@ export function nameParts(tok: Tok): string[] {
  *   line comment for the server but not for the highlighter;
  * - strings of three quotes (the highlighter reads `'''a'''` as three strings);
  * - `#legacySQL` and `#standardSQL`;
- * - a raw string with a backslash (the documentation does not say whether `r'\''` ends at the second quote) and
+ * - a raw string with a backslash (the documentation does not state the rule; refused as a precaution) and
  *   a backtick name with a backslash (the highlighter has no escapes there): the end may be elsewhere. A raw
  *   string without a backslash ends in the same place under every reading, so it passes;
  * - the letter x glued to a quote (`x'41'`): the highlighter reads it as a hex number and loses the string;

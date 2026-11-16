@@ -65,6 +65,7 @@ beforeEach(() => {
   events = [];
   trail = [];
   fake.reset();
+  fake.routinesFor = () => [];
   fake.validTokens = new Set(['test-token', 'fresh-token']);
   fake.statementType = (sql) => (/^\s*\(*\s*(SELECT|WITH|FROM)\b/i.test(sql) ? 'SELECT' : sql.trim().split(/\s+/)[0]!.toUpperCase());
   fake.resultFor = () => ({ schema: [{ name: 'n', type: 'INTEGER' }, { name: 's', type: 'STRING' }], rows: [['1', 'a'], ['2', null]] });
@@ -124,7 +125,11 @@ describe('BigQuery through the SessionManager', () => {
     expect(fake.dryRuns).toHaveLength(2);
     expect(fake.realQueries).toHaveLength(1);
     const dry = fake.dryRuns[0]!.body;
-    expect(dry).toMatchObject({ query: 'SELECT 1', dryRun: true, useLegacySql: false, defaultDataset: { projectId: 'my-project-1', datasetId: 'sales' } });
+    expect(dry).toEqual({
+      configuration: { dryRun: true, query: { query: 'SELECT 1', useLegacySql: false, defaultDataset: { projectId: 'my-project-1', datasetId: 'sales' } } },
+    });
+    expect(fake.dryRuns[0]!.path).toBe('/projects/my-project-1/jobs');
+    expect(fake.queryDryRuns).toHaveLength(0);
     const real = fake.realQueries[0]!.body;
     expect(real).toMatchObject({
       query: 'SELECT 1',
@@ -139,7 +144,7 @@ describe('BigQuery through the SessionManager', () => {
     expect(real.dryRun).toBeUndefined();
     expect(real.timeoutMs).toBeLessThanOrEqual(10_000);
     expect(fake.requests.every((r) => r.authorization === 'Bearer test-token')).toBe(true);
-    expect(fake.requests[0]!.path).toBe('/projects/my-project-1/queries');
+    expect(fake.requests[0]!.path).toBe('/projects/my-project-1/jobs');
   });
 
   it('without a limit it sends no maximumBytesBilled', async () => {
@@ -186,6 +191,31 @@ describe('BigQuery through the SessionManager', () => {
     const result = await session.execute('SELECT 1', { maxRows: 10 });
     expect(result.error?.code).toBe('REFUSED');
     expect(fake.realQueries).toHaveLength(0);
+    await session.close();
+  });
+
+  it('prepare() reports the routines the dry run found as dataset.routine, never with the project', async () => {
+    fake.routinesFor = () => [{ datasetId: 'ds', routineId: 'remote_fn' }, { datasetId: 'other', routineId: 'f2' }];
+    const driver = createBigqueryDriver({ baseUrl: fake.url });
+    const session = await driver.open({ engine: 'bigquery', project: 'my-project-1', accessToken: 'test-token', origin: 'agent' });
+    const prepared = await session.prepare!('SELECT * FROM ds.v');
+    expect(prepared.serverKind).toBe('SELECT');
+    expect(prepared.routines).toEqual(['ds.remote_fn', 'other.f2']);
+    expect(JSON.stringify(prepared)).not.toContain('my-project-1');
+    fake.routinesFor = () => [];
+    expect((await session.prepare!('SELECT 1')).routines).toBeUndefined();
+    await session.close();
+  });
+
+  it('refuseRoutines: a run whose own dry run reports a routine is refused, nothing billed', async () => {
+    fake.routinesFor = () => [{ datasetId: 'ds', routineId: 'remote_fn' }];
+    const driver = createBigqueryDriver({ baseUrl: fake.url });
+    const session = await driver.open({ engine: 'bigquery', project: 'my-project-1', accessToken: 'test-token', origin: 'agent' });
+    const refused = await session.execute('SELECT * FROM ds.v', { maxRows: 10, refuseRoutines: true });
+    expect(refused.error?.code).toBe('routine_not_approved');
+    expect(fake.realQueries).toHaveLength(0);
+    const allowed = await session.execute('SELECT * FROM ds.v', { maxRows: 10 });
+    expect(allowed.error).toBeUndefined();
     await session.close();
   });
 
@@ -401,7 +431,7 @@ describe('BigQuery through the SessionManager', () => {
     expect(fake.realQueries).toHaveLength(realBefore);
 
     fake.dryRunError = () => undefined;
-    fake.failPath = { includes: '/queries', error: { status: 404, reason: 'notFound', message: 'Not found: Table my-project-1:sales.nope' } };
+    fake.failPath = { includes: '/jobs', error: { status: 404, reason: 'notFound', message: 'Not found: Table my-project-1:sales.nope' } };
     expect((await run('SELECT * FROM sales.nope')).results[0]!.error?.code).toBe('notFound');
   });
 
@@ -585,7 +615,8 @@ describe('BigQuery driver: schema and test', () => {
     const result = await driver().test(params());
     expect(result.serverVersion).toBe('BigQuery');
     expect(fake.requestsTo('/datasets', 'GET')[0]!.query.maxResults).toBe('1');
-    expect(fake.dryRuns[0]!.body).toMatchObject({ query: 'SELECT 1', dryRun: true });
+    expect(fake.dryRuns[0]!.body).toMatchObject({ configuration: { dryRun: true, query: { query: 'SELECT 1', useLegacySql: false } } });
+    expect(fake.queryDryRuns).toHaveLength(0);
     expect(fake.realQueries).toHaveLength(0);
   });
 
