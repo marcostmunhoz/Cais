@@ -94,7 +94,7 @@ export interface PrepareResult {
   /** The kind of statement as the server reads it (for a second look at read-only). */
   serverKind?: string;
   bytesEstimated?: number;
-  /** Routines the statement reaches (also through a view), each as "datasetId.routineId": never with the project. */
+  /** Routines the server lists for the statement (views: unconfirmed live), each as "datasetId.routineId": never with the project. */
   routines?: string[];
   error?: StatementError;
 }

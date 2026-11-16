@@ -81,7 +81,7 @@ export type DryRunResponse = z.infer<typeof dryRunResponse>;
 export interface DryRun {
   statementType?: string;
   totalBytesProcessed?: number;
-  /** Routines the statement reaches (also through a view); the server resolves them, jobs.query does not report them. */
+  /** Routines the server lists for the statement (views: unconfirmed live); the server resolves them, jobs.query does not report them. */
   routines: { projectId?: string; datasetId: string; routineId: string }[];
 }
 

@@ -61,7 +61,7 @@ export class FakeBigquery {
   statementType: (sql: string) => string = (sql) => (/^\s*\(*\s*(SELECT|WITH|FROM)\b/i.test(sql) ? 'SELECT' : sql.trim().split(/\s+/)[0]!.toUpperCase());
   /** The result of a statement. */
   resultFor: (sql: string) => FakeResult = () => ({ schema: [{ name: 'n', type: 'INTEGER' }], rows: [['1']] });
-  /** Routines the dry run reports as referenced (also through a view); jobs.insert only, as on the real server. */
+  /** Routines the dry run reports as referenced (the real server on views: unconfirmed); jobs.insert only, as on the real server. */
   routinesFor: (sql: string) => { datasetId: string; routineId: string; projectId?: string }[] = () => [];
   /** Bytes the dry run estimates. */
   bytesFor: (sql: string) => number = () => 1024;

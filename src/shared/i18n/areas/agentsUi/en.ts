@@ -152,7 +152,7 @@ export const en: Shape<typeof ptBR> = {
     overLimit: (p) =>
       `This read should scan ${f.formatBytes(p.bytes)}, above the environment's limit of ${f.formatBytes(p.limit)}: it waits for your approval, whatever the environment's level.`,
     remoteFunction: (p) =>
-      `The command uses the function ${p.name}, defined in the project (directly or through a view): it may be a remote function, which runs code outside BigQuery. The request waits for your approval.`,
+      `The command uses the function ${p.name}, defined in the project: it may be a remote function, which runs code outside BigQuery. The request waits for your approval.`,
     generativeAi: (p) =>
       `The command calls ${p.name}, a generative AI or model function: its cost does not show in the bytes read. The request waits for your approval.`,
     unknownFunction: (p) =>

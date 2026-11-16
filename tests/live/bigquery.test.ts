@@ -5,7 +5,8 @@
 // The token comes from the environment: this suite never runs gcloud. It only reads (dry runs, SELECTs on public
 // data, metadata, a cancel). Without both variables every test is skipped. Optional: CAIS_BQ_LIVE_DATASET, a
 // dataset of that project whose statements may be dry-run against (DML and DDL are only ever dry-run, never run), and
-// CAIS_BQ_LIVE_ROUTINE ("dataset.routine"), a persistent scalar function of one INT64 argument, for the routines test.
+// CAIS_BQ_LIVE_ROUTINE ("dataset.routine"), a persistent scalar function of one INT64 argument, for the routines test, and CAIS_BQ_LIVE_VIEW
+// ("dataset.view"), a view whose definition calls that routine, for the view test.
 import { describe, expect, it } from 'vitest';
 import { classify } from '@shared/dialects/bigquery';
 import { createBigqueryDriver } from '@main/drivers/bigquery';
@@ -113,6 +114,19 @@ describe.skipIf(!live || !routine)('BigQuery live: routines in the dry run', () 
     expect(prepared.error).toBeUndefined();
     expect(prepared.routines).toContain(routine);
     expect(JSON.stringify(prepared)).not.toContain(project!);
+    await session.close();
+  });
+});
+
+// Optional: CAIS_BQ_LIVE_VIEW is "dataset.view", a view whose definition calls CAIS_BQ_LIVE_ROUTINE (for example cais_spike.v).
+const view = process.env.CAIS_BQ_LIVE_VIEW;
+
+describe.skipIf(!live || !routine || !view)('BigQuery live: a routine inside a view', () => {
+  it('prepare() reports the routine the view calls when the statement only reads the view', async () => {
+    const session = await driver.open(params());
+    const prepared = await session.prepare!(`SELECT * FROM \`${view}\``);
+    expect(prepared.error).toBeUndefined();
+    expect(prepared.routines).toContain(routine);
     await session.close();
   });
 });
