@@ -101,7 +101,7 @@
         }
       ],
       "executableName": "cais-app",
-      "icon": "build/icon.png",
+      "icon": "build/icons",
       "category": "Development;Database",
       "synopsis": "Cliente SQL de desktop",
       "description": "Cliente SQL de desktop organizado por projeto e ambiente, com acesso de agentes de IA pelo CLI cais llm.",
