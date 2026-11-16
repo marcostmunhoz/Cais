@@ -248,7 +248,7 @@ export class BigquerySession implements DbSession {
       },
     });
     const location = response.jobReference?.location ?? response.location;
-    if (response.jobReference) {
+    if (response.jobReference?.jobId) {
       active.job = { jobId: response.jobReference.jobId, ...(location ? { location } : {}) };
       // Cancelar came before the job had an id: stop it now
       if (active.cancelRequested) {

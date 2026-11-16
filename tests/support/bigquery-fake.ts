@@ -218,11 +218,16 @@ export class FakeBigquery {
     if (body.dryRun === true) {
       const error = this.dryRunError(sql);
       if (error) return this.fail(res, error);
+      // the shape the real server gives (spike B0): a jobReference with no jobId, since a dry run creates no job
       return this.json(res, 200, {
         kind: 'bigquery#queryResponse',
+        jobReference: { projectId: 'proj', location: 'US' },
         jobComplete: true,
+        cacheHit: false,
+        location: 'US',
         ...(this.statementType(sql) ? { statementType: this.statementType(sql) } : {}),
         totalBytesProcessed: String(this.bytesFor(sql)),
+        totalBytesBilled: '0',
       });
     }
     const error = this.runError(sql);

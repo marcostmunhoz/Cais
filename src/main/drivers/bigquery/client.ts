@@ -27,7 +27,8 @@ const fieldSchema: z.ZodType<SchemaField> = z.lazy(() =>
 );
 
 const tableSchema = z.object({ fields: z.array(fieldSchema).optional() });
-const jobReference = z.object({ projectId: z.string().optional(), jobId: z.string(), location: z.string().optional() });
+// A dry run answers with a jobReference that has no jobId (no job is created): only a real run carries one.
+const jobReference = z.object({ projectId: z.string().optional(), jobId: z.string().optional(), location: z.string().optional() });
 
 export const queryResponse = z.object({
   jobComplete: z.boolean().optional(),
