@@ -59,6 +59,13 @@ Todos rodam na raiz do projeto, com Node 20.19 ou mais novo e npm.
 | `npm run cli -- llm envs` | Recompila o CLI e roda `cais llm …`. Precisa do Cais aberto (`npm run dev`) com o acesso de agentes ligado. |
 | `npm run dist` | `build` + electron-builder, que gera os alvos do sistema em que roda. macOS: `dist/Cais-<versão>-arm64.dmg` e `dist/mac-arm64/Cais.app`. Linux: `dist/cais_<versão>_amd64.deb` (x64, executável `cais-app`, CLI em `/opt/Cais/resources/cli/cais.mjs`). Nos dois, com Electron fuses endurecidos (`electronFuses`) e `umask 022`; no macOS, também assinatura ad-hoc local (`scripts/adhoc-sign.cjs`, hook `afterSign`). O CLI vai em `Cais.app/Contents/Resources/cli/cais.mjs` (`extraResources`: o Node do sistema não lê dentro do asar) e roda no Node do sistema, não pelo Electron (o fuse `runAsNode` fica desligado). |
 
+## Versões e releases
+
+- Uma release se faz assim: `npm version x.y.z` (cria o commit `chore(release): x.y.z` e a tag `vx.y.z`, pelo `.npmrc`) e depois `git push --follow-tags`. O workflow `release.yml` confere que a tag bate com a versão do `package.json`, roda o `npm run check`, gera o deb (Linux) e o dmg (macOS arm64, assinatura ad-hoc) e publica a GitHub Release com os dois arquivos e o `SHA256SUMS.txt`.
+- Tag e release são feitas só pela pessoa, nunca por um agente, a menos que ela peça.
+- O CI (`ci.yml`) roda `npm run check` no Linux a cada push em qualquer branch, e o resultado aparece no pull request. O macOS só roda na release, porque os minutos dele custam 10 vezes mais.
+- As actions ficam fixadas por SHA completo, com a versão num comentário. Só `actions/*`, e o único segredo é o `github.token`.
+
 ## Testes
 
 - **Ganchos de teste** só valem com `!app.isPackaged`; o app empacotado os ignora:
