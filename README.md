@@ -38,6 +38,13 @@ Cais é um cliente SQL de desktop para MySQL e, só para leitura, BigQuery, feit
 
 O empacotamento gera o app para macOS em Apple Silicon (arm64) e um `.deb` para Linux x64 (Ubuntu e derivados), cada um no sistema correspondente. Para Windows não há alvo de empacotamento (o socket dos agentes vira named pipe e o menu tem variante, mas rode pelo código-fonte com `npm run dev`).
 
+## Baixar
+
+Os instaladores ficam na página de [Releases](../../releases) do repositório, com um `SHA256SUMS.txt` para conferir os arquivos.
+
+- **Linux (Ubuntu e derivados, x64):** `sudo apt install ./cais_<versão>_amd64.deb` (veja [Instalar no Linux](#instalar-no-linux)).
+- **macOS (Apple Silicon):** abra o `.dmg` e arraste o `Cais.app` para `Aplicativos`. O app não é notarizado: na primeira abertura, use **Ajustes do Sistema › Privacidade e Segurança › Abrir Mesmo Assim** ou `xattr -dr com.apple.quarantine /Applications/Cais.app` (veja [Abrir o app sem assinatura no macOS](#abrir-o-app-sem-assinatura-no-macos)).
+
 ## Instalar e rodar em desenvolvimento
 
 ```bash
