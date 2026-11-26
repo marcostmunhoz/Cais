@@ -260,6 +260,81 @@ test('autocomplete suggests tables, columns and alias columns from the schema', 
   await page.keyboard.press('Escape');
 });
 
+test('autocomplete offers the columns of the tables the statement reads, one per table when two share a name', async () => {
+  const tooltip = page.locator('.cm-tooltip-autocomplete');
+  await page.locator('.cm-content').click();
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('SELECT * FROM cards WHERE sta');
+  await expect(tooltip).toContainText('status');
+  // only the table of the statement: companies has national_id, cards does not
+  await expect(tooltip).not.toContainText('national_id');
+  await page.keyboard.press('Escape');
+
+  // the FROM after the cursor counts too
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('SELECT  FROM companies co JOIN cards c ON c.company_id = co.id');
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Home');
+  for (let i = 0; i < 'SELECT '.length; i++) await page.keyboard.press('ArrowRight');
+  await page.keyboard.type('nat');
+  await expect(tooltip).toContainText('national_id');
+  await page.keyboard.press('Escape');
+
+  // id is in both tables: one option each, the table in the detail
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('SELECT * FROM cards c JOIN companies co ON c.company_id = co.id WHERE i');
+  await expect(tooltip).toContainText('c · int');
+  await expect(tooltip).toContainText('co · int');
+  await page.keyboard.press('Escape');
+
+  // after FROM the tables come first (before the keywords that start with the same letters)
+  const firstLabel = page.locator('.cm-tooltip-autocomplete .cm-completionLabel').first();
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('SELECT * FROM ca');
+  await expect(firstLabel).toHaveText('cards');
+  await page.keyboard.press('Escape');
+
+  // after WHERE the columns come first, before any keyword (those are in upper case)
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('SELECT * FROM cards WHERE ');
+  await page.keyboard.press('Control+Space');
+  await expect(tooltip).toContainText('status');
+  await expect(firstLabel).toHaveText(/^[a-z_]+$/);
+  await page.keyboard.press('Escape');
+
+  // after UPDATE with an alias the alias columns
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('UPDATE cards x SET x.sta');
+  await expect(tooltip).toContainText('status');
+  await page.keyboard.press('Escape');
+});
+
+test('a syntax error is underlined after a pause, with the parser message in the tooltip, and goes away when fixed', async () => {
+  const marks = page.locator('.cm-lintRange-error');
+  await page.locator('.cm-content').click();
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('SELECT * FRM cards;');
+  await page.keyboard.press('Escape');
+  await expect(marks).toHaveCount(1, { timeout: 10_000 });
+  await expect(marks).toHaveText('FRM');
+  await marks.hover();
+  await expect(page.locator('.cm-tooltip-lint')).toContainText('Possível erro de sintaxe');
+  await expect(page.locator('.cm-tooltip-lint')).toContainText("'FRM' is not valid");
+  // fixed: the mark goes
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('SELECT * FROM cards;');
+  await page.keyboard.press('Escape');
+  await expect(marks).toHaveCount(0, { timeout: 10_000 });
+  // an unfinished statement under the cursor is not an error yet
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('SELECT * FROM cards WHERE');
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(1500);
+  await expect(marks).toHaveCount(0);
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.press('Delete');
+});
+
 test('Cmd+T picker filters by "api pro" and opens a tab; Cmd+W closes it', async () => {
   await page.keyboard.press('ControlOrMeta+T');
   const picker = page.getByRole('dialog', { name: 'Nova aba' });

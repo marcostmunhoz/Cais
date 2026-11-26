@@ -11,5 +11,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['tests/unit/**/*.test.ts'],
+    // dt-sql-parser ships ES modules without file extensions and without "type": "module": the bundler reads it, Node cannot
+    server: { deps: { inline: ['dt-sql-parser'] } },
   },
 });

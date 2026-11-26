@@ -4,7 +4,7 @@ import { engineVersionLabel, getDialect } from '@shared/dialects/registry';
 
 describe('engine capabilities', () => {
   it('MySQL takes the three modes and grid editing', () => {
-    expect(capabilitiesOf('mysql')).toEqual({ modes: ['read-only', 'transaction', 'autocommit'], gridEdit: true, lazyColumns: false, dryRun: false });
+    expect(capabilitiesOf('mysql')).toEqual({ modes: ['read-only', 'transaction', 'autocommit'], gridEdit: true, lazyColumns: false, dryRun: false, syntaxCheck: true });
   });
   it('the initial mode follows production and what the engine accepts', () => {
     const mysql = capabilitiesOf('mysql');
@@ -28,7 +28,7 @@ describe('connection target', () => {
 
 describe('BigQuery engine', () => {
   it('only reads: one mode, no grid editing', () => {
-    expect(capabilitiesOf('bigquery')).toEqual({ modes: ['read-only'], gridEdit: false, lazyColumns: true, dryRun: true });
+    expect(capabilitiesOf('bigquery')).toEqual({ modes: ['read-only'], gridEdit: false, lazyColumns: true, dryRun: true, syntaxCheck: false });
     expect(initialModeFor(capabilitiesOf('bigquery'), false)).toBe('read-only');
     expect(initialModeFor(capabilitiesOf('bigquery'), true)).toBe('read-only');
   });

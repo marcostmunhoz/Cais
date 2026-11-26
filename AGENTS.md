@@ -22,7 +22,7 @@ Antes de mudar comportamento, leia [docs/comportamento.md](docs/comportamento.md
 
 - **Segredo nunca sai do processo principal** em texto puro e nunca vai para log. A senha entra pelo IPC só ao salvar e nunca volta ao renderer. Agentes nunca recebem senha, token, host nem id de credencial, nem o projeto do Google Cloud e e-mails de conta (BigQuery).
 - **O processo principal nunca confia no renderer:** todo canal de IPC valida a entrada com zod, só aceita a janela principal, e o SQL é reclassificado pelo dialeto antes de executar.
-- **A interface não conhece o motor:** dialeto, classificação de comandos e introspecção vêm de `src/shared/dialects` e `src/main/drivers`.
+- **A interface não conhece o motor:** dialeto, classificação de comandos, escopo do comando para o autocomplete (`Dialect.analyze`) e introspecção vêm de `src/shared/dialects` e `src/main/drivers`; o que um motor faz ou não (colunas por dataset, verificação de sintaxe local) vem de `src/shared/engines.ts`.
 - **O app nunca altera o `gcloud`:** só três comandos, todos de leitura: `gcloud auth list`, `gcloud sql generate-login-token` e `gcloud auth print-access-token` (token do BigQuery, com cache próprio de 50 minutos).
 - **Toda requisição de agente é reclassificada no main** (`src/main/agents/policy.ts`). Agente não aprova, não liga o acesso, não muda o nível de um ambiente e não edita nem apaga script. O socket só existe com o acesso ligado (`settings.json`, desligado por padrão). Em produção, escrita de agente sempre pede aprovação. Nada de agente roda sem a Trilha.
 - **Somente leitura em duas camadas:** a lista do app e, no servidor, `READ ONLY` (MySQL) ou o dry run que só deixa passar `SELECT` (BigQuery, repetido dentro de `BigquerySession.execute`). No classificador, na dúvida, recusa.
@@ -39,7 +39,8 @@ Antes de mudar comportamento, leia [docs/comportamento.md](docs/comportamento.md
 - O lockfile muda conforme a versão do npm: usar npm 11.x nas duas máquinas. Scripts de instalação de dependências precisam estar no `allowScripts` do `package.json` (`npm install-scripts ls` tem de ficar sem pendências).
 - `src/shared` é TypeScript puro: sem Node, sem DOM.
 - `vitest` fica na 4.x (a 5.x exige Node 22). O `typescript` está na 7.x: sem `baseUrl`, os aliases usam `paths` com `./`.
-- A CSP mantém `style-src 'unsafe-inline'` porque o CodeMirror injeta estilos.
+- A CSP mantém `style-src 'unsafe-inline'` porque o CodeMirror injeta estilos. A verificação de sintaxe do MySQL roda num Web Worker de módulo (`src/renderer/lib/syntax/worker.ts`); o `script-src 'self'` basta, sem `worker-src`.
+- `dt-sql-parser` (gramática do sublinhado de erro, dependência de desenvolvimento empacotada no worker) entrega módulos ES sem extensão: o Vitest o lê por `server.deps.inline` nos dois configs. A lista do que a gramática lê errado (`src/renderer/lib/syntax/mysql.ts`) tem teste contra o vocabulário dela (`tests/unit/syntax-mysql.test.ts`): ao trocar a versão do pacote, o teste mostra o que mudou.
 
 ## Comandos
 

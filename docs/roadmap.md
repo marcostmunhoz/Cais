@@ -23,6 +23,15 @@ O que está fora da versão atual, com o que cada item exige, e o que ainda falt
 | **Vários motivos de aprovação** | `approval_reason` é um motivo só: quando função e bytes pedem aprovação juntos, vem o da função (os bytes aparecem por comando no modal). Mostrar todos pede uma lista no modelo, na Trilha e no modal. |
 | **Progresso com contagem ao ler colunas** | A linha do dataset já mostra "Lendo…". A contagem pediria um canal novo do processo principal para o renderer, por alguns segundos de espera. |
 
+## Editor
+
+| Item | O que exige |
+|---|---|
+| **Colunas de tabela derivada e de CTE no autocomplete** | O escopo já separa a subquery, a tabela derivada e o corpo da CTE, mas só tabelas do schema têm colunas. Para `WITH w AS (SELECT a, b FROM t) SELECT | FROM w` oferecer `a` e `b`, o escopo teria de ler a lista do `SELECT` (nomes e apelidos, `*` expandido pelo schema). |
+| **Palavra-chave que a gramática espera** | O `dt-sql-parser` sabe quais palavras-chave cabem na posição (`getSuggestionAtCaretPosition`), mas pede um parse por tecla e, no comando incompleto, tropeça. Hoje a ordem de palavra-chave, tabela e coluna vem da palavra antes do cursor. |
+| **Verificação de sintaxe de DDL, `SET`, `SHOW` e rotinas** | A gramática de terceiros lê errado parte do que o MySQL 8.4 aceita. Cada verbo entra na lista de verificados quando o corpus válido dele (`tests/support/mysql-corpus.ts`, conferido no servidor pelo `PREPARE`) passar sem marcação. |
+| **Erro de sintaxe do BigQuery** | Não há gramática do GoogleSQL embutida; o erro de sintaxe vem do servidor. |
+
 ## Técnico
 
 | Item | Por quê |

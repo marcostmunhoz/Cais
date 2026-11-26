@@ -3,6 +3,7 @@ import { classify, identifiers, warnings } from './classifier';
 import { GOOGLESQL_KEYWORDS } from './keywords';
 import { isUnknownUnqualifiedFunction } from './functions';
 import { agentCodeProblem } from './lexer';
+import { analyze } from './scope';
 import { appendStatements, splitStatements } from './splitter';
 
 /** A dataset name: letters, digits and underscore, up to 1024 characters. */
@@ -44,6 +45,7 @@ export const bigqueryDialect: Dialect = {
   classify,
   warnings,
   identifiers,
+  analyze,
   agentCodeProblem,
   quoteIdent,
   agentRules,

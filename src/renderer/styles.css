@@ -692,6 +692,34 @@ kbd {
   color: var(--text-primary);
 }
 
+/* syntax diagnostics: a thin wavy underline and a tooltip in the same look as the completion's */
+.editor-host .cm-editor .cm-lintRange-error {
+  background-image: none;
+  padding-bottom: 0;
+  text-decoration: underline wavy color-mix(in srgb, var(--danger) 70%, transparent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.cm-tooltip.cm-tooltip-lint {
+  background: var(--surface-3);
+  border: 0.5px solid var(--border-strong);
+  border-radius: 6px;
+  box-shadow: var(--shadow);
+  padding: 3px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  max-width: 420px;
+}
+
+.cm-tooltip-lint .cm-diagnostic {
+  color: var(--text-primary);
+  margin-left: 0;
+  padding: 3px 8px;
+  border-left: 3px solid var(--danger);
+  white-space: normal;
+}
+
 .cm-completionDetail {
   color: var(--text-muted);
   font-style: normal;

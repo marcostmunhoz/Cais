@@ -11,12 +11,14 @@ export interface EngineCapabilities {
   lazyColumns?: boolean;
   /** The engine answers a dry run (type and estimated bytes of a statement) before it runs. */
   dryRun?: boolean;
+  /** The editor checks the syntax of a statement while it is typed, with a grammar of its own (no server involved). */
+  syntaxCheck?: boolean;
 }
 
 const CAPABILITIES: Record<Engine, EngineCapabilities> = {
-  mysql: { modes: ['read-only', 'transaction', 'autocommit'], gridEdit: true, lazyColumns: false, dryRun: false },
+  mysql: { modes: ['read-only', 'transaction', 'autocommit'], gridEdit: true, lazyColumns: false, dryRun: false, syntaxCheck: true },
   // BigQuery only reads in this version: no transactions, no auto-commit, no editing in the grid
-  bigquery: { modes: ['read-only'], gridEdit: false, lazyColumns: true, dryRun: true },
+  bigquery: { modes: ['read-only'], gridEdit: false, lazyColumns: true, dryRun: true, syntaxCheck: false },
 };
 
 export function capabilitiesOf(engine: Engine): EngineCapabilities {

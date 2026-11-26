@@ -4,6 +4,7 @@ import { classify, identifiers, warnings } from './classifier';
 import { MYSQL_KEYWORDS } from './keywords';
 import { appendStatements, splitStatements } from './splitter';
 import { agentCodeProblem } from './lexer';
+import { analyze } from './scope';
 import { buildUpdate, quoteIdent, quoteLiteral, valueKind } from './literals';
 
 /** MySQL identifiers are at most 64 characters; anything else in --database is refused before it reaches a modal. */
@@ -33,6 +34,7 @@ export const mysqlDialect: Dialect = {
   classify,
   warnings,
   identifiers,
+  analyze,
   agentCodeProblem,
   quoteIdent,
   agentRules,
