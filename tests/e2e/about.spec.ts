@@ -3,7 +3,7 @@ import { createServer, type IncomingHttpHeaders, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
-import { launch, root, setTheme, shortTempDir, shots } from './helpers';
+import { launch, root, setTheme, shoot, shortTempDir, shots } from './helpers';
 
 // The About window: opened from the application menu, shows the version and the runtime, never reaches the
 // network on its own, and asks the releases API only when the person clicks Verificar. The API is a local fake
@@ -125,9 +125,9 @@ test('the window shows the version, the runtime, the license and the logo; nothi
   await expect(about().getByTestId('about-check-result')).toHaveCount(0);
   expect(seen).toHaveLength(0);
   await setTheme(app, page, 'light');
-  await page.screenshot({ path: join(shots, 'about-light.png') });
+  await shoot(page, join(shots, 'about-light.png'));
   await setTheme(app, page, 'dark');
-  await page.screenshot({ path: join(shots, 'about-dark.png') });
+  await shoot(page, join(shots, 'about-dark.png'));
   await setTheme(app, page, 'light');
 });
 
@@ -148,7 +148,7 @@ test('Verificar finds a newer version and links to that release, built from the 
   expect(seen[0]!.headers.cookie).toBeUndefined();
   await about().getByTestId('about-open-release').click();
   await expect.poll(opened).toEqual(['https://github.com/marcostmunhoz/Cais', 'https://github.com/marcostmunhoz/Cais/releases/tag/v99.0.0']);
-  await page.screenshot({ path: join(shots, 'about-newer.png') });
+  await shoot(page, join(shots, 'about-newer.png'));
 });
 
 test('copying the info puts the versions on the clipboard', async () => {
