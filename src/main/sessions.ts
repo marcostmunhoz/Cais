@@ -470,9 +470,9 @@ export class SessionManager {
       // fetching more rows runs the statement again: only for a plain read
       throw new CaisError(m().mainSessions.refetchNotRead, 'refetch-not-read');
     }
-    if (req.origin === 'grid' && (req.refetch || plan.some(({ c }) => c.kind !== 'write' || c.verb !== 'UPDATE'))) {
-      // the label "Edição na grade" on the trail is only for the UPDATEs the grid generates
-      throw new CaisError(m().mainSessions.gridNotUpdate, 'grid-not-update');
+    if (req.origin === 'grid' && (req.refetch || plan.some(({ c }) => c.kind !== 'write' || (c.verb !== 'UPDATE' && c.verb !== 'DELETE')))) {
+      // the label "Edição na grade" on the trail is only for the UPDATEs and DELETEs the grid generates
+      throw new CaisError(m().mainSessions.gridNotEdit, 'grid-not-edit');
     }
 
     // 1. refuse before anything leaves the app

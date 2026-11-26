@@ -128,7 +128,7 @@ test('in Transação, Aplicar runs the UPDATE, shows what the server wrote and w
   await expect(cell(0, 'name')).not.toHaveAttribute('data-edited', 'true');
   await expect(bar()).toHaveCount(0);
   await expect(page.getByTestId('grid-edit-notice')).toHaveCount(0);
-  await expect(page.locator('.toast')).toHaveText('2 UPDATEs rodaram na transação. Faça Commit para gravar.');
+  await expect(page.locator('.toast')).toHaveText('Rodaram na transação: 2 UPDATEs. Faça Commit para gravar.');
   // another session does not see it before the Commit
   expect(await dbValue('SELECT name FROM grid_items WHERE id = 1')).toBe('Caneta');
 
@@ -582,3 +582,184 @@ test('Gerar INSERT: a table without a primary key only has the plain variant, an
   await page.keyboard.press('Escape');
   await db.query('DROP TABLE grid_nopk');
 });
+
+test('Excluir linha: mark from the cell menu, the row gutter and the Delete key; a marked row keeps its edits and cannot be edited', async () => {
+  await db.query('CREATE TABLE grid_del (id INT PRIMARY KEY, v VARCHAR(20) NOT NULL)');
+  await db.query("INSERT INTO grid_del VALUES (1, 'a'), (2, 'b'), (3, 'c'), (4, 'd'), (5, 'e')");
+  // a table that cascades from it, there from the start so the environment tree knows the foreign key
+  await db.query('CREATE TABLE grid_del_kids (id INT PRIMARY KEY, parent_id INT, FOREIGN KEY (parent_id) REFERENCES grid_del (id) ON DELETE CASCADE)');
+  const gutter = (r: number) => page.locator(`[data-gr="${r}"]`);
+  const row = (r: number) => page.locator(`[role=row][aria-rowindex="${r + 1}"]`);
+
+  await page.getByTestId('env-dev').click();
+  await expect(page.getByTestId('conn-chip')).toHaveAttribute('data-status', 'connected', { timeout: 20_000 });
+  if (await page.getByTestId('txbar').count()) {
+    await page.getByTestId('txbar').getByRole('button', { name: 'Rollback' }).click();
+    await expect(page.getByTestId('txbar')).toHaveCount(0);
+  }
+  await page.getByRole('radio', { name: 'Auto-commit' }).click();
+  await expect(page.getByRole('radio', { name: 'Auto-commit' })).toHaveAttribute('aria-checked', 'true');
+  await run('SELECT id, v FROM grid_del ORDER BY id;');
+  await expect(cell(4, 'v')).toHaveText('e', { timeout: 20_000 });
+
+  // from the cell menu, with the shortcut shown in it
+  await editCell(1, 'v', 'b2');
+  await cell(1, 'v').click({ button: 'right' });
+  const del = page.getByRole('menuitem', { name: /^Excluir linha/ });
+  await expect(del).toContainText(process.platform === 'darwin' ? '⌫' : 'Delete');
+  await del.click();
+  await expect(row(1)).toHaveAttribute('data-deleted', 'true');
+  // the deletion wins: the edit stays stored but is no longer a change to apply
+  await expect(bar()).toHaveText(/1 exclusão/);
+  await expect(bar()).not.toContainText('alteração');
+
+  // a marked row does not open for editing and says why
+  await cell(1, 'v').dblclick();
+  await expect(editor()).toHaveCount(0);
+  await expect(page.getByTestId('grid-hint')).toHaveText('A linha está marcada para exclusão. Desfaça a exclusão para editá-la.');
+
+  // from the row gutter, and with the Delete key
+  await gutter(3).click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Excluir linha' }).click();
+  await expect(row(3)).toHaveAttribute('data-deleted', 'true');
+  await cell(4, 'v').click();
+  await page.keyboard.press('Delete');
+  await expect(row(4)).toHaveAttribute('data-deleted', 'true');
+  await expect(bar()).toContainText('3 exclusões');
+
+  await setTheme(app, page, 'light');
+  await page.screenshot({ path: join(shots, 'grid-delete-light.png') });
+  await setTheme(app, page, 'dark');
+  await page.screenshot({ path: join(shots, 'grid-delete-dark.png') });
+  await setTheme(app, page, 'light');
+
+  // Desfazer exclusão brings the edit back
+  await cell(1, 'v').click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Desfazer exclusão' }).click();
+  await expect(row(1)).not.toHaveAttribute('data-deleted', 'true');
+  await expect(cell(1, 'v')).toHaveText('b2');
+  await expect(bar()).toContainText('1 alteração em 1 linha');
+  await expect(bar()).toContainText('2 exclusões');
+
+  // several selected rows are all marked, and the menu counts them
+  await cell(0, 'v').click();
+  await cell(2, 'v').click({ modifiers: ['Shift'] });
+  await cell(1, 'v').click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Excluir 3 linhas' }).click();
+  await expect(bar()).toContainText('5 exclusões');
+  await expect(bar()).not.toContainText('alteração');
+  await page.getByTestId('edit-discard').click();
+  await expect(bar()).toHaveCount(0);
+  await expect(page.locator('[data-deleted="true"]')).toHaveCount(0);
+});
+
+test('Excluir linha: Gerar SQL puts the UPDATEs then the DELETEs in the editor, and runs nothing', async () => {
+  await run('SELECT id, v FROM grid_del ORDER BY id;');
+  await expect(cell(4, 'v')).toHaveText('e', { timeout: 20_000 });
+  await cell(0, 'v').click();
+  await page.keyboard.press('Delete');
+  await editCell(2, 'v', 'c2');
+  await cell(3, 'v').click();
+  await page.keyboard.press('Delete');
+  await expect(bar()).toContainText('1 alteração em 1 linha · 2 exclusões');
+  await page.getByTestId('edit-generate').click();
+  await expect(bar()).toHaveCount(0);
+  const text = await editorText();
+  const at = (sql: string) => text.indexOf(sql);
+  expect(at("UPDATE `cais_test`.`grid_del` SET `v` = 'c2' WHERE `id` = 3;")).toBeGreaterThan(-1);
+  expect(at('DELETE FROM `cais_test`.`grid_del` WHERE `id` = 1;')).toBeGreaterThan(at("UPDATE `cais_test`.`grid_del` SET `v` = 'c2'"));
+  expect(at('DELETE FROM `cais_test`.`grid_del` WHERE `id` = 4;')).toBeGreaterThan(at('DELETE FROM `cais_test`.`grid_del` WHERE `id` = 1;'));
+  expect(text).not.toMatch(/LIMIT/);
+  expect(await dbValue('SELECT COUNT(*) FROM grid_del')).toBe(5);
+});
+
+test('Excluir linha: Auto-commit always asks before deleting, then Aplicar deletes and reads the table again', async () => {
+  await run('SELECT id, v FROM grid_del ORDER BY id;');
+  await expect(cell(4, 'v')).toHaveText('e', { timeout: 20_000 });
+  await cell(1, 'v').click();
+  await page.keyboard.press('Delete');
+  await cell(3, 'v').click();
+  await page.keyboard.press('Delete');
+  await page.getByTestId('edit-apply').click();
+  const dialog = page.getByRole('dialog', { name: 'Excluir linhas em Auto-commit' });
+  await expect(dialog).toContainText('As 2 linhas marcadas serão excluídas do banco.');
+  await expect(dialog).toContainText('DELETE FROM `cais_test`.`grid_del` WHERE `id` = 2;');
+  await expect(dialog).toContainText('DELETE FROM `cais_test`.`grid_del` WHERE `id` = 4;');
+  await dialog.getByRole('button', { name: 'Cancelar' }).click();
+  expect(await dbValue('SELECT COUNT(*) FROM grid_del')).toBe(5);
+  await expect(bar()).toContainText('2 exclusões');
+
+  await page.getByTestId('edit-apply').click();
+  await page.getByRole('dialog', { name: 'Excluir linhas em Auto-commit' }).getByRole('button', { name: 'Excluir' }).click();
+  await expect(bar()).toHaveCount(0);
+  await expect(page.locator('[role=row][aria-rowindex]').filter({ has: page.locator('[data-col="v"]') })).toHaveCount(3);
+  await expect(cell(1, 'v')).toHaveText('c');
+  expect(await dbValue('SELECT COUNT(*) FROM grid_del')).toBe(3);
+  expect(await dbValue('SELECT GROUP_CONCAT(id ORDER BY id) FROM grid_del')).toBe('1,3,5');
+
+  // the Trilha labels the DELETE as a grid edit
+  await page.getByTestId('trail-entry').click();
+  const trail = page.getByRole('dialog', { name: 'Trilha' });
+  await trail.getByTestId('trail-row').filter({ hasText: 'DELETE FROM `cais_test`.`grid_del` WHERE `id` = 2' }).first().click();
+  await expect(trail.getByTestId('trail-detail')).toContainText('Edição na grade');
+  await page.keyboard.press('Escape');
+  await expect(trail).toHaveCount(0);
+});
+
+test('Excluir linha: in Transação nothing is asked and Commit saves; in Somente leitura Aplicar is disabled; a cascade is warned about', async () => {
+  await db.query('INSERT INTO grid_del_kids VALUES (1, 3)');
+  await page.getByTestId('env-dev').click();
+  await page.getByRole('radio', { name: 'Transação' }).click();
+  await expect(page.getByRole('radio', { name: 'Transação' })).toHaveAttribute('aria-checked', 'true');
+  await run('SELECT id, v FROM grid_del ORDER BY id;');
+  await expect(cell(2, 'v')).toHaveText('e', { timeout: 20_000 });
+  await cell(1, 'v').click();
+  await page.keyboard.press('Delete');
+  await page.getByTestId('edit-apply').click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  const txbar = page.getByTestId('txbar');
+  await expect(txbar).toBeVisible();
+  await expect(page.locator('.toast')).toHaveText('Rodaram na transação: 1 DELETE. Faça Commit para gravar.');
+  await expect(page.locator('[role=row][aria-rowindex]').filter({ has: page.locator('[data-col="v"]') })).toHaveCount(2);
+  // another session still sees the row before the Commit
+  expect(await dbValue('SELECT COUNT(*) FROM grid_del')).toBe(3);
+  await txbar.getByRole('button', { name: 'Commit' }).click();
+  await expect(txbar).toHaveCount(0);
+  expect(await dbValue('SELECT COUNT(*) FROM grid_del')).toBe(2);
+  // the cascade took the child with it
+  expect(await dbValue('SELECT COUNT(*) FROM grid_del_kids')).toBe(0);
+
+  // Somente leitura: Aplicar is disabled, Gerar SQL works
+  await page.getByRole('radio', { name: 'Somente leitura' }).click();
+  await expect(page.getByRole('radio', { name: 'Somente leitura' })).toHaveAttribute('aria-checked', 'true');
+  await run('SELECT id, v FROM grid_del ORDER BY id;');
+  await expect(cell(1, 'v')).toHaveText('e', { timeout: 20_000 });
+  await cell(0, 'v').click();
+  await page.keyboard.press('Delete');
+  await expect(page.getByTestId('edit-apply')).toBeDisabled();
+  await expect(page.getByTestId('edit-generate')).toBeEnabled();
+  await page.getByTestId('edit-discard').click();
+  await expect(bar()).toHaveCount(0);
+});
+
+test('Excluir linha: a table that cascades is warned about in the bar and in the confirmation', async () => {
+  await db.query('INSERT INTO grid_del_kids VALUES (2, 1)');
+  await page.getByRole('radio', { name: 'Auto-commit' }).click();
+  await expect(page.getByRole('radio', { name: 'Auto-commit' })).toHaveAttribute('aria-checked', 'true');
+  await run('SELECT id, v FROM grid_del ORDER BY id;');
+  await expect(cell(0, 'v')).toHaveText('a', { timeout: 20_000 });
+  await cell(0, 'v').click();
+  await page.keyboard.press('Delete');
+  const warn = page.getByTestId('grid-delete-warning');
+  await expect(warn).toContainText('chaves estrangeiras em cascata');
+  await expect(warn).toContainText('grid_del_kids');
+  await page.getByTestId('edit-apply').click();
+  const dialog = page.getByRole('dialog', { name: 'Excluir linhas em Auto-commit' });
+  await expect(dialog).toContainText('chaves estrangeiras em cascata');
+  await dialog.getByRole('button', { name: 'Cancelar' }).click();
+  await page.getByTestId('edit-discard').click();
+  expect(await dbValue('SELECT COUNT(*) FROM grid_del_kids')).toBe(1);
+  await db.query('DROP TABLE grid_del_kids');
+  await db.query('DROP TABLE grid_del');
+});
+

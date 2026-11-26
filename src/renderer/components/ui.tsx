@@ -22,6 +22,8 @@ export interface MenuEntry {
   label: string;
   onSelect?: () => void;
   separatorBefore?: boolean;
+  /** The keyboard shortcut of the entry, shown at its right edge. */
+  shortcut?: string;
   /** Entries of a submenu opened to the right. */
   children?: MenuEntry[];
 }
@@ -64,6 +66,7 @@ export function ContextMenu({ x, y, items, onClose }: { x: number; y: number; it
             }}
           >
             <span style={{ flex: 1 }}>{item.label}</span>
+            {item.shortcut && <kbd className="menu-shortcut">{item.shortcut}</kbd>}
             {item.children && <span aria-hidden="true">›</span>}
           </button>
           {item.children && sub === item.label && (

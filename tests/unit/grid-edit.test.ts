@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { mysqlDialect } from '@shared/dialects/mysql';
-import { buildInsert, buildUpdate, buildUpdateLocated, quoteLiteral, valueKind } from '@shared/dialects/mysql/literals';
+import { bigqueryDialect } from '@shared/dialects/bigquery';
+import { buildDelete, buildInsert, buildUpdate, buildUpdateLocated, quoteLiteral, valueKind } from '@shared/dialects/mysql/literals';
 import {
   buildCellUpdates,
   buildGridInsert,
+  buildGridStatements,
   buildGridUpdates,
+  deleteReach,
+  hasPending,
   cellLock,
   gridEditability,
   insertability,
@@ -13,7 +17,9 @@ import {
   pendingCount,
   planAppend,
   remapCells,
+  remapRows,
   sameCell,
+  withDeleted,
   type EditTarget,
   type InsertTarget,
 } from '@shared/grid';
@@ -438,7 +444,7 @@ describe('grid edits to UPDATEs', () => {
       "UPDATE `app`.`people` SET `name` = 'Caio d''Ávila' WHERE `id` = 3",
     ]);
     expect(mysqlDialect.splitStatements(sql.map((s) => s + ';').join('\n'))).toHaveLength(2);
-    expect(pendingCount({ 2: { 1: 'x' }, 0: { 2: null, 1: 'y' } })).toEqual({ changes: 3, rows: 2 });
+    expect(pendingCount({ 2: { 1: 'x' }, 0: { 2: null, 1: 'y' } })).toEqual({ changes: 3, rows: 2, deletions: 0, total: 3 });
   });
 
   it('parses what the person typed by column type', () => {
@@ -765,5 +771,156 @@ describe('Gerar INSERT: buildGridInsert', () => {
 
   it('has a row limit', () => {
     expect(MAX_INSERT_ROWS).toBe(1000);
+  });
+});
+
+describe('buildDelete (MySQL)', () => {
+  it('qualifies the table and matches the whole key, without LIMIT', () => {
+    const sql = buildDelete({
+      database: 'app',
+      table: 'order_items',
+      where: [
+        { column: 'order_id', type: 'bigint', value: '9007199254740993' },
+        { column: 'sku', type: 'varchar(20)', value: "A'1" },
+      ],
+    });
+    expect(sql).toBe("DELETE FROM `app`.`order_items` WHERE `order_id` = 9007199254740993 AND `sku` = 'A''1'");
+    expect(sql).not.toMatch(/LIMIT/i);
+    // it reads as exactly one DELETE to the Cais itself, so the main accepts it under the grid label
+    const parts = mysqlDialect.splitStatements(sql + ';');
+    expect(parts).toHaveLength(1);
+    const c = mysqlDialect.classify(sql);
+    expect(c.kind).toBe('write');
+    expect(c.verb).toBe('DELETE');
+    expect(mysqlDialect.warnings(sql)).toEqual([]);
+  });
+
+  it('quotes hostile identifiers and values so nothing escapes the statement', () => {
+    const sql = buildDelete({
+      database: 'a`b',
+      table: 'c; DROP TABLE x',
+      where: [{ column: 'id', type: 'varchar(20)', value: "1' OR '1'='1" }],
+    });
+    expect(sql).toBe("DELETE FROM `a``b`.`c; DROP TABLE x` WHERE `id` = '1'' OR ''1''=''1'");
+    expect(mysqlDialect.splitStatements(sql + ';')).toHaveLength(1);
+  });
+
+  it('refuses a NULL key value and an empty key', () => {
+    expect(() => buildDelete({ database: 'app', table: 't', where: [{ column: 'id', type: 'int', value: null }] })).toThrow();
+    expect(() => buildDelete({ database: 'app', table: 't', where: [] })).toThrow();
+  });
+
+  it('BigQuery has none', () => {
+    expect(() => bigqueryDialect.buildDelete({ database: 'd', table: 't', where: [{ column: 'id', type: 'INT64', value: 1 }] })).toThrow();
+  });
+});
+
+describe('grid deletions', () => {
+  const e = editability([src('id'), src('name', { name: 'nome' }), src('email')], [
+    [1, 'Ana', 'ana@x'],
+    [2, 'Bia', null],
+    [3, 'Caio', 'c@x'],
+    [4, 'Duda', 'd@x'],
+  ]) as EditTarget;
+  const rows: CellValue[][] = [
+    [1, 'Ana', 'ana@x'],
+    [2, 'Bia', null],
+    [3, 'Caio', 'c@x'],
+    [4, 'Duda', 'd@x'],
+  ];
+
+  it('UPDATEs first, then the DELETEs, each in row order', () => {
+    const out = buildGridStatements(mysqlDialect, e, rows, { 3: { 1: 'D' }, 0: { 1: 'A' } }, [2, 1]);
+    expect(out.map((s) => [s.row, s.verb])).toEqual([
+      [0, 'UPDATE'],
+      [3, 'UPDATE'],
+      [1, 'DELETE'],
+      [2, 'DELETE'],
+    ]);
+    expect(out[2]!.sql).toBe('DELETE FROM `app`.`people` WHERE `id` = 2');
+    for (const s of out) expect(mysqlDialect.splitStatements(s.sql + ';')).toHaveLength(1);
+  });
+
+  it('a marked row gets no UPDATE, whatever edits it holds; unmarking brings them back', () => {
+    const cells = { 1: { 1: 'Bia2' }, 0: { 1: 'A' } };
+    const marked = buildGridStatements(mysqlDialect, e, rows, cells, [1]);
+    expect(marked.map((s) => [s.row, s.verb])).toEqual([
+      [0, 'UPDATE'],
+      [1, 'DELETE'],
+    ]);
+    expect(marked.some((s) => s.sql.includes('Bia2'))).toBe(false);
+    const unmarked = buildGridStatements(mysqlDialect, e, rows, cells, []);
+    expect(unmarked.map((s) => [s.row, s.verb])).toEqual([
+      [0, 'UPDATE'],
+      [1, 'UPDATE'],
+    ]);
+  });
+
+  it('only deletions: the statements are the DELETEs, and a key that is NULL throws', () => {
+    expect(buildGridStatements(mysqlDialect, e, rows, {}, [3]).map((s) => s.sql)).toEqual(['DELETE FROM `app`.`people` WHERE `id` = 4']);
+    expect(() => buildGridStatements(mysqlDialect, e, [[null, 'x', 'y']], {}, [0])).toThrow();
+    expect(() => buildGridStatements(mysqlDialect, e, rows, {}, [9])).toThrow();
+  });
+
+  it('counts: a marked row leaves the change count, and the total is what discarding loses', () => {
+    const cells = { 1: { 1: 'x', 2: 'y' }, 0: { 1: 'A' } };
+    expect(pendingCount(cells, [])).toEqual({ changes: 3, rows: 2, deletions: 0, total: 3 });
+    expect(pendingCount(cells, [1])).toEqual({ changes: 1, rows: 1, deletions: 1, total: 4 });
+    expect(pendingCount({}, [0, 2])).toEqual({ changes: 0, rows: 0, deletions: 2, total: 2 });
+    expect(hasPending({}, [])).toBe(false);
+    expect(hasPending({}, [3])).toBe(true);
+    expect(hasPending({ 0: { 1: 'x' } }, [])).toBe(true);
+  });
+
+  it('marks and unmarks rows, sorted and without repeats', () => {
+    expect(withDeleted([], [3, 1, 3], true)).toEqual([1, 3]);
+    expect(withDeleted([1, 3], [2, 3], true)).toEqual([1, 2, 3]);
+    expect(withDeleted([1, 2, 3], [2, 9], false)).toEqual([1, 3]);
+  });
+
+  it('finds the marked rows again by their key after a refresh; rows that are gone are dropped', () => {
+    const fresh: CellValue[][] = [
+      [4, 'Duda', 'd@x'],
+      [2, 'Bia', null],
+      [9, 'Nova', 'n@x'],
+    ];
+    expect(remapRows(e.key, rows, fresh, [1, 2, 3])).toEqual([0, 1]);
+    expect(remapRows(e.key, rows, fresh, [])).toEqual([]);
+  });
+});
+
+describe('deleteReach', () => {
+  const tree = (extra: Partial<SchemaTable>, db: Partial<SchemaTree['databases'][number]> = {}, complete: boolean | undefined = true): SchemaTree => ({
+    foreignKeysComplete: complete,
+    databases: [{ name: 'app', tables: [{ name: 'people', type: 'table', columns: [], ...extra }], ...db }],
+  });
+
+  it('knows nothing without the table', () => {
+    expect(deleteReach(undefined, 'app', 'people')).toBeNull();
+    expect(deleteReach(tree({}), 'app', 'other')).toBeNull();
+  });
+
+  it('a plain table reaches nothing else', () => {
+    expect(deleteReach(tree({}), 'app', 'people')).toEqual({ cascades: [], triggers: false, unknown: false });
+  });
+
+  it('reports cascades and triggers the schema shows', () => {
+    expect(deleteReach(tree({ cascadedBy: ['app.orders'], triggers: ['BEGIN END'] }), 'app', 'people')).toEqual({
+      cascades: ['app.orders'],
+      triggers: true,
+      unknown: false,
+    });
+  });
+
+  it('metadata that could not be read makes the absence of a cascade prove nothing', () => {
+    expect(deleteReach(tree({}, {}, false), 'app', 'people')!.unknown).toBe(true);
+    expect(deleteReach(tree({}, { partial: true }), 'app', 'people')!.unknown).toBe(true);
+    expect(deleteReach(tree({}, { triggersVisible: false }), 'app', 'people')!.unknown).toBe(true);
+    // a tree from a server that does not say (older snapshot) is not "incomplete"
+    expect(deleteReach(tree({}, {}, undefined), 'app', 'people')!.unknown).toBe(false);
+  });
+
+  it('is found by a name that differs only in case when it is the only one', () => {
+    expect(deleteReach(tree({ cascadedBy: ['app.o'] }), 'APP', 'People')!.cascades).toEqual(['app.o']);
   });
 });

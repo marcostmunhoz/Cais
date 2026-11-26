@@ -53,6 +53,7 @@ export const bigqueryDialect: Dialect = {
   buildUpdate: unsupported('UPDATE'),
   buildUpdateLocated: unsupported('UPDATE'),
   buildInsert: unsupported('INSERT'),
+  buildDelete: unsupported('DELETE'),
 };
 
 export { splitStatements, appendStatements, classify, warnings, identifiers, agentCodeProblem };

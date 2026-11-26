@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { shortcutText, type ShortcutId } from '@shared/shortcuts';
+import { isDeleteRowsKey, shortcutText, type ShortcutId } from '@shared/shortcuts';
 
-const IDS: ShortcutId[] = ['run', 'cancel', 'save', 'saveAs', 'newTab', 'open', 'closeTab', 'runAll'];
+const IDS: ShortcutId[] = ['run', 'cancel', 'save', 'saveAs', 'newTab', 'open', 'closeTab', 'runAll', 'deleteRows'];
 
 describe('shortcutText', () => {
   it('uses symbols on macOS', () => {
@@ -23,5 +23,33 @@ describe('shortcutText', () => {
       const labels = IDS.map((id) => shortcutText(id, platform));
       expect(new Set(labels).size).toBe(IDS.length);
     }
+  });
+});
+
+describe('isDeleteRowsKey', () => {
+  const key = (k: string, mods: Partial<{ metaKey: boolean; ctrlKey: boolean; altKey: boolean; shiftKey: boolean }> = {}) => ({
+    key: k,
+    metaKey: false,
+    ctrlKey: false,
+    altKey: false,
+    shiftKey: false,
+    ...mods,
+  });
+
+  it('matches the shortcut text: Delete everywhere, and Backspace on macOS where the key is labelled delete', () => {
+    expect(shortcutText('deleteRows', 'linux')).toBe('Delete');
+    expect(isDeleteRowsKey(key('Delete'), 'linux')).toBe(true);
+    expect(isDeleteRowsKey(key('Delete'), 'darwin')).toBe(true);
+    expect(shortcutText('deleteRows', 'darwin')).toBe('⌫');
+    expect(isDeleteRowsKey(key('Backspace'), 'darwin')).toBe(true);
+    expect(isDeleteRowsKey(key('Backspace'), 'linux')).toBe(false);
+  });
+
+  it('never with a modifier, and never for other keys', () => {
+    for (const mods of [{ metaKey: true }, { ctrlKey: true }, { altKey: true }, { shiftKey: true }]) {
+      expect(isDeleteRowsKey(key('Delete', mods), 'linux')).toBe(false);
+      expect(isDeleteRowsKey(key('Backspace', mods), 'darwin')).toBe(false);
+    }
+    expect(isDeleteRowsKey(key('x'), 'darwin')).toBe(false);
   });
 });

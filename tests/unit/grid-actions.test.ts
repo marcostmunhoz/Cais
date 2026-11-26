@@ -12,7 +12,7 @@ interface Run {
   connecting: boolean;
   results: StatementResult[];
   active: number;
-  edits?: { result: StatementResult; cells: Record<number, Record<number, unknown>> };
+  edits?: { result: StatementResult; cells: Record<number, Record<number, unknown>>; deleted: number[] };
   editNotice?: string[];
 }
 interface State {
@@ -27,6 +27,9 @@ interface State {
 }
 interface Actions {
   applyEdits(tabId: string): Promise<void>;
+  generateUpdates(tabId: string): Promise<void>;
+  markRowsDeleted(tabId: string, result: StatementResult, rows: readonly number[], marked: boolean): void;
+  setCellEdit(tabId: string, result: StatementResult, row: number, column: number, value: unknown): void;
   generateCellUpdates(tabId: string, result: StatementResult, column: number, rows: readonly number[]): Promise<void>;
   generateInserts(tabId: string, result: StatementResult, rows: readonly number[], withKey: boolean): void;
   registerEditor(handle: unknown): void;
@@ -106,7 +109,7 @@ beforeEach(() => {
     catalog: { ...store.getState().catalog, environments: [dev] },
     sessions: { t: session },
     schemas: { dev: { status: 'ready', tree: tree(['id']) } },
-    runs: { t: { running: false, connecting: false, results: [result], active: 0, edits: { result, cells: { 0: { 1: 'x' } } } } },
+    runs: { t: { running: false, connecting: false, results: [result], active: 0, edits: { result, cells: { 0: { 1: 'x' } }, deleted: [] } } },
     confirm: null,
     toast: null,
   });
@@ -137,7 +140,7 @@ describe('grid edits in the renderer', () => {
 
   it('after Aplicar, a re-read that lands on another database keeps the old result and its remaining edits', async () => {
     store.setState({
-      runs: { t: { running: false, connecting: false, results: [result], active: 0, edits: { result, cells: { 0: { 1: 'x' }, 1: { 1: 'y' } } } } },
+      runs: { t: { running: false, connecting: false, results: [result], active: 0, edits: { result, cells: { 0: { 1: 'x' }, 1: { 1: 'y' } }, deleted: [] } } },
     });
     api.schema.get.mockResolvedValueOnce(tree(['id']));
     api.session.run
@@ -174,6 +177,175 @@ describe('grid edits in the renderer', () => {
   });
 });
 
+describe('row deletions in the renderer', () => {
+  const ok = (index: number, verb: string, affectedRows = 1) => ({ index, sql: 's', kind: 'write', verb, durationMs: 1, affectedRows });
+  const mark = (rows: number[], cells: Record<number, Record<number, unknown>> = {}) => {
+    store.setState({ runs: { t: { running: false, connecting: false, results: [result], active: 0, edits: { result, cells, deleted: rows } } } });
+  };
+  const insertText = vi.fn();
+  beforeEach(() => {
+    insertText.mockClear();
+    actions.registerEditor({ getSelection: () => ({ cursor: 0 }), focus: vi.fn(), insertText });
+    api.schema.get.mockResolvedValue(tree(['id']));
+  });
+  afterAll(() => actions.registerEditor(null));
+
+  it('marks and unmarks rows; a pending edit on a marked row stays and comes back', () => {
+    store.setState({ runs: { t: { running: false, connecting: false, results: [result], active: 0 } } });
+    actions.markRowsDeleted('t', result, [1, 0], true);
+    expect(store.getState().runs.t!.edits).toEqual({ result, cells: {}, deleted: [0, 1] });
+    actions.setCellEdit('t', result, 0, 1, 'zz');
+    actions.markRowsDeleted('t', result, [0], false);
+    expect(store.getState().runs.t!.edits).toEqual({ result, cells: { 0: { 1: 'zz' } }, deleted: [1] });
+    actions.markRowsDeleted('t', result, [1], false);
+    actions.setCellEdit('t', result, 0, 1, undefined);
+    // nothing pending any more: no edits object at all
+    expect(store.getState().runs.t!.edits).toBeUndefined();
+  });
+
+  it('ignores a result that is no longer the tab\'s', () => {
+    actions.markRowsDeleted('t', read(), [0], true);
+    expect(store.getState().runs.t!.edits?.deleted).toEqual([]);
+  });
+
+  it('Gerar SQL puts the UPDATEs, then the DELETEs, in the editor; a marked row gets no UPDATE', async () => {
+    mark([0], { 0: { 1: 'x' }, 1: { 1: 'y' } });
+    await actions.generateUpdates('t');
+    expect(insertText).toHaveBeenCalledWith("UPDATE `shop`.`items` SET `name` = 'y' WHERE `id` = 2;\nDELETE FROM `shop`.`items` WHERE `id` = 1;");
+    expect(api.session.run).not.toHaveBeenCalled();
+    expect(store.getState().runs.t!.edits).toBeUndefined();
+  });
+
+  it('Aplicar always asks in Auto-commit when rows are marked, even outside production, and lists the DELETEs', async () => {
+    mark([1]);
+    await actions.applyEdits('t');
+    const confirm = store.getState().confirm as unknown as { title: string; body: string; items: string[]; notes?: string[] };
+    expect(confirm.title).toBe('Excluir linhas em Auto-commit');
+    expect(confirm.body).toContain('A linha marcada será excluída');
+    expect(confirm.items).toEqual(['DELETE FROM `shop`.`items` WHERE `id` = 2;']);
+    expect(api.session.run).not.toHaveBeenCalled();
+  });
+
+  it('the confirmation warns about a known cascade and a trigger, and about metadata that could not be read', async () => {
+    const t = tree(['id']);
+    t.foreignKeysComplete = false;
+    t.databases[0]!.tables[0]!.cascadedBy = ['shop.order_lines'];
+    t.databases[0]!.tables[0]!.triggers = ['BEGIN END'];
+    api.schema.get.mockResolvedValue(t);
+    mark([0]);
+    await actions.applyEdits('t');
+    const notes = (store.getState().confirm as unknown as { notes: string[] }).notes;
+    expect(notes).toEqual([
+      'A tabela items tem chaves estrangeiras em cascata (ON DELETE ou ON UPDATE): excluir pode apagar ou alterar linhas de shop.order_lines.',
+      'A tabela items tem trigger: se algum for de exclusão, o que ele grava não entra na contagem de linhas.',
+      'Parte dos metadados do banco (triggers ou chaves estrangeiras) não pôde ser lida: a exclusão pode alcançar outras tabelas.',
+    ]);
+  });
+
+  it('in production the same confirmation as before, with the deletion said in it', async () => {
+    store.setState({ catalog: { ...store.getState().catalog, environments: [{ ...dev, production: true }] } });
+    mark([0], { 1: { 1: 'y' } });
+    await actions.applyEdits('t');
+    const confirm = store.getState().confirm as unknown as { title: string; notes: string[]; items: string[] };
+    expect(confirm.title).toBe('Aplicar em Auto-commit em produção');
+    expect(confirm.notes[0]).toBe('A linha marcada será excluída do banco.');
+    // the sentence about Rollback is in the body only
+    expect(confirm.notes.join(' ')).not.toContain('sem Rollback');
+    expect(confirm.items).toHaveLength(2);
+  });
+
+  it('in a Transaction nothing is asked: the statements run, UPDATEs first', async () => {
+    const tx = { ...session, mode: 'transaction' as const, transaction: { open: true, statements: 2 } };
+    store.setState({ sessions: { t: tx } });
+    mark([0], { 1: { 1: 'y' } });
+    api.session.run
+      .mockResolvedValueOnce({ session: tx, results: [ok(0, 'UPDATE'), ok(1, 'DELETE')] })
+      .mockResolvedValueOnce({ session: tx, results: [read('shop', [[2, 'y']])] });
+    await actions.applyEdits('t');
+    await vi.waitFor(() => expect(store.getState().runs.t!.running).toBe(false));
+    expect(store.getState().confirm).toBeNull();
+    const call = api.session.run.mock.calls[0]![1];
+    expect(call.origin).toBe('grid');
+    expect(call.sql).toBe("UPDATE `shop`.`items` SET `name` = 'y' WHERE `id` = 2;\nDELETE FROM `shop`.`items` WHERE `id` = 1;");
+    // the re-read has no row 1: nothing stays pending
+    expect(store.getState().runs.t!.results[0]!.rows).toEqual([[2, 'y']]);
+    expect(store.getState().runs.t!.edits).toBeUndefined();
+    expect(store.getState().toast?.message).toBe('Rodaram na transação: 1 UPDATE e 1 DELETE. Faça Commit para gravar.');
+  });
+
+  it('a DELETE that fails keeps its mark and the edits of its row, and says which statement failed', async () => {
+    // row 1 carries stored edits; row 0 (no edits) is deleted first and succeeds, then row 1's DELETE is stopped by a foreign key
+    mark([0, 1], { 1: { 1: 'x' } });
+    api.session.run
+      .mockResolvedValueOnce({
+        session,
+        results: [ok(0, 'DELETE'), { index: 1, sql: 'd2', kind: 'write', verb: 'DELETE', durationMs: 1, error: { message: 'Cannot delete a parent row', code: 'ER_ROW_IS_REFERENCED_2' } }],
+      })
+      .mockResolvedValueOnce({ session, results: [read('shop', [[2, 'b']])] });
+    await actions.applyEdits('t');
+    store.getState().confirm!.onConfirm();
+    await vi.waitFor(() => expect(api.session.run).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(store.getState().runs.t!.running).toBe(false));
+    const run = store.getState().runs.t!;
+    expect(run.results[0]!.rows).toEqual([[2, 'b']]);
+    // the row that was deleted is gone; the failed one keeps its mark and its stored edits, now at its new index
+    expect(run.edits?.deleted).toEqual([0]);
+    expect(run.edits?.cells).toEqual({ 0: { 1: 'x' } });
+    expect(run.editNotice).toContain('O DELETE 2 falhou: Cannot delete a parent row');
+    expect(run.editNotice).toContain('Em Auto-commit, o comando anterior ao erro já está gravado.');
+  });
+
+  it('an UPDATE that fails before the DELETEs keeps every mark together with the stored edits of the marked rows', async () => {
+    // row 0 is edited (UPDATE, statement 0); rows 1 and 2 are marked, row 1 with stored edits
+    result = read('shop', [[1, 'a'], [2, 'b'], [3, 'c']]);
+    store.setState({
+      runs: { t: { running: false, connecting: false, results: [result], active: 0, edits: { result, cells: { 0: { 1: 'x' }, 1: { 1: 'kept' } }, deleted: [1, 2] } } },
+    });
+    api.session.run.mockResolvedValueOnce({
+      session,
+      results: [{ index: 0, sql: 'u', kind: 'write', verb: 'UPDATE', durationMs: 1, error: { message: 'Lock wait timeout', code: 'ER_LOCK_WAIT_TIMEOUT' } }],
+    });
+    await actions.applyEdits('t');
+    store.getState().confirm!.onConfirm();
+    await vi.waitFor(() => expect(api.session.run).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(store.getState().runs.t!.editNotice).toBeDefined());
+    const run = store.getState().runs.t!;
+    // nothing ran: no re-read, the result is the same one, and every edit and mark stays
+    expect(api.session.run).toHaveBeenCalledTimes(1);
+    expect(run.results[0]).toBe(result);
+    expect(run.edits?.deleted).toEqual([1, 2]);
+    expect(run.edits?.cells).toEqual({ 0: { 1: 'x' }, 1: { 1: 'kept' } });
+    expect(run.editNotice).toContain('O UPDATE 1 falhou: Lock wait timeout');
+  });
+
+  it('a DELETE that finds no row is reported with its own verb', async () => {
+    store.setState({ sessions: { t: { ...session, mode: 'transaction' } } });
+    mark([0]);
+    api.session.run
+      .mockResolvedValueOnce({ session: { ...session, mode: 'transaction' }, results: [ok(0, 'DELETE', 0)] })
+      .mockResolvedValueOnce({ session: { ...session, mode: 'transaction' }, results: [read('shop', [[2, 'b']])] });
+    await actions.applyEdits('t');
+    await vi.waitFor(() => expect(store.getState().runs.t!.running).toBe(false));
+    expect(store.getState().runs.t!.editNotice).toContain('O DELETE 1 não encontrou a linha (esperado: 1).');
+  });
+
+  it('Aplicar refuses when the key moved, and the marks stay', async () => {
+    mark([0]);
+    api.schema.get.mockResolvedValueOnce(tree(['id', 'tenant_id']));
+    await actions.applyEdits('t');
+    expect(api.session.run).not.toHaveBeenCalled();
+    expect(store.getState().confirm).toBeNull();
+    expect(store.getState().runs.t!.edits?.deleted).toEqual([0]);
+  });
+
+  it('closing a tab with only a deletion pending asks first', async () => {
+    mark([0]);
+    await actions.requestCloseTab('t');
+    expect(store.getState().confirm?.body).toContain('1 alteração pendente');
+    expect(api.session.close).not.toHaveBeenCalled();
+  });
+});
+
 describe('Gerar UPDATE da célula in the renderer', () => {
   const insertText = vi.fn();
   beforeEach(() => {
@@ -195,7 +367,7 @@ describe('Gerar UPDATE da célula in the renderer', () => {
   });
 
   it('keys on the row the server sent, even when its key cell has a pending edit', async () => {
-    store.setState({ runs: { t: { running: false, connecting: false, results: [result], active: 0, edits: { result, cells: { 0: { 0: 99 } } } } } });
+    store.setState({ runs: { t: { running: false, connecting: false, results: [result], active: 0, edits: { result, cells: { 0: { 0: 99 } }, deleted: [] } } } });
     await actions.generateCellUpdates('t', result, 0, [0]);
     expect(insertText.mock.calls[0]![0]).toBe('UPDATE `shop`.`items` SET `id` = 99 WHERE `id` = 1;');
   });

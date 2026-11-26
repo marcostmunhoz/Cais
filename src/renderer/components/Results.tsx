@@ -4,9 +4,11 @@ import { ChevronDown, Copy, PanelRight, X } from 'lucide-react';
 import type { CellValue, ColumnMeta, StatementResult } from '@shared/results';
 import { getDialect } from '@shared/dialects/registry';
 import { capabilitiesOf } from '@shared/engines';
+import { isDeleteRowsKey, shortcutText } from '@shared/shortcuts';
 import {
   cellInputText,
   cellLock,
+  deleteReach,
   gridEditability,
   insertability,
   parseCellInput,
@@ -23,6 +25,8 @@ import {
   generateInserts,
   generateUpdates,
   loadSchema,
+  markRowsDeleted,
+  reachNotes,
   selectResult,
   setCellEdit,
 } from '../lib/actions';
@@ -115,9 +119,13 @@ interface GridProps {
   editing?: { cell: Cell; input: React.ReactNode } | null;
   onEditRequest: (cell: Cell) => void;
   onCellMenu: (cell: Cell, x: number, y: number) => void;
+  /** Rows marked for deletion: drawn struck through. */
+  deleted?: ReadonlySet<number>;
+  /** The delete key was pressed with the grid focused. */
+  onDeleteKey: () => void;
 }
 
-function Grid({ columns, rows, focus, anchor, onSelect, onCopy, scroller, edited, editing, onEditRequest, onCellMenu }: GridProps) {
+function Grid({ columns, rows, focus, anchor, onSelect, onCopy, scroller, edited, editing, onEditRequest, onCellMenu, deleted, onDeleteKey }: GridProps) {
   const widths = useMemo(() => estimateWidths(columns, rows), [columns, rows]);
   const totalW = GUTTER_W + widths.reduce((a, b) => a + b, 0);
 
@@ -215,6 +223,11 @@ function Grid({ columns, rows, focus, anchor, onSelect, onCopy, scroller, edited
       onEditRequest(focus);
       return;
     }
+    if (isDeleteRowsKey(e, window.cais.platform) && focus) {
+      e.preventDefault();
+      onDeleteKey();
+      return;
+    }
     if (mod && e.key.toLowerCase() === 'a') {
       e.preventDefault();
       onSelect({ r: 0, c: 0 }, { r: lastRow, c: lastCol });
@@ -288,11 +301,14 @@ function Grid({ columns, rows, focus, anchor, onSelect, onCopy, scroller, edited
         </div>
         {rowV.getVirtualItems().map((vr) => {
           const row = rows[vr.index]!;
+          const isDeleted = deleted?.has(vr.index) === true;
           return (
             <div
               key={vr.key}
               role="row"
               aria-rowindex={vr.index + 1}
+              className={isDeleted ? 'grid-row-deleted' : undefined}
+              {...(isDeleted ? { 'data-deleted': 'true' } : {})}
               style={{ position: 'absolute', top: HEAD_H + vr.start, left: 0, width: totalW, height: ROW_H }}
             >
               <div
@@ -498,7 +514,14 @@ export function Results({ tabId }: { tabId: string }) {
   }, [active, target, insertTarget, schemaStatus, environmentId]);
 
   const edits = run?.edits && run.edits.result === active ? run.edits.cells : undefined;
-  const pending = edits ? pendingCount(edits) : { changes: 0, rows: 0 };
+  const deletedRows = useMemo(() => (run?.edits && run.edits.result === active ? run.edits.deleted : []), [run?.edits, active]);
+  const deletedSet = useMemo(() => new Set(deletedRows), [deletedRows]);
+  const pending = edits || deletedRows.length > 0 ? pendingCount(edits ?? {}, deletedRows) : { changes: 0, rows: 0, deletions: 0, total: 0 };
+  // what deleting rows of this table may also touch, as the schema says
+  const reach = useMemo(
+    () => (pending.deletions > 0 && target?.editable ? reachNotes(deleteReach(schemaTree, target.database, target.table), target.table) : []),
+    [pending.deletions, target, schemaTree],
+  );
   const shownRows = useMemo(
     () =>
       edits
@@ -513,6 +536,10 @@ export function Results({ tabId }: { tabId: string }) {
   const [queued, setQueued] = useState<Cell | null>(null);
   const startEdit = (cell: Cell) => {
     if (!active || !target || run?.running) return;
+    if (deletedSet.has(cell.r)) {
+      setHint(m().grid.reason.deleted);
+      return;
+    }
     const original = rows[cell.r]?.[cell.c] ?? null;
     const lock = cellLock(target, cell.c, original);
     if (lock) {
@@ -564,7 +591,7 @@ export function Results({ tabId }: { tabId: string }) {
   };
   const cellEntries = (cell: Cell): MenuEntry[] => {
     if (cell.c < 0) return []; // the row gutter has no cell to edit
-    if (!active || !target?.editable || cellLock(target, cell.c, rows[cell.r]?.[cell.c] ?? null)) return [];
+    if (!active || !target?.editable || deletedSet.has(cell.r) || cellLock(target, cell.c, rows[cell.r]?.[cell.c] ?? null)) return [];
     const column = target.columns[cell.c] as EditTarget['columns'][number] & { editable: true };
     const out: MenuEntry[] = [{ label: m().grid.menu.edit, onSelect: () => startEdit(cell) }];
     if (column.nullable) out.push({ label: m().grid.menu.setNull, onSelect: () => setCellEdit(tabId, active, cell.r, cell.c, null) });
@@ -652,13 +679,45 @@ export function Results({ tabId }: { tabId: string }) {
     }
     return out;
   };
+  // The rows a deletion acts on: those of the selection (the menu selects the clicked row first)
+  const selectedRows = (cell?: Cell): number[] =>
+    sel ? Array.from({ length: sel.r2 - sel.r1 + 1 }, (_, i) => sel.r1 + i) : cell ? [cell.r] : [];
+  // Excluir linha / Desfazer exclusão: any editable result (the same gate as editing), also on the row gutter
+  const deleteEntries = (cell?: Cell): MenuEntry[] => {
+    if (!active || !target?.editable || !cell || run?.running) return [];
+    const picked = selectedRows(cell);
+    const marked = picked.filter((r) => deletedSet.has(r)).length;
+    const out: MenuEntry[] = [];
+    if (marked < picked.length) {
+      out.push({
+        label: picked.length === 1 ? m().grid.menu.deleteRow : m().grid.menu.deleteRows({ count: picked.length }),
+        shortcut: shortcutText('deleteRows', window.cais.platform),
+        onSelect: () => {
+          setHint(null);
+          markRowsDeleted(tabId, active, picked, true);
+        },
+      });
+    }
+    if (marked > 0) {
+      out.push({ label: m().grid.menu.undoDelete, onSelect: () => markRowsDeleted(tabId, active, picked, false) });
+    }
+    return out;
+  };
+  // The delete key: marks the selected rows, or unmarks them when they all are marked already
+  const deleteKey = () => {
+    if (!active || !target || run?.running) return;
+    if (!target.editable) {
+      setHint(render(target.reason));
+      return;
+    }
+    const picked = selectedRows(focus ?? undefined);
+    if (picked.length === 0) return;
+    setHint(null);
+    markRowsDeleted(tabId, active, picked, !picked.every((r) => deletedSet.has(r)));
+  };
   const menuEntries = (cell?: Cell): MenuEntry[] => {
-    const edit = cell ? cellEntries(cell) : [];
-    const insert = cell ? insertEntries() : [];
-    if (edit.length > 0 && insert[0]) insert[0] = { ...insert[0], separatorBefore: true };
-    const copy = copyEntries();
-    if (edit.length + insert.length > 0 && copy[0]) copy[0] = { ...copy[0], separatorBefore: true };
-    return [...edit, ...insert, ...copy];
+    const groups = [cell ? cellEntries(cell) : [], deleteEntries(cell), cell ? insertEntries() : [], copyEntries()].filter((g) => g.length > 0);
+    return groups.flatMap((g, i) => (i > 0 ? [{ ...g[0]!, separatorBefore: true }, ...g.slice(1)] : g));
   };
   const readOnly = mode === 'read-only';
   const editArea = (
@@ -675,7 +734,7 @@ export function Results({ tabId }: { tabId: string }) {
           </button>
         </div>
       )}
-      {pending.changes > 0 && (
+      {pending.changes + pending.deletions > 0 && (
         <div className="grid-editbar" role="toolbar" aria-label={m().grid.bar.summary(pending)} data-testid="grid-edit-bar">
           <span className="summary" data-testid="grid-edit-summary">
             {m().grid.bar.summary(pending)}
@@ -696,6 +755,13 @@ export function Results({ tabId }: { tabId: string }) {
           <button className="btn small ghost" data-testid="edit-discard" onClick={() => discardEdits(tabId)}>
             {m().grid.bar.discard}
           </button>
+        </div>
+      )}
+      {reach.length > 0 && (
+        <div className="grid-delete-warn" role="alert" data-testid="grid-delete-warning">
+          {reach.map((line) => (
+            <div key={line}>{line}</div>
+          ))}
         </div>
       )}
       {hint && (
@@ -738,6 +804,8 @@ export function Results({ tabId }: { tabId: string }) {
               anchor={anchor}
               scroller={scroller}
               edited={edits}
+              deleted={deletedSet}
+              onDeleteKey={deleteKey}
               editing={
                 editing && target?.editable
                   ? {

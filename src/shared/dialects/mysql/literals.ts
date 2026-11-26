@@ -1,5 +1,5 @@
 import type { CellValue } from '../../results';
-import type { InsertSpec, UpdateSpec, ValueKind } from '../types';
+import type { DeleteSpec, InsertSpec, UpdateSpec, ValueKind } from '../types';
 import { m } from '../../i18n';
 
 // Literals for the UPDATEs the grid generates. Two readers must agree on every literal: the
@@ -135,6 +135,17 @@ export function buildUpdateLocated(spec: UpdateSpec): { sql: string; setValues: 
     sql += a.literal;
   });
   return { sql: `${sql} WHERE ${match.join(' AND ')}`, setValues };
+}
+
+/** `DELETE FROM db.table WHERE <every key column> = …`: one row by its whole key, no LIMIT (the reasons of `buildUpdateLocated`). */
+export function buildDelete(spec: DeleteSpec): string {
+  if (spec.where.length === 0) throw new Error(m().dialect.literal.noKey);
+  const match = spec.where.map((c) => {
+    // "= NULL" never matches: a key value is never NULL
+    if (c.value === null) throw new Error(m().dialect.literal.noKey);
+    return `${quoteIdent(c.column)} = ${quoteLiteral(c.value, c.type)}`;
+  });
+  return `DELETE FROM ${quoteIdent(spec.database)}.${quoteIdent(spec.table)} WHERE ${match.join(' AND ')}`;
 }
 
 export const buildUpdate = (spec: UpdateSpec): string => buildUpdateLocated(spec).sql;

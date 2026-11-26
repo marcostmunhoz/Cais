@@ -13,7 +13,7 @@ Cais é um cliente SQL de desktop para MySQL e, só para leitura, BigQuery, feit
 - **Somente leitura de verdade**, em duas camadas: uma lista do que é permitido no app e, no MySQL, a sessão em `READ ONLY` no servidor, reafirmada antes de cada comando (no BigQuery, um dry run que só deixa passar `SELECT`).
 - **Editor SQL** (CodeMirror 6) com realce do MySQL ou do GoogleSQL e autocomplete de palavras-chave, bancos, tabelas, colunas e apelidos.
 - **Resultados em grade virtualizada**: até 1.000 linhas por comando, com "Buscar até 50.000", cancelamento pelo servidor (`KILL QUERY` no MySQL), painel com o valor completo da célula e cópia do valor, em TSV, CSV, JSON ou tabela Markdown.
-- **Edição na grade**: altere células de um resultado de uma tabela com a chave primária inteira e gere o `UPDATE` equivalente (ou o `UPDATE` de uma célula, com o valor selecionado para você trocar por uma expressão) ou aplique na própria aba, respeitando o modo da sessão. Linhas selecionadas viram um `INSERT` de várias linhas, com ou sem a chave primária.
+- **Edição na grade**: altere células de um resultado de uma tabela com a chave primária inteira e gere o `UPDATE` equivalente (ou o `UPDATE` de uma célula, com o valor selecionado para você trocar por uma expressão) ou aplique na própria aba, respeitando o modo da sessão. Linhas marcadas para exclusão (menu ou Delete) saem como `DELETE` pela chave inteira, com confirmação sempre em Auto-commit. Linhas selecionadas viram um `INSERT` de várias linhas, com ou sem a chave primária.
 - **Estado da conexão em cada aba** (desconectado, conectando, conectado, executando, erro), com Conectar, Reconectar e Desconectar, e desconexão por inatividade depois de 30 minutos (nunca com transação aberta).
 - **Scripts salvos por projeto**, listados dentro de cada ambiente do projeto, com botão Salvar, Cmd+S e seletor por Cmd+O.
 - **Duplicar ambiente e projeto, renomear projeto.**
@@ -24,7 +24,7 @@ Cais é um cliente SQL de desktop para MySQL e, só para leitura, BigQuery, feit
 
 | Edição na grade | Pedido de agente |
 |---|---|
-| ![Grade com três alterações pendentes e os botões Gerar UPDATE, Aplicar e Descartar](docs/images/grid-edit-dark.png) | ![Modal de aprovação de uma escrita pedida por um agente](docs/images/agent-write-approval-light.png) |
+| ![Grade com três alterações pendentes e os botões Gerar SQL, Aplicar e Descartar](docs/images/grid-edit-dark.png) | ![Modal de aprovação de uma escrita pedida por um agente](docs/images/agent-write-approval-light.png) |
 
 ![Tela Trilha com pedidos de agentes e mudanças de configuração](docs/images/trail-light.png)
 

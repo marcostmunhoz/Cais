@@ -4,7 +4,7 @@ import { classify, identifiers, warnings } from './classifier';
 import { MYSQL_KEYWORDS } from './keywords';
 import { appendStatements, splitStatements } from './splitter';
 import { agentCodeProblem } from './lexer';
-import { buildInsert, buildUpdate, buildUpdateLocated, quoteIdent, quoteLiteral, valueKind } from './literals';
+import { buildDelete, buildInsert, buildUpdate, buildUpdateLocated, quoteIdent, quoteLiteral, valueKind } from './literals';
 
 /** MySQL identifiers are at most 64 characters; anything else in --database is refused before it reaches a modal. */
 const MAX_DATABASE_NAME = 64;
@@ -42,6 +42,7 @@ export const mysqlDialect: Dialect = {
   buildUpdate,
   buildUpdateLocated,
   buildInsert,
+  buildDelete,
 };
 
-export { splitStatements, appendStatements, classify, warnings, identifiers, buildInsert, buildUpdate, buildUpdateLocated, quoteLiteral, valueKind };
+export { splitStatements, appendStatements, classify, warnings, identifiers, buildDelete, buildInsert, buildUpdate, buildUpdateLocated, quoteLiteral, valueKind };

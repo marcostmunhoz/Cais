@@ -3,12 +3,14 @@ import type { CatalogSnapshot, SavedScript, SessionMode, TabState } from '@share
 import type { AgentsSnapshot } from '@shared/agents';
 import type { PendingTransaction } from '@shared/ipc';
 import type { SchemaTree, SessionState, StatementResult } from '@shared/results';
-import type { PendingCells } from '@shared/grid';
+import type { PendingCells, PendingDeleted } from '@shared/grid';
 
-/** Edits in the grid not yet applied nor sent to the editor. They belong to one result object. */
+/** Edits and deletions in the grid not yet applied nor sent to the editor. They belong to one result object. */
 export interface GridEdits {
   result: StatementResult;
   cells: PendingCells;
+  /** Rows marked for deletion (row indexes of `result`). A marked row's cell edits stay in `cells` but are not applied. */
+  deleted: PendingDeleted;
 }
 
 export interface RunView {
@@ -20,7 +22,7 @@ export interface RunView {
   message?: string;
   /** Pending grid edits, valid only while `result` is still in `results`. */
   edits?: GridEdits;
-  /** What Aplicar found (an UPDATE that did not find exactly one row, an error), shown above the grid. */
+  /** What Aplicar found (an UPDATE or DELETE that did not find exactly one row, an error), shown above the grid. */
   editNotice?: string[];
 }
 
@@ -45,6 +47,8 @@ export interface ConfirmRequest {
   items?: string[];
   confirmLabel: string;
   danger?: boolean;
+  /** Extra lines under the body (what the change may also reach). */
+  notes?: string[];
   onConfirm: () => void;
 }
 

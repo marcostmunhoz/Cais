@@ -869,6 +869,23 @@ kbd {
   box-shadow: inset 3px 0 0 var(--fill-warning), inset 0 0 0 1.5px var(--accent);
 }
 
+/* Rows marked for deletion */
+.grid-row-deleted .grid-cell:not(.gutter) {
+  background: var(--danger-bg);
+  color: var(--danger);
+  text-decoration: line-through;
+}
+
+.grid-row-deleted .grid-cell.gutter {
+  color: var(--danger);
+  background: var(--danger-bg);
+  text-decoration: line-through;
+}
+
+.grid-row-deleted .grid-cell.sel:not(.gutter) {
+  background: color-mix(in srgb, var(--danger-bg) 70%, var(--accent) 30%);
+}
+
 .grid-cell.editing {
   padding: 0;
   overflow: visible;
@@ -912,6 +929,19 @@ kbd {
 
 .grid-editbar .summary {
   font-weight: 500;
+}
+
+.grid-delete-warn {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0 10px 6px 0;
+  padding: 5px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  background: var(--danger-bg);
+  color: var(--danger);
+  border: 0.5px solid var(--danger-border);
 }
 
 .grid-hint {
@@ -1496,6 +1526,14 @@ kbd {
 .menu button:hover {
   background: var(--accent);
   color: var(--accent-fg);
+}
+
+.menu .menu-shortcut {
+  margin-left: 16px;
+  color: inherit;
+  opacity: 0.6;
+  font-family: inherit;
+  font-size: 11px;
 }
 
 .menu hr {

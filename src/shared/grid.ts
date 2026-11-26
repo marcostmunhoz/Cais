@@ -254,16 +254,47 @@ export function cellInputText(value: CellValue): string {
   return String(value);
 }
 
-/** How many cells and rows have a pending change. */
-export function pendingCount(cells: PendingCells): { changes: number; rows: number } {
+/**
+ * Rows marked for deletion, as indexes into the result's rows. The deletion wins over the row's pending cell edits:
+ * they stay in `PendingCells` (so unmarking brings them back) but produce no UPDATE and are not counted as changes.
+ */
+export type PendingDeleted = readonly number[];
+
+/**
+ * What is pending: `changes` and `rows` count the cell edits that will run (rows marked for deletion left out), `deletions`
+ * the rows marked, `total` every pending cell edit (marked rows' included) plus the deletions: what discarding loses.
+ */
+export function pendingCount(
+  cells: PendingCells,
+  deleted: PendingDeleted = [],
+): { changes: number; rows: number; deletions: number; total: number } {
+  const marked = new Set(deleted);
   let changes = 0;
   let rows = 0;
-  for (const row of Object.values(cells)) {
+  let total = 0;
+  for (const [r, row] of Object.entries(cells)) {
     const n = Object.keys(row).length;
+    total += n;
+    if (marked.has(Number(r))) continue;
     if (n > 0) rows++;
     changes += n;
   }
-  return { changes, rows };
+  return { changes, rows, deletions: marked.size, total: total + marked.size };
+}
+
+/** Whether anything is pending, edits of marked rows included (they come back when the mark is undone). */
+export function hasPending(cells: PendingCells, deleted: PendingDeleted = []): boolean {
+  return deleted.length > 0 || Object.keys(cells).length > 0;
+}
+
+/** The rows with a deletion mark set or cleared (sorted, no repeats). */
+export function withDeleted(deleted: PendingDeleted, rows: readonly number[], marked: boolean): number[] {
+  const set = new Set(deleted);
+  for (const r of rows) {
+    if (marked) set.add(r);
+    else set.delete(r);
+  }
+  return [...set].sort((a, b) => a - b);
 }
 
 /** One UPDATE per edited row (row order), with the whole key in the WHERE. Statements have no terminator. */
@@ -294,6 +325,67 @@ export function buildGridUpdates(
     });
   }
   return out;
+}
+
+/** One statement the grid applies: the row it comes from, its verb and the SQL (no terminator). */
+export interface GridStatement {
+  row: number;
+  verb: 'UPDATE' | 'DELETE';
+  sql: string;
+}
+
+/**
+ * What Aplicar and Gerar SQL write: the UPDATEs of the edited rows first, then one DELETE per row marked for deletion,
+ * each in row order. A row marked for deletion gets no UPDATE, whatever edits it holds. The whole key is in each WHERE.
+ */
+export function buildGridStatements(
+  dialect: Pick<Dialect, 'buildUpdate' | 'buildDelete'>,
+  target: EditTarget,
+  rows: readonly (readonly CellValue[])[],
+  cells: PendingCells,
+  deleted: PendingDeleted,
+): GridStatement[] {
+  const marked = new Set(deleted);
+  const live: PendingCells = {};
+  for (const [r, edits] of Object.entries(cells)) if (!marked.has(Number(r))) live[Number(r)] = edits;
+  const out: GridStatement[] = buildGridUpdates(dialect, target, rows, live).map((u) => ({ ...u, verb: 'UPDATE' as const }));
+  for (const r of [...marked].sort((a, b) => a - b)) {
+    const row = rows[r];
+    if (!row) throw new Error(`row ${r} does not exist`);
+    out.push({
+      row: r,
+      verb: 'DELETE',
+      sql: dialect.buildDelete({
+        database: target.database,
+        table: target.table,
+        where: target.key.map((k) => ({ column: k.column, type: k.type, value: row[k.index] ?? null })),
+      }),
+    });
+  }
+  return out;
+}
+
+/** What a DELETE of the table may also touch beyond its own rows, as far as the schema says. */
+export interface DeleteReach {
+  /** "db.table" of the tables whose foreign keys cascade from this one (delete, set null or set default). */
+  cascades: string[];
+  /** The table has triggers: what they write is not in the row count. */
+  triggers: boolean;
+  /** Some of that metadata could not be read, so the absence of the two above proves nothing. */
+  unknown: boolean;
+}
+
+/** The reach of a DELETE on a table, from the schema the renderer has. Null when the schema does not know the table. */
+export function deleteReach(schema: SchemaTree | undefined, database: string, table: string): DeleteReach | null {
+  if (!schema) return null;
+  const db = byName(schema.databases, database);
+  const t = db ? byName(db.tables, table) : undefined;
+  if (!db || !t) return null;
+  return {
+    cascades: t.cascadedBy ?? [],
+    triggers: (t.triggers ?? []).length > 0,
+    unknown: schema.foreignKeysComplete === false || db.partial === true || db.triggersVisible === false,
+  };
 }
 
 /** The most rows one "Gerar UPDATE da célula" writes: one statement and one selected literal each. */
@@ -465,6 +557,24 @@ export function buildGridInsert(
       rows: rows.map(({ values }) => columns.map((c) => values[c.index] ?? null)),
     }),
   };
+}
+
+/** Row indexes (of `oldRows`) found again in a refreshed result, by their key: the rows that are gone are dropped. */
+export function remapRows(
+  key: readonly KeyColumn[],
+  oldRows: readonly (readonly CellValue[])[],
+  newRows: readonly (readonly CellValue[])[],
+  rows: PendingDeleted,
+): number[] {
+  const at = new Map<string, number>();
+  newRows.forEach((row, i) => at.set(keyOf(row, key), i));
+  const out: number[] = [];
+  for (const r of rows) {
+    const row = oldRows[r];
+    const index = row ? at.get(keyOf(row, key)) : undefined;
+    if (index !== undefined) out.push(index);
+  }
+  return out.sort((a, b) => a - b);
 }
 
 /**

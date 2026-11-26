@@ -42,6 +42,11 @@ export function ConfirmDialog() {
       <DialogHead title={confirm.title} />
       <div className="dialog-body" style={{ width: 460 }}>
         <div>{confirm.body}</div>
+        {confirm.notes?.map((note) => (
+          <div key={note} className="muted">
+            {note}
+          </div>
+        ))}
         {confirm.items && (
           <pre className="confirm-list">{confirm.items.join('\n')}</pre>
         )}

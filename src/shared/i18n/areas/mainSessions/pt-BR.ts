@@ -11,7 +11,7 @@ export const ptBR = {
     connecting: 'A sessão ainda está conectando.',
   },
   gridEdit: 'Edição na grade',
-  gridNotUpdate: 'A edição na grade só aplica UPDATE.',
+  gridNotEdit: 'A edição na grade só aplica UPDATE e DELETE.',
   /** Session modes, as the trail details name them. */
   mode: {
     readOnly: 'Somente leitura',
