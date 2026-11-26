@@ -4,7 +4,7 @@ export const LOCALES = ['pt-BR', 'en'] as const;
 export type Locale = (typeof LOCALES)[number];
 
 /** Locale used for everything agents read (CLI output, guide, broker responses): fixed, never the app's. */
-export const AGENT_LOCALE: Locale = 'pt-BR';
+export const AGENT_LOCALE: Locale = 'en';
 
 export function isLocale(value: unknown): value is Locale {
   return typeof value === 'string' && (LOCALES as readonly string[]).includes(value);

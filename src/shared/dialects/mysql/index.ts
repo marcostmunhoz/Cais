@@ -4,7 +4,8 @@ import { classify, identifiers, warnings } from './classifier';
 import { MYSQL_KEYWORDS } from './keywords';
 import { appendStatements, splitStatements } from './splitter';
 import { agentCodeProblem } from './lexer';
-import { buildUpdate, quoteIdent, quoteLiteral, valueKind } from './literals';
+import { analyze } from './scope';
+import { buildDelete, buildInsert, buildUpdate, buildUpdateLocated, quoteIdent, quoteLiteral, valueKind } from './literals';
 
 /** MySQL identifiers are at most 64 characters; anything else in --database is refused before it reaches a modal. */
 const MAX_DATABASE_NAME = 64;
@@ -17,8 +18,8 @@ const agentRules: AgentRules = {
   writeVerbs: ['INSERT', 'REPLACE', 'UPDATE', 'DELETE'],
   isValidDatabaseName: (name) => name.length <= MAX_DATABASE_NAME && hiddenTextProblem(name) === null && !/[\r\n`]/.test(name),
   messages: {
-    systemSchemaWrite: 'Agentes não escrevem nos esquemas do sistema (mysql, performance_schema, sys, information_schema).',
-    systemSchemaRead: 'Agentes não leem o esquema mysql (contas e hashes de senha).',
+    systemSchemaWrite: 'Agents do not write to the system schemas (mysql, performance_schema, sys, information_schema).',
+    systemSchemaRead: 'Agents do not read the mysql schema (accounts and password hashes).',
   },
 };
 
@@ -33,6 +34,7 @@ export const mysqlDialect: Dialect = {
   classify,
   warnings,
   identifiers,
+  analyze,
   agentCodeProblem,
   quoteIdent,
   agentRules,
@@ -40,6 +42,9 @@ export const mysqlDialect: Dialect = {
   valueKind,
   quoteLiteral,
   buildUpdate,
+  buildUpdateLocated,
+  buildInsert,
+  buildDelete,
 };
 
-export { splitStatements, appendStatements, classify, warnings, identifiers, buildUpdate, quoteLiteral, valueKind };
+export { splitStatements, appendStatements, classify, warnings, identifiers, buildDelete, buildInsert, buildUpdate, buildUpdateLocated, quoteLiteral, valueKind };

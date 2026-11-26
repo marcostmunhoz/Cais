@@ -136,7 +136,7 @@ export function makeBroker(overrides: { executor?: FakeExecutor } = {}) {
       save: async (input, by) => {
         if (scripts.some((s) => s.projectId === input.projectId && s.name.toLowerCase() === input.name.toLowerCase())) {
           const { CaisError } = await import('@main/errors');
-          throw new CaisError('Já existe um script com esse nome em api.', 'duplicate-name');
+          throw new CaisError('A script with this name already exists in api.', 'duplicate-name');
         }
         const s: SavedScript = {
           id: `s${scripts.length + 1}`, projectId: input.projectId, name: input.name, sql: input.sql,

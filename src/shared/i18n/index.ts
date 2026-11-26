@@ -6,13 +6,15 @@
  *   once per process (`setLocale`) by main (`src/main/i18n.ts`) and by the renderer (`src/renderer/lib/i18n.ts`);
  *   it stays pt-BR when nobody sets it (unit tests).
  * - `MessageRef` carries text that two audiences read: `renderRef(ref, locale)` renders it for the person in the
- *   app locale and for agents in `AGENT_LOCALE` (pt-BR, fixed).
+ *   app locale and for agents in `AGENT_LOCALE` (English, fixed).
  */
 import { createFormat, type Format, type Locale, type Shape } from './core';
 import { ptBR as commonPtBR } from './areas/common/pt-BR';
 import { en as commonEn } from './areas/common/en';
 import { ptBR as menuPtBR } from './areas/menu/pt-BR';
 import { en as menuEn } from './areas/menu/en';
+import { ptBR as aboutPtBR } from './areas/about/pt-BR';
+import { en as aboutEn } from './areas/about/en';
 import { ptBR as nativePtBR } from './areas/native/pt-BR';
 import { en as nativeEn } from './areas/native/en';
 import { ptBR as appPtBR } from './areas/app/pt-BR';
@@ -67,6 +69,7 @@ export * from './core';
 const ptBRMessages = {
   common: commonPtBR,
   menu: menuPtBR,
+  about: aboutPtBR,
   native: nativePtBR,
   app: appPtBR,
   sidebar: sidebarPtBR,
@@ -102,6 +105,7 @@ export type AreaMessages<A extends keyof Messages> = Messages[A];
 const enMessages: Messages = {
   common: commonEn,
   menu: menuEn,
+  about: aboutEn,
   native: nativeEn,
   app: appEn,
   sidebar: sidebarEn,
@@ -176,7 +180,7 @@ export function createI18n(locale: Locale): I18n {
 // --- message references ---
 
 /**
- * A message rendered later, possibly twice (person in the app locale, agent in pt-BR). Plain data, safe to send
+ * A message rendered later, possibly twice (person in the app locale, agent in English). Plain data, safe to send
  * over IPC or store: `key` is `'<area>.<path>.<entry>'`, `params` goes to the entry's function.
  */
 export interface MessageRef {

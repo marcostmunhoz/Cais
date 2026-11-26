@@ -24,6 +24,30 @@ export interface GcloudAccount {
 
 export type TestConnectionResult = { ok: true; serverVersion: string } | { ok: false; error: string };
 
+/** What the About window shows. Versions come from main; the renderer cannot know them. */
+export interface AboutInfo {
+  version: string;
+  electron: string;
+  chromium: string;
+  node: string;
+  /** `<platform> <arch>`, e.g. `linux x64`. */
+  system: string;
+  /** For display only: the renderer opens it through `openLink('repository')`, never by address. */
+  repository: string;
+}
+
+/**
+ * Answer of the version check. `latest` (e.g. `0.2.0`, no `v`) comes with `newer` and `current`.
+ * `unavailable` covers every failure (no network, rate limit, repository without releases, invalid answer).
+ */
+export type LatestCheck =
+  | { status: 'newer'; latest: string }
+  | { status: 'current'; latest: string }
+  | { status: 'unavailable' };
+
+/** The only pages the app opens in the browser. `release` is the page of the newest version the last check found. */
+export type AboutLink = 'repository' | 'releases' | 'release';
+
 export interface RunRequest {
   sql: string;
   scope: 'current' | 'all';
@@ -37,9 +61,9 @@ export interface RunRequest {
    * the accepted one, is asked about again.
    */
   confirmedBytes?: { sql: string; bytes: number }[];
-  /** "Buscar até 50.000": run one read again with more rows. Main refuses anything that is not a plain read. */
+  /** "Fetch up to 50,000": run one read again with more rows. Main refuses anything that is not a plain read. */
   refetch?: boolean;
-  /** "Aplicar" of the grid edits: main accepts it only for UPDATEs and labels them on the trail. */
+  /** "Apply" of the grid edits: main accepts it only for UPDATEs and labels them on the trail. */
   origin?: 'grid';
 }
 
@@ -56,6 +80,30 @@ export interface SetModeResponse {
   session: SessionState;
   needsConfirmation?: { reason: 'production-autocommit' };
 }
+
+/** What the person chose in the app that is kept across runs (`settings.json`, apart from the agent access switch). */
+export interface UserSettings {
+  /** BigQuery: dry-run the statement under the cursor after a pause in typing (its text goes to Google). Off by default. */
+  estimateAsYouType: boolean;
+}
+
+/** Why `estimate` did nothing (and sent nothing). */
+export type EstimateSkip = 'off' | 'not-connected' | 'unsupported' | 'no-statement' | 'cancelled';
+
+/**
+ * The answer to a dry run of the statement being typed. Never a result set, never a job: nothing ran.
+ * `error` is what the server (or the driver) said about the text, with the server's own words in `detail`.
+ */
+export type EstimateResponse =
+  | { state: 'ok'; bytes?: number }
+  | {
+      state: 'error';
+      /** `inStatement`: the server faulted the text (syntax, unknown name), so it belongs in the editor; otherwise it is about reaching the server. */
+      error: { message: string; detail?: string; hint?: string; code?: string; inStatement: boolean };
+    }
+  /** The app's own rules refuse the statement (not a read, ...): refused here, nothing was sent. */
+  | { state: 'refused'; message: string }
+  | { state: 'skipped'; reason: EstimateSkip };
 
 export interface PendingTransaction {
   tabId: string;
@@ -100,6 +148,15 @@ export interface CaisApi {
     /** Desconectar: keeps the tab, its mode and database. Refused by main with a transaction open (`transaction-open`). */
     disconnect(tabId: string): Promise<SessionState>;
     state(tabId: string): Promise<SessionState>;
+    /**
+     * BigQuery: asks the server what one statement would read, without running it (dry run). Main refuses it while
+     * "Estimate while typing" is off, and reclassifies the text: only a plain read leaves the app. Not on the trail.
+     */
+    estimate(tabId: string, sql: string): Promise<EstimateResponse>;
+  };
+  settings: {
+    get(): Promise<UserSettings>;
+    setEstimateAsYouType(enabled: boolean): Promise<UserSettings>;
   };
   schema: {
     /**
@@ -138,6 +195,12 @@ export interface CaisApi {
   app: {
     /** The user backed out of quitting while transactions were open. */
     quitCancelled(): Promise<void>;
+    /** What the About window shows: versions of the app and its runtime. */
+    about(): Promise<AboutInfo>;
+    /** Asks the GitHub releases API whether a newer version exists. Only when the person clicks; never automatic. */
+    checkLatest(): Promise<LatestCheck>;
+    /** Opens one of a few fixed pages in the system browser. Main builds the address; the renderer never sends one. */
+    openLink(target: AboutLink): Promise<void>;
   };
   events: {
     onSessionState(cb: (state: SessionState) => void): Unsubscribe;
@@ -147,6 +210,8 @@ export interface CaisApi {
     onAgents(cb: (snapshot: AgentsSnapshot) => void): Unsubscribe;
     /** Main asks the renderer to resolve open transactions before quitting. */
     onResolveTransactions(cb: (pending: PendingTransaction[]) => void): Unsubscribe;
+    /** The application menu asked for the About window. */
+    onOpenAbout(cb: () => void): Unsubscribe;
   };
 }
 
@@ -173,6 +238,9 @@ export const CHANNELS = {
   sessionClose: 'session:close',
   sessionDisconnect: 'session:disconnect',
   sessionState: 'session:state',
+  sessionEstimate: 'session:estimate',
+  settingsGet: 'settings:get',
+  settingsSetEstimateAsYouType: 'settings:setEstimateAsYouType',
   schemaGet: 'schema:get',
   scriptsList: 'scripts:list',
   scriptsSave: 'scripts:save',
@@ -191,10 +259,14 @@ export const CHANNELS = {
   tabsLoad: 'tabs:load',
   tabsSave: 'tabs:save',
   appQuitCancelled: 'app:quitCancelled',
+  appAbout: 'app:about',
+  appCheckLatest: 'app:checkLatest',
+  appOpenLink: 'app:openLink',
   eventSessionState: 'event:sessionState',
   eventScriptsChanged: 'event:scriptsChanged',
   eventAgents: 'event:agents',
   eventResolveTransactions: 'event:resolveTransactions',
+  eventOpenAbout: 'event:openAbout',
 } as const;
 
 /** Envelope used on the wire so errors keep their friendly message. */

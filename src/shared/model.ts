@@ -104,7 +104,7 @@ export interface CatalogSnapshot extends Catalog {
   credentialsWithSecret: string[];
   /** Environments changed outside the Cais: no connection until the person reviews and saves them. */
   blockedEnvironments: string[];
-  /** No system vault: nothing can be signed, so every environment stays "Tudo com aprovação". */
+  /** No system vault: nothing can be signed, so every environment stays "Everything needs approval". */
   agentLevelsLocked?: boolean;
   /** Files that were unreadable at startup and set aside (messages in the app locale). */
   notices: string[];

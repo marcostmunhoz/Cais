@@ -5,6 +5,7 @@ export const ptBR = {
     unsupported: (p: { type: string }) => `O tipo ${p.type} não pode ser escrito como valor.`,
     truncated: 'O valor binário está cortado: não dá para escrevê-lo de volta.',
     noKey: 'O UPDATE precisa de colunas para alterar e da chave inteira da linha.',
+    noColumns: 'O INSERT precisa de colunas e de linhas.',
   },
   /** Run statement at the cursor with nothing under it. */
   noStatement: 'Nenhum comando sob o cursor.',
@@ -40,7 +41,7 @@ export const ptBR = {
     alwaysTrue: (p: { verb: string }) => `${p.verb} com WHERE sempre verdadeiro`,
     executableComment: (p: { syntax: string }) => `Comentário executável (${p.syntax}): o servidor pode rodar outra coisa`,
   },
-  /** Why SQL from an agent may read differently to a person than to the server. Agents get it in pt-BR. */
+  /** Why SQL from an agent may read differently to a person than to the server. Agents get it in English (AGENT_LOCALE, fixed): the `en.ts` text is part of the CLI output. */
   agentCode: {
     nestedComment:
       'Comentário com /* dentro: o MySQL termina o comentário no primeiro */ e a revisão pode mostrar outra coisa. Tire o /* de dentro.',

@@ -34,7 +34,11 @@ export const en: Shape<typeof ptBR> = {
     transaction: 'Transaction',
     autocommit: 'Auto-commit',
   },
-  modeUnsupported: (p) => `${p.engine} does not support this mode.`,
+  modeFixedTitle: (p) =>
+    p.mode === 'read-only' ? `${p.engine} is read-only in this version` : `${p.engine} only accepts ${p.mode === 'transaction' ? 'Transaction' : 'Auto-commit'} mode`,
+  estimateToggle: 'Estimate while typing',
+  estimateToggleTitle:
+    'Estimates the bytes of the statement under the cursor after each pause in typing and marks errors in the editor. Its text is sent to Google each time; nothing runs and nothing is billed.',
   cancel: 'Cancel',
   run: 'Run',
   txOpen: (p) => `Transaction open · ${f.count(p.statements, { one: 'statement', other: 'statements' })} · ${p.elapsed}`,

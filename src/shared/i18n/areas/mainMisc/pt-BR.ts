@@ -78,4 +78,15 @@ export const ptBR = {
     installed: (p: { path: string }) => `Comando cais instalado em ${p.path}.`,
     notOnPath: (p: { dir: string }) => `A pasta ${p.dir} não está no PATH do terminal: adicione-a para usar o comando.`,
   },
+  skillInstall: {
+    sourceMissing: 'O arquivo da skill que vem com o Cais não foi encontrado ou não é a skill do Cais. Reinstale o Cais ou leia a skill com "cais llm skill".',
+    notDirectory: (p: { path: string }) => `${p.path} já existe e não é uma pasta (ou é um link). O Cais não mexeu nela.`,
+    notFile: (p: { path: string }) => `${p.path} já existe e não é um arquivo comum (ou é um link). O Cais não mexeu nele.`,
+    notOurFile: (p: { path: string }) => `${p.path} já existe e não é a skill do Cais (não é um arquivo nosso). O Cais não mexeu nele.`,
+    failed: (p: { path: string; reason: string }) => `Não foi possível instalar a skill em ${p.path}: ${p.reason}.`,
+    noPermission: 'sem permissão',
+    installed: (p: { path: string }) => `Skill instalada em ${p.path}.`,
+    updated: (p: { path: string }) => `Skill atualizada em ${p.path}.`,
+    alreadyUpToDate: (p: { path: string }) => `A skill em ${p.path} já está atualizada.`,
+  },
 };

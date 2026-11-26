@@ -191,7 +191,7 @@ export function nameParts(tok: Tok): string[] {
  * - the letter x glued to a quote (`x'41'`): the highlighter reads it as a hex number and loses the string;
  * - a `--` comment with no space or tab after the dashes and a string with a `b` prefix (`b'a'`, `rb'a'`, `br'a'`):
  *   a reading with MySQL's rules (no space after the dashes is not a comment; `b'` opens a bit literal) differs.
- * The text goes to the agent that sent the SQL, so it is in `AGENT_LOCALE` (pt-BR, fixed) unless asked otherwise.
+ * The text goes to the agent that sent the SQL, so it is in `AGENT_LOCALE` (English, fixed) unless asked otherwise.
  */
 /**
  * The GoogleSQL chained call, `(x).fn()` or `(x).(ds.fn)()`: the function is named after the expression, where the

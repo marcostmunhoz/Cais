@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { capabilitiesOf, connectionTargetKey, GIB, initialModeFor, isBigqueryDatasetId, isGcpProjectId, sameTarget } from '@shared/engines';
+import { capabilitiesOf, connectionTargetKey, fixedModeOf, GIB, initialModeFor, isBigqueryDatasetId, isGcpProjectId, sameTarget } from '@shared/engines';
 import { engineVersionLabel, getDialect } from '@shared/dialects/registry';
 
 describe('engine capabilities', () => {
   it('MySQL takes the three modes and grid editing', () => {
-    expect(capabilitiesOf('mysql')).toEqual({ modes: ['read-only', 'transaction', 'autocommit'], gridEdit: true, lazyColumns: false, dryRun: false });
+    expect(capabilitiesOf('mysql')).toEqual({ modes: ['read-only', 'transaction', 'autocommit'], gridEdit: true, lazyColumns: false, dryRun: false, syntaxCheck: true });
   });
   it('the initial mode follows production and what the engine accepts', () => {
     const mysql = capabilitiesOf('mysql');
@@ -12,6 +12,20 @@ describe('engine capabilities', () => {
     expect(initialModeFor(mysql, false)).toBe('autocommit');
     expect(initialModeFor({ modes: ['read-only'], gridEdit: false }, false)).toBe('read-only');
     expect(initialModeFor({ modes: ['transaction', 'read-only'], gridEdit: false }, false)).toBe('transaction');
+  });
+});
+
+describe('the mode picker', () => {
+  it('an engine with one mode has nothing to pick: that mode is fixed', () => {
+    expect(fixedModeOf(capabilitiesOf('bigquery'))).toBe('read-only');
+    expect(fixedModeOf({ modes: ['autocommit'], gridEdit: false })).toBe('autocommit');
+  });
+  it('an engine with more than one mode has a picker, and none is fixed', () => {
+    expect(fixedModeOf(capabilitiesOf('mysql'))).toBeNull();
+    expect(fixedModeOf({ modes: ['read-only', 'transaction'], gridEdit: false })).toBeNull();
+  });
+  it('an engine with no mode at all is not a badge either', () => {
+    expect(fixedModeOf({ modes: [], gridEdit: false })).toBeNull();
   });
 });
 
@@ -28,7 +42,7 @@ describe('connection target', () => {
 
 describe('BigQuery engine', () => {
   it('only reads: one mode, no grid editing', () => {
-    expect(capabilitiesOf('bigquery')).toEqual({ modes: ['read-only'], gridEdit: false, lazyColumns: true, dryRun: true });
+    expect(capabilitiesOf('bigquery')).toEqual({ modes: ['read-only'], gridEdit: false, lazyColumns: true, dryRun: true, syntaxCheck: false });
     expect(initialModeFor(capabilitiesOf('bigquery'), false)).toBe('read-only');
     expect(initialModeFor(capabilitiesOf('bigquery'), true)).toBe('read-only');
   });

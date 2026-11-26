@@ -12,7 +12,7 @@ export const en: Shape<typeof ptBR> = {
     connecting: 'The session is still connecting.',
   },
   gridEdit: 'Grid edit',
-  gridNotUpdate: 'Grid edits only apply UPDATE statements.',
+  gridNotEdit: 'Grid edits only apply UPDATE and DELETE statements.',
   mode: {
     readOnly: 'Read-only',
     transaction: 'Transaction',

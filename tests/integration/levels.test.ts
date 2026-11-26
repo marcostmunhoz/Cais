@@ -67,7 +67,7 @@ describe('free-reads-writes outside production', () => {
   it('more than 1.000 rows: stays open for the person, nobody else sees it, Rollback undoes it', async () => {
     const res = (await rig.broker.query({ database: DB, env: 'api/dev', sql: "UPDATE lv_bulk SET v = 'y' WHERE id > 0", write: true, reason: 'teste' })) as any;
     expect(res.status).toBe('awaiting_commit');
-    expect(res.commit_reason).toContain('1.200');
+    expect(res.commit_reason).toContain('1,200');
     expect(Number(await value("SELECT COUNT(*) FROM lv_bulk WHERE v = 'y'"))).toBe(0);
     await rig.broker.rollback(res.request_id);
     expect(Number(await value("SELECT COUNT(*) FROM lv_bulk WHERE v = 'y'"))).toBe(0);
@@ -78,7 +78,7 @@ describe('free-reads-writes outside production', () => {
     try {
       const res = (await rig.broker.query({ database: DB, env: 'api/dev', sql: "INSERT INTO lv_myisam VALUES (1, 'a')", write: true, reason: 'teste' })) as any;
       expect(res.status).toBe('pending_approval');
-      expect(res.approval_reason).toContain('alerta');
+      expect(res.approval_reason).toContain('has an alert');
       expect(Number(await value('SELECT COUNT(*) FROM lv_myisam'))).toBe(0);
       rig.broker.reject(res.request_id);
       // the trigger of an InnoDB table writing to the MyISAM one is seen and stops the write too
@@ -123,8 +123,8 @@ describe('free-reads-writes outside production', () => {
       for (const sql of cases) {
         const res = (await rig.broker.query({ database: DB, env: 'api/dev', sql, write: true, reason: 'teste' })) as any;
         expect(res.status, sql).toBe('pending_approval');
-        if (sql.startsWith('DELETE')) expect(res.approval_reason).toContain('cascata (cais_levels.lv_child)');
-        if (sql.includes('lv_v')) expect(res.approval_reason).toMatch(/view lv_v|função lv_purge|só INSERT/);
+        if (sql.startsWith('DELETE')) expect(res.approval_reason).toContain('cascading foreign key (cais_levels.lv_child)');
+        if (sql.includes('lv_v')) expect(res.approval_reason).toMatch(/view lv_v|database function lv_purge|only INSERT/);
         rig.broker.reject(res.request_id);
       }
       await root.query("CREATE TRIGGER lv_items_purge AFTER UPDATE ON lv_items FOR EACH ROW DELETE FROM lv_victim");
@@ -168,7 +168,7 @@ describe('free-reads-writes outside production', () => {
     try {
       const upd = (await plain.broker.query({ database: DB, env: 'api/dev', sql: "UPDATE lv_items SET v = 'n' WHERE id = 2", write: true, reason: 'teste' })) as any;
       expect(upd.status).toBe('pending_approval');
-      expect(upd.approval_reason).toContain('chaves estrangeiras');
+      expect(upd.approval_reason).toContain('cannot see every foreign key');
       plain.broker.reject(upd.request_id);
       const ins = (await plain.broker.query({ database: DB, env: 'api/dev', sql: "INSERT INTO lv_items VALUES (50, 'novo')", write: true, reason: 'teste' })) as any;
       expect(ins).toMatchObject({ status: 'committed', auto_commit: true, decided_by: 'policy' });

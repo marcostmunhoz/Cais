@@ -192,7 +192,7 @@ describe('broker: script-save follows the agent write policy', () => {
     for (const sql of ['SELECT 1;\n\n\n\nSELECT 2;', 'SELECT 1;\n  \n\t\n \nSELECT 2;', 'SELECT 1;\r\n\r\n\r\n\r\nSELECT 2;', `SELECT 1;${'\n'.repeat(300)}DELETE FROM t WHERE id = 1;`]) {
       const e = await refused(h.broker.scriptSave({ project: 'api', name: `many${sql.length}`, sql }));
       expect(e.code, JSON.stringify(sql.slice(0, 30))).toBe('invalid_script');
-      expect(e.message).toContain('linhas em branco');
+      expect(e.message).toContain('too many blank lines');
     }
     expect(h.scripts.map((s) => s.name)).toEqual(['two', 'two-crlf']);
   });
@@ -734,7 +734,7 @@ function makeManager() {
   return { manager, envs, opened, run };
 }
 
-describe('SessionManager: Cancelar stops the rest of the run', () => {
+describe('SessionManager: Cancel stops the rest of the run', () => {
   it('in autocommit, the statements after the cancelled one never start', async () => {
     const { manager, opened, run } = makeManager();
     await manager.open('t', 'dev');
@@ -752,7 +752,7 @@ describe('SessionManager: Cancelar stops the rest of the run', () => {
     expect(res.session.status).toBe('idle');
   });
 
-  it('in Transação, the state after a cancel comes from the server (probe)', async () => {
+  it('in Transaction, the state after a cancel comes from the server (probe)', async () => {
     const { manager, opened, run } = makeManager();
     await manager.open('t', 'dev');
     await manager.setMode('t', 'transaction');
@@ -787,7 +787,7 @@ describe('SessionManager: Cancelar stops the rest of the run', () => {
 });
 
 describe('SessionManager: an environment newly marked production', () => {
-  it('a tab that was in Auto-commit reopens in Somente leitura with a notice', async () => {
+  it('a tab that was in Auto-commit reopens in Read-only with a notice', async () => {
     const { manager, envs, opened } = makeManager();
     expect((await manager.open('t', 'dev')).mode).toBe('autocommit');
     envs.dev = { ...envs.dev!, production: true };
@@ -809,7 +809,7 @@ describe('SessionManager: an environment newly marked production', () => {
   });
 });
 
-describe('SessionManager: "Buscar até 50.000" (refetch) only for a single plain read', () => {
+describe('SessionManager: "Fetch up to 50,000" (refetch) only for a single plain read', () => {
   it.each(['UPDATE a SET b = 1', 'SELECT 1; SELECT 2', 'SELECT * FROM t FOR UPDATE', 'CALL p()', "SELECT 1 INTO OUTFILE '/tmp/x'", 'SET @a = 1'])(
     'refuses %s before anything runs',
     async (sql) => {

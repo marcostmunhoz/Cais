@@ -1,5 +1,6 @@
 import type { Engine } from '../model';
 import type { CellValue, StatementKind } from '../results';
+import type { ScopeAnalysis } from './scope';
 
 export interface SqlStatement {
   /** Statement text without the trailing delimiter, trimmed. */
@@ -20,9 +21,9 @@ export interface Classification {
   allowedInReadOnly: boolean;
   implicitCommit: boolean;
   transactionControl: TransactionControl;
-  /** Why the statement is refused in read-only mode (pt-BR), when it is. */
+  /** Why the statement is refused in read-only mode (in the app locale), when it is. */
   reason?: string;
-  /** Refused in every mode (message pt-BR): SET autocommit / transaction characteristics, COMMIT RELEASE. */
+  /** Refused in every mode (message in the app locale): SET autocommit / transaction characteristics, COMMIT RELEASE. */
   alwaysRefuse?: string;
   /** True for USE: the current database may have changed. */
   changesDatabase?: boolean;
@@ -78,9 +79,24 @@ export interface UpdateSpec {
   where: UpdateValue[];
 }
 
+/** One DELETE of one row of one table, identified by its whole primary key. */
+export interface DeleteSpec {
+  database: string;
+  table: string;
+  where: UpdateValue[];
+}
+
+/** One INSERT of one or more rows into one table: `rows[i][j]` is the value of `columns[j]`. */
+export interface InsertSpec {
+  database: string;
+  table: string;
+  columns: { column: string; type: string }[];
+  rows: (readonly CellValue[])[];
+}
+
 /**
  * What agents may and may not touch, as the engine names it. `decide()` (main/agents/policy.ts) and the broker
- * read these and know no engine's names. The refusal messages go to agents only (fixed pt-BR).
+ * read these and know no engine's names. The refusal messages go to agents only (fixed English).
  */
 export interface AgentRules {
   /** Lower-case names of schemas/databases agents never write to. */
@@ -124,11 +140,16 @@ export interface Dialect {
    */
   appendStatements(doc: string, text: string): { changes: { from: number; insert: string }[]; selection: { from: number; to: number } };
   classify(statement: string): Classification;
-  /** Alerts for a person reviewing the statement (pt-BR), such as "UPDATE sem WHERE". */
+  /** Alerts for a person reviewing the statement (in the app locale), such as "UPDATE without WHERE". */
   warnings(statement: string): string[];
+  /**
+   * Which tables a statement names, under which alias, and what each position of it can see (see `scope.ts`). Reads
+   * incomplete text: the editor asks it while the statement is being typed.
+   */
+  analyze(statement: string): ScopeAnalysis;
   /** Lower-case identifier names a statement mentions (words and quoted names), for matching against the schema. */
   identifiers(statement: string): string[];
-  /** Why SQL from an agent may read differently to a person than to the server (pt-BR), or null. */
+  /** Why SQL from an agent may read differently to a person than to the server (in AGENT_LOCALE, English), or null. */
   agentCodeProblem?(sql: string): string | null;
   quoteIdent(name: string): string;
   /** What agents may and may not touch. */
@@ -144,4 +165,13 @@ export interface Dialect {
   quoteLiteral(value: CellValue, type: string): string;
   /** `UPDATE db.table SET … WHERE <every key column> = …`, without a terminator and without LIMIT. Throws like `quoteLiteral`. */
   buildUpdate(spec: UpdateSpec): string;
+  /** `buildUpdate`, plus where each SET value literal sits in the statement (offsets into `sql`, in order of `spec.set`). */
+  buildUpdateLocated(spec: UpdateSpec): { sql: string; setValues: { from: number; to: number }[] };
+  /** `DELETE FROM db.table WHERE <every key column> = …`, without a terminator and without LIMIT. Throws like `quoteLiteral`, and when a key value is NULL. */
+  buildDelete(spec: DeleteSpec): string;
+  /**
+   * `INSERT INTO db.table (<columns>) VALUES (…), (…)`, without a terminator: one line when there is one row, one
+   * line per row otherwise. Throws like `quoteLiteral`, and when there is no column or no row.
+   */
+  buildInsert(spec: InsertSpec): string;
 }

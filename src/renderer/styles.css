@@ -440,6 +440,68 @@ html:not(.platform-darwin) .sidebar {
   font-weight: 500;
 }
 
+.mode-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 6px;
+  border: 0.5px solid var(--border);
+  background: var(--surface-1);
+  color: var(--text-secondary);
+  cursor: default;
+  user-select: none;
+}
+
+.estimate-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.estimate-switch:hover {
+  color: var(--text-primary);
+}
+
+.estimate-switch .track {
+  position: relative;
+  flex: none;
+  width: 24px;
+  height: 14px;
+  border-radius: 7px;
+  border: 0.5px solid var(--border-strong);
+  background: var(--fill-ghost-selected);
+}
+
+.estimate-switch .track::after {
+  content: '';
+  position: absolute;
+  top: 1.5px;
+  left: 1.5px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  transition: transform 0.12s;
+}
+
+.estimate-switch[aria-checked='true'] .track {
+  background: var(--accent);
+  border-color: transparent;
+}
+
+.estimate-switch[aria-checked='true'] .track::after {
+  transform: translateX(10px);
+}
+
 .select {
   appearance: none;
   height: 24px;
@@ -692,6 +754,34 @@ kbd {
   color: var(--text-primary);
 }
 
+/* syntax diagnostics: a thin wavy underline and a tooltip in the same look as the completion's */
+.editor-host .cm-editor .cm-lintRange-error {
+  background-image: none;
+  padding-bottom: 0;
+  text-decoration: underline wavy color-mix(in srgb, var(--danger) 70%, transparent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.cm-tooltip.cm-tooltip-lint {
+  background: var(--surface-3);
+  border: 0.5px solid var(--border-strong);
+  border-radius: 6px;
+  box-shadow: var(--shadow);
+  padding: 3px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  max-width: 420px;
+}
+
+.cm-tooltip-lint .cm-diagnostic {
+  color: var(--text-primary);
+  margin-left: 0;
+  padding: 3px 8px;
+  border-left: 3px solid var(--danger);
+  white-space: normal;
+}
+
 .cm-completionDetail {
   color: var(--text-muted);
   font-style: normal;
@@ -703,6 +793,24 @@ kbd {
   text-decoration: none;
   font-weight: 600;
   color: var(--accent-text);
+}
+
+.cm-tooltip.cm-tooltip-lint {
+  background: var(--surface-3);
+  border: 0.5px solid var(--border-strong);
+  border-radius: 6px;
+  box-shadow: var(--shadow);
+  color: var(--text-primary);
+  font-size: 12px;
+  max-width: 560px;
+}
+
+.cm-tooltip-lint .cm-diagnostic {
+  white-space: pre-wrap;
+}
+
+.cm-tooltip-lint .cm-diagnostic-error {
+  border-left-color: var(--danger);
 }
 
 .splitter {
@@ -869,6 +977,23 @@ kbd {
   box-shadow: inset 3px 0 0 var(--fill-warning), inset 0 0 0 1.5px var(--accent);
 }
 
+/* Rows marked for deletion */
+.grid-row-deleted .grid-cell:not(.gutter) {
+  background: var(--danger-bg);
+  color: var(--danger);
+  text-decoration: line-through;
+}
+
+.grid-row-deleted .grid-cell.gutter {
+  color: var(--danger);
+  background: var(--danger-bg);
+  text-decoration: line-through;
+}
+
+.grid-row-deleted .grid-cell.sel:not(.gutter) {
+  background: color-mix(in srgb, var(--danger-bg) 70%, var(--accent) 30%);
+}
+
 .grid-cell.editing {
   padding: 0;
   overflow: visible;
@@ -912,6 +1037,19 @@ kbd {
 
 .grid-editbar .summary {
   font-weight: 500;
+}
+
+.grid-delete-warn {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0 10px 6px 0;
+  padding: 5px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  background: var(--danger-bg);
+  color: var(--danger);
+  border: 0.5px solid var(--danger-border);
 }
 
 .grid-hint {
@@ -1498,6 +1636,14 @@ kbd {
   color: var(--accent-fg);
 }
 
+.menu .menu-shortcut {
+  margin-left: 16px;
+  color: inherit;
+  opacity: 0.6;
+  font-family: inherit;
+  font-size: 11px;
+}
+
 .menu hr {
   border: 0;
   border-top: 0.5px solid var(--border);
@@ -2007,4 +2153,100 @@ kbd {
   display: flex;
   justify-content: center;
   padding: 10px 0 4px;
+}
+
+/* About window ---------------------------------------------------------- */
+.dialog.about {
+  width: 400px;
+}
+
+.about-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 2px;
+  padding: 20px 20px 16px;
+}
+
+.about-logo {
+  width: 72px;
+  height: 72px;
+  margin-bottom: 8px;
+  user-select: none;
+}
+
+.about-name {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.about-version {
+  color: var(--text-secondary);
+  min-height: 1.4em;
+}
+
+.about-tagline {
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.about-list {
+  width: 100%;
+  margin: 16px 0 0;
+  text-align: left;
+  border-top: 0.5px solid var(--border);
+}
+
+.about-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 6px 0;
+  border-bottom: 0.5px solid var(--border);
+}
+
+.about-row dt {
+  color: var(--text-secondary);
+}
+
+.about-row dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.about-row .link-btn {
+  font-size: inherit;
+  font-family: inherit;
+}
+
+.about-update {
+  width: 100%;
+  margin-top: 14px;
+  text-align: left;
+}
+
+.about-update-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 600;
+}
+
+.about-hint,
+.about-result {
+  margin-top: 6px;
+  color: var(--text-secondary);
+}
+
+.about-hint {
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+.about-result .link-btn {
+  font-size: inherit;
 }

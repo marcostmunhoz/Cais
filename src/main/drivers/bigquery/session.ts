@@ -7,7 +7,7 @@ import { quoteIdent } from '@shared/dialects/bigquery';
 import type { BigqueryConnectParams, DbSession, DbSessionError, ExecuteOptions, PrepareResult } from '../types';
 import { DriverError } from '../types';
 import { anything, datasetGet, dryRunBody, dryRunResponse, jobGet, queryResponse, toDryRun, type BigqueryClient, type DryRun, type QueryResponse } from './client';
-import { mapBigqueryError } from './errors';
+import { BigqueryApiError, mapBigqueryError } from './errors';
 import { columnMeta, decodeRow, type SchemaField } from './values';
 
 /** How long jobs.query waits for a quick answer before handing back a job to poll. */
@@ -31,7 +31,7 @@ interface JobRef {
   location?: string;
 }
 
-/** The last finished read, kept so "Buscar até 50.000" can read more pages of the same job instead of running again. */
+/** The last finished read, kept so "Fetch up to 50,000" can read more pages of the same job instead of running again. */
 interface LastJob {
   sql: string;
   dataset: string | null;
@@ -145,9 +145,9 @@ export class BigquerySession implements DbSession {
   }
 
   /** The dry run: what BigQuery reads the statement as, and how many bytes it would read. */
-  async prepare(sql: string): Promise<PrepareResult> {
+  async prepare(sql: string, opts: { signal?: AbortSignal } = {}): Promise<PrepareResult> {
     try {
-      const response = await this.dryRun(sql, undefined);
+      const response = await this.dryRun(sql, opts.signal);
       return {
         ...(response.statementType ? { serverKind: response.statementType } : {}),
         ...(response.totalBytesProcessed !== undefined ? { bytesEstimated: response.totalBytesProcessed } : {}),
@@ -155,8 +155,29 @@ export class BigquerySession implements DbSession {
         ...(response.routines.length > 0 ? { routines: response.routines.map((r) => `${r.datasetId}.${r.routineId}`) } : {}),
       };
     } catch (error) {
-      return { error: mapBigqueryError(error, { cancelled: false }) };
+      // 400 (invalid query) is about the text, and so is a 404 for something the text names; the rest (a 404 for the
+      // project or the default dataset, permission, quota, network) is about the way to the server
+      const inStatement = error instanceof BigqueryApiError && (error.status === 400 || (error.status === 404 && this.missingIsNamedBy(sql, error.apiMessage)));
+      return { error: mapBigqueryError(error, { cancelled: false }), ...(inStatement ? { errorInStatement: true } : {}) };
     }
+  }
+
+  /**
+   * A 404 says something is not there. It is a fault of the text when the text names it (a table, a view, a routine, or
+   * a dataset the text spells out). When it is the project or the tab's default dataset, the environment is what is wrong,
+   * unless the text itself spells that name.
+   */
+  private missingIsNamedBy(sql: string, message: string): boolean {
+    if (/\bat \[\d+:\d+\]/.test(message)) return true;
+    const named = /Not found: (\w+) (\S+)/i.exec(message);
+    if (!named) return false;
+    const kind = named[1]!.toLowerCase();
+    if (kind !== 'dataset' && kind !== 'project') return kind !== 'location' && kind !== 'job' && kind !== 'user';
+    const id = named[2]!.replace(/[`,.;:]+$/, '');
+    const ours = [this.params.project, this.dataset ? `${this.params.project}:${this.dataset}` : null];
+    if (!ours.includes(id)) return true;
+    const spelled = kind === 'project' ? this.params.project : this.dataset;
+    return !!spelled && sql.includes(spelled);
   }
 
   /** jobs.insert with dryRun: unlike jobs.query, it also reports the routines the statement reaches. */
@@ -212,7 +233,7 @@ export class BigquerySession implements DbSession {
       const read = await this.run(sql, opts, active, stats);
       return { ...base, durationMs: elapsed(), ...read };
     } catch (error) {
-      // a stop by Cancelar is a cancellation whatever the server or the aborted request said
+      // a stop by Cancel is a cancellation whatever the server or the aborted request said
       if (active.cancelRequested && !this.dead) return { ...base, durationMs: elapsed(), error: cancelledError() };
       if (this.closing) return { ...base, durationMs: elapsed(), error: this.dead ?? lostError() };
       return { ...base, durationMs: elapsed(), error: mapBigqueryError(error, { cancelled: false }) };
@@ -242,7 +263,7 @@ export class BigquerySession implements DbSession {
     let response = await this.client.call(queryResponse, 'POST', `${this.projectPath}/queries`, {
       // Not tied to the client's life: close and destroy abort every call, and an aborted jobs.query would lose the
       // job id of a job the server already created (it would run and bill with nobody to cancel it). It waits for
-      // the answer, bounded, and the check below stops the job when close or Cancelar came meanwhile.
+      // the answer, bounded, and the check below stops the job when close or Cancel came meanwhile.
       detached: true,
       signal: AbortSignal.any([active.controller.signal, AbortSignal.timeout(QUICK_WAIT_MS + QUERY_CALL_SLACK_MS)]),
       body: {
@@ -263,7 +284,7 @@ export class BigquerySession implements DbSession {
     const location = response.jobReference?.location ?? response.location;
     if (response.jobReference?.jobId) {
       active.job = { jobId: response.jobReference.jobId, ...(location ? { location } : {}) };
-      // Cancelar came before the job had an id: stop it now
+      // Cancel came before the job had an id: stop it now
       if (active.cancelRequested) {
         await this.stopJob(active.job);
         return { error: cancelledError() };

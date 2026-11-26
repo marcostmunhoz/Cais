@@ -1,87 +1,92 @@
 # AGENTS.md — Cais
 
-Cliente SQL de desktop (Electron + React + TypeScript), organizado por projeto e ambiente. MySQL primeiro e BigQuery só leitura, com o motor isolado por contratos de driver e de dialeto; login IAM no Cloud SQL via `gcloud`; acesso de agentes de IA pelo CLI `cais llm`, com aprovação no app.
+Desktop SQL client (Electron + React + TypeScript), organized by project and environment. MySQL first and BigQuery read-only, with the engine isolated behind driver and dialect contracts; IAM login on Cloud SQL through `gcloud`; AI agent access through the `cais llm` CLI, with approval in the app.
 
-Antes de mudar comportamento, leia [docs/comportamento.md](docs/comportamento.md) (o que o produto faz e por quê) e [docs/seguranca.md](docs/seguranca.md) (o modelo de segurança). A arquitetura está em [docs/arquitetura.md](docs/arquitetura.md) e o contrato do CLI em [docs/agentes.md](docs/agentes.md).
+Before changing behavior, read [docs/behavior.md](docs/behavior.md) (what the product does and why) and [docs/security.md](docs/security.md) (the security model). The architecture is in [docs/architecture.md](docs/architecture.md) and the CLI contract in [docs/agents.md](docs/agents.md).
 
-## Mapa do código
+## Code map
 
-| Pasta | O que tem |
+| Folder | What it holds |
 |---|---|
-| `src/main` | Processo principal: ciclo de vida, IPC (`ipc.ts`), sessões da pessoa (`sessions.ts`), drivers (`drivers/mysql`, `drivers/bigquery`), credenciais e `gcloud` (`auth/`), arquivos e cofre (`store/`), Trilha (`trail.ts`), acesso de agentes (`agents/`) |
-| `src/preload` | A ponte `window.cais` (contrato `CaisApi`) |
-| `src/renderer` | Interface em React (`components/`, `lib/`) |
-| `src/shared` | TypeScript puro usado pelos dois lados: modelo, resultados, contrato de IPC, dialetos (`dialects/mysql`, `dialects/bigquery`), capacidades por motor (`engines.ts`), i18n (`i18n/`), regras de texto, edição na grade |
-| `src/cli` | O comando `cais llm` (sem dependências, empacotado por `scripts/build-cli.mjs`) |
-| `tests` | `unit`, `integration` (MySQL em container; BigQuery em servidor falso, sem Docker), `e2e` (Playwright com Electron), `live` (BigQuery de verdade, opcional), `support` |
-| `scripts` | Empacotamento do CLI e assinatura ad-hoc do app (`afterSign`) |
-| `skills/cais` | Skill para agentes usarem o CLI |
-| `docs` | Documentação do produto, da segurança, da arquitetura e do CLI |
+| `src/main` | Main process: lifecycle, IPC (`ipc.ts`), the user's sessions (`sessions.ts`), drivers (`drivers/mysql`, `drivers/bigquery`), credentials and `gcloud` (`auth/`), files and vault (`store/`), Trail (`trail.ts`), agent access (`agents/`) |
+| `src/preload` | The `window.cais` bridge (`CaisApi` contract) |
+| `src/renderer` | React interface (`components/`, `lib/`) |
+| `src/shared` | Pure TypeScript used by both sides: model, results, IPC contract, dialects (`dialects/mysql`, `dialects/bigquery`), per-engine capabilities (`engines.ts`), i18n (`i18n/`), text rules, grid editing |
+| `src/cli` | The `cais llm` command (no dependencies, bundled by `scripts/build-cli.mjs`; `skill.ts` embeds `skills/cais/SKILL.md` with a Vite `?raw` import for `cais llm skill`) |
+| `tests` | `unit`, `integration` (MySQL in a container; BigQuery against a fake server, no Docker), `e2e` (Playwright with Electron), `live` (real BigQuery, optional), `support` |
+| `scripts` | CLI bundling and the app's ad-hoc signing (`afterSign`) |
+| `skills/cais` | Skill for agents to use the CLI |
+| `docs` | Documentation for the product, security, architecture and the CLI |
 
-## Invariantes
+## Invariants
 
-- **Segredo nunca sai do processo principal** em texto puro e nunca vai para log. A senha entra pelo IPC só ao salvar e nunca volta ao renderer. Agentes nunca recebem senha, token, host nem id de credencial, nem o projeto do Google Cloud e e-mails de conta (BigQuery).
-- **O processo principal nunca confia no renderer:** todo canal de IPC valida a entrada com zod, só aceita a janela principal, e o SQL é reclassificado pelo dialeto antes de executar.
-- **A interface não conhece o motor:** dialeto, classificação de comandos e introspecção vêm de `src/shared/dialects` e `src/main/drivers`.
-- **O app nunca altera o `gcloud`:** só três comandos, todos de leitura: `gcloud auth list`, `gcloud sql generate-login-token` e `gcloud auth print-access-token` (token do BigQuery, com cache próprio de 50 minutos).
-- **Toda requisição de agente é reclassificada no main** (`src/main/agents/policy.ts`). Agente não aprova, não liga o acesso, não muda o nível de um ambiente e não edita nem apaga script. O socket só existe com o acesso ligado (`settings.json`, desligado por padrão). Em produção, escrita de agente sempre pede aprovação. Nada de agente roda sem a Trilha.
-- **Somente leitura em duas camadas:** a lista do app e, no servidor, `READ ONLY` (MySQL) ou o dry run que só deixa passar `SELECT` (BigQuery, repetido dentro de `BigquerySession.execute`). No classificador, na dúvida, recusa.
-- **Custo no BigQuery:** leitura de agente estimada acima de 10 GiB (`AGENT_BYTES_APPROVAL`, fixo, somando o pedido) ou do limite do ambiente, se menor, espera a pessoa em qualquer nível, e todo job de agente leva `maximumBytesBilled`. O dry run vai por `jobs.insert` e leitura de agente que usa qualquer rotina (`referencedRoutines`; por dentro de uma view, ainda não conferido contra o servidor real: `docs/seguranca.md`) espera a pessoa em qualquer nível.
-- **Linux:** o cofre só vale com chaveiro de verdade (Secret Service; `basic_text` e `unknown` são recusados em `SafeStorageVault`). Os textos de atalho mostrados na interface saem de `src/shared/shortcuts.ts` (símbolos no macOS, Ctrl+… nos outros), nunca fixos no componente; o tratamento das teclas fica em `App.tsx` (`useGlobalShortcuts`) e deve bater com esses textos. O socket dos agentes cai em `$XDG_RUNTIME_DIR` quando o caminho padrão passa de 100 bytes. O deb instala o executável `cais-app` em `/opt/Cais`.
-- **Poucas opções:** nada de opção de configuração sem o motivo registrado em `docs/comportamento.md`.
-- **Idioma:** a interface segue o idioma do sistema, em pt-BR ou inglês. Todo texto que a pessoa vê sai dos catálogos de `src/shared/i18n/areas` (os dois idiomas, mesma chave), nunca escrito direto no componente. O que vai para agentes (saída do CLI, `guide`, respostas do broker) fica em português, fixo. Sem exclamação; termos do ofício como se fala (commit, rollback, schema, query).
-- **O Cais roda uma instância por usuário** (`requestSingleInstanceLock`) e recusa abrir com opções de depuração remota (`--inspect*`, `--remote-debugging-*`), menos no gancho de e2e. O DevTools só existe fora do pacote.
+- **Secrets never leave the main process** in plain text and never go to a log. The password enters through IPC only when saving and never returns to the renderer. Agents never receive a password, token, host or credential id, nor the Google Cloud project or account emails (BigQuery).
+- **The main process never trusts the renderer:** every IPC channel validates its input with zod, only accepts the main window, and the SQL is reclassified by the dialect before it runs.
+- **The interface does not know the engine:** dialect, statement classification, statement scope for autocomplete (`Dialect.analyze`) and introspection come from `src/shared/dialects` and `src/main/drivers`; what an engine does or does not do (columns per dataset, local syntax check) comes from `src/shared/engines.ts`.
+- **The app never changes `gcloud`:** only three commands, all read-only: `gcloud auth list`, `gcloud sql generate-login-token` and `gcloud auth print-access-token` (BigQuery token, with its own 50-minute cache).
+- **Every agent request is reclassified in main** (`src/main/agents/policy.ts`). An agent does not approve, does not turn access on, does not change an environment's level and does not edit or delete scripts. The socket exists only with agent access on (`settings.json`, off by default). On Production, an agent's write always needs approval. No agent action runs without the Trail.
+- **Read-only in two layers:** the app's list and, on the server, `READ ONLY` (MySQL) or the dry run that only lets `SELECT` through (BigQuery, repeated inside `BigquerySession.execute`). In the classifier, when in doubt, it refuses.
+- **BigQuery cost:** an agent read estimated above 10 GiB (`AGENT_BYTES_APPROVAL`, fixed, summing the request) or above the environment's limit, if lower, waits for the user at any level, and every agent job carries `maximumBytesBilled`. The dry run goes through `jobs.insert`, and an agent read that uses any routine (`referencedRoutines`; inside a view, not yet checked against the real server: `docs/security.md`) waits for the user at any level.
+- **Estimate while typing (BigQuery):** main decides what goes out (`SessionManager.estimate`): only with the switch on in `settings.json` (`estimateAsYouType`, off by default, outside the agent access seal), one statement at a time, reclassified by the dialect, and it never executes or enters the Trail. Main checks the switch, the number of statements and the classifier on every request; the renderer only chooses when to ask; the channel does not exist on the agent socket.
+- **Linux:** the vault is only accepted with a real keyring (Secret Service; `basic_text` and `unknown` are refused in `SafeStorageVault`). The shortcut texts shown in the interface come from `src/shared/shortcuts.ts` (symbols on macOS, Ctrl+… elsewhere), never hardcoded in the component; key handling lives in `App.tsx` (`useGlobalShortcuts`) and must match those texts (the exception is the grid's Delete key, which marks rows for deletion: handling lives in `Results.tsx`, through `isDeleteRowsKey` from the same `shortcuts.ts`). The agent socket falls back to `$XDG_RUNTIME_DIR` when the default path exceeds 100 bytes. The deb installs the `cais-app` executable in `/opt/Cais`.
+- **Few options:** no configuration option without its reason recorded in `docs/behavior.md`.
+- **Language:** the repository is in English: docs, README, `AGENTS.md`, `skills/cais/SKILL.md`, and release notes are in English, and everything sent to agents (CLI output, `guide`, broker answers and refusals) is in English regardless of the system language. Only the in-app UI follows the system language, pt-BR or English. Every text the user sees comes from the catalogs in `src/shared/i18n/areas` (both languages, same key), never written directly in the component. No exclamation marks; trade terms as developers say them (commit, rollback, schema, query); the pt-BR catalog keeps the same style rule.
+- **Network:** only the main process leaves the machine (databases, `bigquery.googleapis.com`, the `gcloud` subprocess and, only when the user clicks Check in the About Cais window, `api.github.com`; full list in `docs/security.md`). What opens in the browser is fixed and built in main (`app:openLink` receives a name, never an address). No check runs on its own.
+- **Cais runs one instance per user** (`requestSingleInstanceLock`) and refuses to start with remote debugging options (`--inspect*`, `--remote-debugging-*`), except under the e2e hook. DevTools only exists outside the packaged app.
 
-## Convenções
+## Conventions
 
-- TypeScript `strict`; código, identificadores e comentários em inglês. A documentação em `docs/` e o README ficam em português.
-- Dependências com versão exata (sem `^`), `package-lock.json` versionado.
-- O lockfile muda conforme a versão do npm: usar npm 11.x nas duas máquinas. Scripts de instalação de dependências precisam estar no `allowScripts` do `package.json` (`npm install-scripts ls` tem de ficar sem pendências).
-- `src/shared` é TypeScript puro: sem Node, sem DOM.
-- `vitest` fica na 4.x (a 5.x exige Node 22). O `typescript` está na 7.x: sem `baseUrl`, os aliases usam `paths` com `./`.
-- A CSP mantém `style-src 'unsafe-inline'` porque o CodeMirror injeta estilos.
+- TypeScript `strict`; code, identifiers and comments in English. The documentation in `docs/` and the README are in English too.
+- Dependencies with exact versions (no `^`), `package-lock.json` committed.
+- The lockfile changes with the npm version: use npm 11.x on both machines. Dependency install scripts must be in the `package.json` `allowScripts` (`npm install-scripts ls` must show nothing pending).
+- `src/shared` is pure TypeScript: no Node, no DOM.
+- `vitest` stays on 4.x (5.x requires Node 22). `typescript` is on 7.x: no `baseUrl`, aliases use `paths` with `./`.
+- The CSP keeps `style-src 'unsafe-inline'` because CodeMirror injects styles. The MySQL syntax check runs in a module Web Worker (`src/renderer/lib/syntax/worker.ts`); `script-src 'self'` is enough, no `worker-src`.
+- `dt-sql-parser` (grammar for the error underline, a development dependency bundled in the worker) ships ES modules without extensions: Vitest reads it through `server.deps.inline` in both configs. The list of what the grammar misreads (`src/renderer/lib/syntax/mysql.ts`) has a test against its vocabulary (`tests/unit/syntax-mysql.test.ts`): when the package version changes, the test shows what changed.
 
-## Comandos
+## Commands
 
-Todos rodam na raiz do projeto, com Node 20.19 ou mais novo e npm.
+All run from the project root, with Node 20.19 or newer and npm.
 
-| Comando | O que faz |
+| Command | What it does |
 |---|---|
-| `npm install` | Instala as dependências (versões exatas). |
-| `npm run dev` | Abre o app em desenvolvimento (electron-vite, com recarga). |
-| `npm run typecheck` | `tsc` estrito nos dois projetos (`tsconfig.node.json` e `tsconfig.web.json`). |
-| `npm run unit` | Vitest sem Docker: dialeto, sessões (driver e relógio falsos), `gcloud` (spawn falso), stores, assinatura, Trilha, política e broker de agentes, servidor do socket (socket real em pasta temporária), CLI, i18n, edição na grade. |
-| `npm run integration` | Vitest contra um `mysql:8.4` em container próprio `cais-test-*`, porta aleatória, removido no fim (inclui o acesso de agentes ponta a ponta). Precisa do Docker. |
-| `npm run build` | `electron-vite build` (saída em `out/`) e `scripts/build-cli.mjs`, que empacota o CLI em `out/cli/cais.mjs` (um arquivo, só módulos do Node, executável). |
-| `npm run e2e` | Playwright `_electron`: abre janelas de verdade com `userData` e socket temporários, sobe o próprio container `cais-test-*`, roda o CLI real como processo filho e regrava as capturas em `tests/e2e/screenshots/`. Precisa de `npm run build` antes e do Docker. |
-| `npm run check` | `typecheck && unit && integration && build && e2e`. É o que precisa estar verde para commitar. |
-| `npm run live:bigquery` | Suíte ao vivo opcional contra um projeto BigQuery sandbox, fora do `npm run check`. Precisa de `CAIS_BQ_LIVE_PROJECT` e `CAIS_BQ_LIVE_TOKEN` (o token é o do próprio `gcloud auth print-access-token`, que você roda); opcionais: `CAIS_BQ_LIVE_DATASET`, `CAIS_BQ_LIVE_ROUTINE` (função escalar persistente de um INT64, `dataset.rotina`) e `CAIS_BQ_LIVE_VIEW` (`dataset.view` que chama essa rotina). Pula tudo sem as duas primeiras, só lê: dry runs e consultas sem tabela (0 bytes), metadados e um cancelamento; o SELECT na tabela pública só roda com teto de 1 byte e é recusado sem cobrança. Nunca roda o `gcloud`; o cabeçalho de `tests/live/bigquery.test.ts` tem o passo a passo. Confere o que o servidor diz de cada classe de comando (o `statementType` do dry run) contra o classificador. |
-| `npm run cli -- llm envs` | Recompila o CLI e roda `cais llm …`. Precisa do Cais aberto (`npm run dev`) com o acesso de agentes ligado. |
-| `npm run dist` | `build` + electron-builder, que gera os alvos do sistema em que roda. macOS: `dist/Cais-<versão>-arm64.dmg` e `dist/mac-arm64/Cais.app`. Linux: `dist/cais_<versão>_amd64.deb` (x64, executável `cais-app`, CLI em `/opt/Cais/resources/cli/cais.mjs`). Nos dois, com Electron fuses endurecidos (`electronFuses`) e `umask 022`; no macOS, também assinatura ad-hoc local (`scripts/adhoc-sign.cjs`, hook `afterSign`). O CLI vai em `Cais.app/Contents/Resources/cli/cais.mjs` (`extraResources`: o Node do sistema não lê dentro do asar) e roda no Node do sistema, não pelo Electron (o fuse `runAsNode` fica desligado). |
+| `npm install` | Installs the dependencies (exact versions). |
+| `npm run dev` | Opens the app in development (electron-vite, with hot reload). |
+| `npm run typecheck` | Strict `tsc` on both projects (`tsconfig.node.json` and `tsconfig.web.json`). |
+| `npm run unit` | Vitest without Docker: dialect, sessions (fake driver and clock), `gcloud` (fake spawn), stores, signature, Trail, agent policy and broker, socket server (real socket in a temporary folder), CLI, i18n, grid editing. |
+| `npm run integration` | Vitest against a `mysql:8.4` in its own `cais-test-*` container, random port, removed at the end (includes agent access end to end). Needs Docker. |
+| `npm run build` | `electron-vite build` (output in `out/`) and `scripts/build-cli.mjs`, which bundles the CLI into `out/cli/cais.mjs` (a single file, Node modules only, executable). |
+| `npm run e2e` | Playwright `_electron`: opens real windows with a temporary `userData` and socket, starts its own `cais-test-*` container, runs the real CLI as a child process and rewrites the screenshots in `tests/e2e/screenshots/`. Needs `npm run build` first and Docker. |
+| `npm run e2e -- tests/e2e/docs-images.spec.ts` | Regenerates the English screenshots of `docs/images/` (a dedicated spec with `CAIS_LOCALE=en`, 1280x800, written to `tests/e2e/screenshots/<name>-en.png`); copy each one over `docs/images/<name>.png` (same name without `-en`). Needs `npm run build` first and Docker. |
+| `npm run check` | `typecheck && unit && integration && build && e2e`. It must be green to commit. |
+| `npm run live:bigquery` | Optional live suite against a sandbox BigQuery project, outside `npm run check`. Needs `CAIS_BQ_LIVE_PROJECT` and `CAIS_BQ_LIVE_TOKEN` (the token is the one from `gcloud auth print-access-token`, which you run yourself); optional: `CAIS_BQ_LIVE_DATASET`, `CAIS_BQ_LIVE_ROUTINE` (persistent scalar function of one INT64, `dataset.routine`) and `CAIS_BQ_LIVE_VIEW` (`dataset.view` that calls that routine). Skips everything without the first two, only reads: dry runs and queries without a table (0 bytes), metadata and one cancellation; the SELECT on the public table only runs with a 1-byte cap and is refused without charge. Never runs `gcloud`; the header of `tests/live/bigquery.test.ts` has step-by-step instructions. Checks what the server says for each statement class (the dry run's `statementType`) against the classifier. |
+| `npm run cli -- llm envs` | Rebuilds the CLI and runs `cais llm …`. Needs Cais open (`npm run dev`) with agent access on. |
+| `npm run dist` | `build` + electron-builder, which produces the targets for the system it runs on. macOS: `dist/Cais-<version>-arm64.dmg` and `dist/mac-arm64/Cais.app`. Linux: `dist/cais_<version>_amd64.deb` (x64, `cais-app` executable, CLI at `/opt/Cais/resources/cli/cais.mjs`). On both, with hardened Electron fuses (`electronFuses`) and `umask 022`; on macOS, also local ad-hoc signing (`scripts/adhoc-sign.cjs`, `afterSign` hook). The skill ships in `resources/skill/SKILL.md` next to it (`Cais.app/Contents/Resources/skill/SKILL.md`, `/opt/Cais/resources/skill/SKILL.md` in the deb), a copy of the single source `skills/cais/SKILL.md`, which `cais llm skill` also embeds at build time. The CLI ships in `Cais.app/Contents/Resources/cli/cais.mjs` (`extraResources`: the system Node does not read inside the asar) and runs on the system Node, not through Electron (the `runAsNode` fuse stays off). |
 
-## Versões e releases
+## Versions and releases
 
-- Uma release se faz assim: `npm version x.y.z` (cria o commit `chore(release): x.y.z` e a tag `vx.y.z`, pelo `.npmrc`) e depois `git push --follow-tags`. O workflow `release.yml` confere que a tag bate com a versão do `package.json`, roda o `npm run check`, gera o deb (Linux) e o dmg (macOS arm64, assinatura ad-hoc) e publica a GitHub Release com os dois arquivos e o `SHA256SUMS.txt`.
-- Tag e release são feitas só pela pessoa, nunca por um agente, a menos que ela peça.
-- O CI (`ci.yml`) roda `npm run check` no Linux a cada push em qualquer branch, e o resultado aparece no pull request. O macOS só roda na release, porque os minutos dele custam 10 vezes mais.
-- As actions ficam fixadas por SHA completo, com a versão num comentário. Só `actions/*`, e o único segredo é o `github.token`.
+- A release is made like this: `npm version x.y.z` (creates the `chore(release): x.y.z` commit and the `vx.y.z` tag, through `.npmrc`) and then `git push --follow-tags`. The `release.yml` workflow checks that the tag matches the `package.json` version, runs `npm run check`, builds the deb (Linux) and the dmg (macOS arm64, ad-hoc signing) and publishes the GitHub Release with both files and `SHA256SUMS.txt`.
+- Tags and releases are made only by the user, never by an agent, unless the user asks.
+- CI (`ci.yml`) runs `npm run check` on Linux on every push to any branch, and the result shows on the pull request. macOS only runs on release, because its minutes cost 10 times more.
+- Actions are pinned by full SHA, with the version in a comment. Only `actions/*`, and the only secret is `github.token`.
 
-## Testes
+## Tests
 
-- **Ganchos de teste** só valem com `!app.isPackaged`; o app empacotado os ignora:
-  - `CAIS_E2E=1`: cofre falso (sem Keychain), o `userData` de `CAIS_USER_DATA` e aceita as opções de depuração (o Playwright as usa);
-  - `CAIS_SOCKET`: caminho do socket dos agentes (o CLI também o lê);
-  - `CAIS_LOCALE` = `pt-BR` | `en`: o e2e fixa `pt-BR` por padrão e usa `en` só no teste de idioma;
-  - `CAIS_IDLE_MS`: inteiro de 100 ms ou mais, encurta a desconexão por inatividade;
-  - `CAIS_BIGQUERY_URL`: troca o endereço da API do BigQuery pelo do servidor falso;
-  - com `CAIS_E2E=1`, o token do BigQuery é um valor falso fixo (`cais-test-access-token`) e a lista de contas do `gcloud` é uma conta falsa fixa (`ana@exemplo.com`): o e2e nunca roda o `gcloud`.
-- **Banco:** os testes usam só o próprio container `cais-test-*`, em porta aleatória. Nunca a porta 3306 (para não colidir com um MySQL local), nunca outro container, nunca um banco real. Se um teste travar e deixar container para trás: `docker ps -a --filter name=cais-test-` e `docker rm -f` neles.
-- **`gcloud`:** nunca rodar o `gcloud` de verdade nos testes. Eles usam um `gcloud` falso (`spawn` injetável).
-- **BigQuery:** os testes nunca falam com o Google. O driver recebe `fetch` e endereço injetáveis, e `tests/support/bigquery-fake.ts` é um servidor HTTP local (porta aleatória) com o subconjunto da API que o Cais usa, com o tipo do dry run, os bytes, os erros e a lentidão configuráveis por teste. Os ganchos `CAIS_BIGQUERY_URL` e o token e a conta falsos do e2e estão na lista acima. A suíte ao vivo, `npm run live:bigquery` (`tests/live/`, fora do `npm run check`), precisa de `CAIS_BQ_LIVE_PROJECT` e `CAIS_BQ_LIVE_TOKEN`, pula tudo sem eles e nunca roda o `gcloud`.
-- **Comando `cais`:** nunca instalar na máquina durante os testes. `installCli` recebe as pastas por parâmetro e os testes usam pasta temporária.
-- **Acesso de agentes:** qualquer mudança em `src/main/agents/` ou em `src/cli/` precisa de `tests/unit/agent-*.test.ts` e `tests/integration/agents*.test.ts` (ataques, segredos, limites) verdes, e da saída do CLI estável byte a byte (a do MySQL não pode mudar por causa do BigQuery: `tests/unit/agent-bigquery.test.ts` confere as chaves e a ordem). Mudança nas regras de agente do BigQuery (`src/shared/dialects/bigquery`, `policy.ts`, `broker.ts`, `redact.ts`) também pede `tests/unit/agent-bigquery.test.ts` e `tests/integration/agents-bigquery.test.ts` verdes.
-- Novas regras do classificador entram com teste unitário e, quando dependem do servidor, com teste de integração que confere o estado do servidor depois.
+- **Test hooks** only apply with `!app.isPackaged`; the packaged app ignores them:
+  - `CAIS_E2E=1`: fake vault (no Keychain), the `userData` from `CAIS_USER_DATA`, and accepts the debugging options (Playwright uses them);
+  - `CAIS_SOCKET`: agent socket path (the CLI also reads it);
+  - `CAIS_LOCALE` = `pt-BR` | `en`: e2e pins `pt-BR` by default and uses `en` in the language test (`i18n.spec.ts`) and in the docs screenshots (`docs-images.spec.ts`);
+  - `CAIS_IDLE_MS`: integer of 100 ms or more, shortens the inactivity time before disconnecting;
+  - `CAIS_BIGQUERY_URL`: replaces the BigQuery API address with the fake server's;
+  - `CAIS_RELEASES_URL`: replaces the GitHub releases API address (version check in the About Cais window) with a fake server's; with `CAIS_E2E=1` and without it, the check answers "Could not check." without going out to the network;
+  - with `CAIS_E2E=1`, the BigQuery token is a fixed fake value (`cais-test-access-token`) and the `gcloud` account list is a fixed fake account (`ana@exemplo.com`): e2e never runs `gcloud`.
+- **Database:** tests use only their own `cais-test-*` container, on a random port. Never port 3306 (so it does not collide with a local MySQL), never another container, never a real database. If a test hangs and leaves a container behind: `docker ps -a --filter name=cais-test-` and `docker rm -f` them.
+- **`gcloud`:** never run the real `gcloud` in tests. They use a fake `gcloud` (injectable `spawn`).
+- **BigQuery:** tests never talk to Google. The driver takes an injectable `fetch` and address, and `tests/support/bigquery-fake.ts` is a local HTTP server (random port) with the subset of the API that Cais uses, with the dry run type, the bytes, the errors and the slowness configurable per test. The `CAIS_BIGQUERY_URL` hook and the fake token and account in e2e are in the list above. The live suite, `npm run live:bigquery` (`tests/live/`, outside `npm run check`), needs `CAIS_BQ_LIVE_PROJECT` and `CAIS_BQ_LIVE_TOKEN`, skips everything without them and never runs `gcloud`.
+- **`cais` command and skill:** never install them on the machine during tests. `installCli` and `installSkill` take the folders as parameters and tests use a temporary folder (never the real `~/.claude`). The menu items open native dialogs and are not clicked in e2e: tests only check that they exist, with the right label, in both locales.
+- **Agent access:** any change in `src/main/agents/` or `src/cli/` needs `tests/unit/agent-*.test.ts` and `tests/integration/agents*.test.ts` (attacks, secrets, limits) green, and the CLI output stable byte for byte (the MySQL output cannot change because of BigQuery: `tests/unit/agent-bigquery.test.ts` checks the keys and their order). A change to the BigQuery agent rules (`src/shared/dialects/bigquery`, `policy.ts`, `broker.ts`, `redact.ts`) also needs `tests/unit/agent-bigquery.test.ts` and `tests/integration/agents-bigquery.test.ts` green.
+- New classifier rules come with a unit test and, when they depend on the server, with an integration test that checks the server state afterwards.
 
 ## Commits
 
-Só com a suíte completa verde (`npm run check`). Sem linhas de atribuição de IA em commits ou pull requests.
+Only with the full suite green (`npm run check`). No AI attribution lines in commits or pull requests.

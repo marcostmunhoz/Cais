@@ -4,25 +4,45 @@ import { ChevronDown, Copy, PanelRight, X } from 'lucide-react';
 import type { CellValue, ColumnMeta, StatementResult } from '@shared/results';
 import { getDialect } from '@shared/dialects/registry';
 import { capabilitiesOf } from '@shared/engines';
-import { cellInputText, cellLock, gridEditability, parseCellInput, pendingCount, type EditTarget, type PendingCells } from '@shared/grid';
+import { isDeleteRowsKey, shortcutText } from '@shared/shortcuts';
+import {
+  cellInputText,
+  cellLock,
+  deleteReach,
+  gridEditability,
+  insertability,
+  parseCellInput,
+  pendingCount,
+  type EditTarget,
+  type PendingCells,
+} from '@shared/grid';
 import {
   applyEdits,
   discardEdits,
   dismissEditNotice,
   effectiveMode,
+  generateCellUpdates,
+  generateInserts,
   generateUpdates,
   loadSchema,
+  markRowsDeleted,
+  reachNotes,
   selectResult,
   setCellEdit,
 } from '../lib/actions';
 import { m, render } from '../lib/i18n';
 import {
+  copyValueText,
   displayCell,
   formatDuration,
+  isColumnSelection,
   isNumericType,
+  isPartialBinary,
+  isSingleCell,
   prettyJson,
   toDelimited,
   toJson,
+  toMarkdown,
   type Selection,
 } from '../lib/format';
 import { useStore } from '../lib/store';
@@ -100,9 +120,13 @@ interface GridProps {
   editing?: { cell: Cell; input: React.ReactNode } | null;
   onEditRequest: (cell: Cell) => void;
   onCellMenu: (cell: Cell, x: number, y: number) => void;
+  /** Rows marked for deletion: drawn struck through. */
+  deleted?: ReadonlySet<number>;
+  /** The delete key was pressed with the grid focused. */
+  onDeleteKey: () => void;
 }
 
-function Grid({ columns, rows, focus, anchor, onSelect, onCopy, scroller, edited, editing, onEditRequest, onCellMenu }: GridProps) {
+function Grid({ columns, rows, focus, anchor, onSelect, onCopy, scroller, edited, editing, onEditRequest, onCellMenu, deleted, onDeleteKey }: GridProps) {
   const widths = useMemo(() => estimateWidths(columns, rows), [columns, rows]);
   const totalW = GUTTER_W + widths.reduce((a, b) => a + b, 0);
 
@@ -200,6 +224,11 @@ function Grid({ columns, rows, focus, anchor, onSelect, onCopy, scroller, edited
       onEditRequest(focus);
       return;
     }
+    if (isDeleteRowsKey(e, window.cais.platform) && focus) {
+      e.preventDefault();
+      onDeleteKey();
+      return;
+    }
     if (mod && e.key.toLowerCase() === 'a') {
       e.preventDefault();
       onSelect({ r: 0, c: 0 }, { r: lastRow, c: lastCol });
@@ -240,10 +269,14 @@ function Grid({ columns, rows, focus, anchor, onSelect, onCopy, scroller, edited
       }}
       onContextMenu={(e) => {
         const hit = cellAt(e.target);
-        if (!hit || hit.r < 0 || hit.c < 0) return;
+        if (!hit || hit.r < 0) return;
         e.preventDefault();
-        const inside = sel && hit.r >= sel.r1 && hit.r <= sel.r2 && hit.c >= sel.c1 && hit.c <= sel.c2;
-        if (!inside) onSelect(hit, hit);
+        if (hit.c === -2) {
+          // the row gutter: the selected rows when they are whole rows and this is one of them, else this whole row
+          if (!(sel && sel.c1 === 0 && sel.c2 === lastCol && hit.r >= sel.r1 && hit.r <= sel.r2)) onSelect({ r: hit.r, c: 0 }, { r: hit.r, c: lastCol });
+        } else if (!(sel && hit.r >= sel.r1 && hit.r <= sel.r2 && hit.c >= sel.c1 && hit.c <= sel.c2)) {
+          onSelect(hit, hit);
+        }
         onCellMenu(hit, e.clientX, e.clientY);
       }}
     >
@@ -269,11 +302,14 @@ function Grid({ columns, rows, focus, anchor, onSelect, onCopy, scroller, edited
         </div>
         {rowV.getVirtualItems().map((vr) => {
           const row = rows[vr.index]!;
+          const isDeleted = deleted?.has(vr.index) === true;
           return (
             <div
               key={vr.key}
               role="row"
               aria-rowindex={vr.index + 1}
+              className={isDeleted ? 'grid-row-deleted' : undefined}
+              {...(isDeleted ? { 'data-deleted': 'true' } : {})}
               style={{ position: 'absolute', top: HEAD_H + vr.start, left: 0, width: totalW, height: ROW_H }}
             >
               <div
@@ -455,6 +491,14 @@ export function Results({ tabId }: { tabId: string }) {
     () => (active && columns ? gridEditability(active, schemaTree, getDialect(engine).valueKind, { gridEdit: capabilitiesOf(engine).gridEdit, name: getDialect(engine).displayName }) : null),
     [active, columns, schemaTree, engine],
   );
+  // Generate INSERT: the same table, but no key is needed
+  const insertTarget = useMemo(
+    () =>
+      active && columns
+        ? insertability(active, schemaTree, getDialect(engine).valueKind, { gridEdit: capabilitiesOf(engine).gridEdit, name: getDialect(engine).displayName })
+        : null,
+    [active, columns, schemaTree, engine],
+  );
   // a table created or changed after the schema was read: read it again, once per result
   const refreshed = useRef(new WeakSet<StatementResult>());
   useEffect(() => {
@@ -462,14 +506,23 @@ export function Results({ tabId }: { tabId: string }) {
     const stale = target.editable
       ? target.columns.some((c) => !c.editable && c.reason.key === 'grid.reason.staleColumn')
       : target.reason.key === 'grid.reason.unknownTable' || target.reason.key === 'grid.reason.staleSchema';
-    if (!stale) return;
+    const insertStale =
+      !!insertTarget && !insertTarget.insertable && ['grid.reason.staleColumn', 'grid.reason.unknownColumn'].includes(insertTarget.reason.key);
+    if (!stale && !insertStale) return;
     if (refreshed.current.has(active)) return;
     refreshed.current.add(active);
     void loadSchema(environmentId, true);
-  }, [active, target, schemaStatus, environmentId]);
+  }, [active, target, insertTarget, schemaStatus, environmentId]);
 
   const edits = run?.edits && run.edits.result === active ? run.edits.cells : undefined;
-  const pending = edits ? pendingCount(edits) : { changes: 0, rows: 0 };
+  const deletedRows = useMemo(() => (run?.edits && run.edits.result === active ? run.edits.deleted : []), [run?.edits, active]);
+  const deletedSet = useMemo(() => new Set(deletedRows), [deletedRows]);
+  const pending = edits || deletedRows.length > 0 ? pendingCount(edits ?? {}, deletedRows) : { changes: 0, rows: 0, deletions: 0, total: 0 };
+  // what deleting rows of this table may also touch, as the schema says
+  const reach = useMemo(
+    () => (pending.deletions > 0 && target?.editable ? reachNotes(deleteReach(schemaTree, target.database, target.table), target.table) : []),
+    [pending.deletions, target, schemaTree],
+  );
   const shownRows = useMemo(
     () =>
       edits
@@ -484,6 +537,10 @@ export function Results({ tabId }: { tabId: string }) {
   const [queued, setQueued] = useState<Cell | null>(null);
   const startEdit = (cell: Cell) => {
     if (!active || !target || run?.running) return;
+    if (deletedSet.has(cell.r)) {
+      setHint(m().grid.reason.deleted);
+      return;
+    }
     const original = rows[cell.r]?.[cell.c] ?? null;
     const lock = cellLock(target, cell.c, original);
     if (lock) {
@@ -534,12 +591,29 @@ export function Results({ tabId }: { tabId: string }) {
     if (how === 'enter') refocusGrid();
   };
   const cellEntries = (cell: Cell): MenuEntry[] => {
-    if (!active || !target?.editable || cellLock(target, cell.c, rows[cell.r]?.[cell.c] ?? null)) return [];
+    if (cell.c < 0) return []; // the row gutter has no cell to edit
+    if (!active || !target?.editable || deletedSet.has(cell.r) || cellLock(target, cell.c, rows[cell.r]?.[cell.c] ?? null)) return [];
     const column = target.columns[cell.c] as EditTarget['columns'][number] & { editable: true };
     const out: MenuEntry[] = [{ label: m().grid.menu.edit, onSelect: () => startEdit(cell) }];
     if (column.nullable) out.push({ label: m().grid.menu.setNull, onSelect: () => setCellEdit(tabId, active, cell.r, cell.c, null) });
     if (edits?.[cell.r] && Object.hasOwn(edits[cell.r]!, cell.c)) {
       out.push({ label: m().grid.menu.undo, onSelect: () => setCellEdit(tabId, active, cell.r, cell.c, undefined) });
+    }
+    // Generate cell UPDATE: one UPDATE per selected cell when the selection is one column wide; not offered over a
+    // wider selection (which cells would it mean?)
+    if (!sel || sel.c1 === sel.c2) {
+      const inColumn = !!sel && sel.c1 === cell.c && cell.r >= sel.r1 && cell.r <= sel.r2;
+      // rows marked for deletion are left out: they get no UPDATE (the deletion wins)
+      const picked = (inColumn ? Array.from({ length: sel.r2 - sel.r1 + 1 }, (_, i) => sel.r1 + i) : [cell.r]).filter((r) => !deletedSet.has(r));
+      if (picked.length > 0) {
+        out.push({
+          label: picked.length === 1 ? m().grid.menu.generateCell : m().grid.menu.generateCells({ count: picked.length }),
+          onSelect: () => {
+            setHint(null);
+            void generateCellUpdates(tabId, active, cell.c, picked);
+          },
+        });
+      }
     }
     return out;
   };
@@ -567,19 +641,89 @@ export function Results({ tabId }: { tabId: string }) {
     };
     navigator.clipboard.writeText(text).catch(fallback);
   };
+  // "Copy value" (one cell): the raw value, no header. A binary the driver cut copies with its `…` and says so.
+  const copyValue = (): string => {
+    const value = (sel && shownRows[sel.r1]?.[sel.c1]) ?? null;
+    if (isPartialBinary(value)) {
+      setHint(`${m().results.copyPartial} ${m().results.bytesPartial({ length: value.length, shown: value.hex.length / 2 })}`);
+    }
+    return copyValueText(value);
+  };
   const copyEntries = (): MenuEntry[] =>
     columns
       ? [
+          ...(isSingleCell(sel) ? [{ label: m().results.copyValue, onSelect: () => write(copyValue()) }] : []),
           { label: m().results.copyTsv, onSelect: () => write(toDelimited(columns, shownRows, sel, '\t')) },
           { label: m().results.copyCsv, onSelect: () => write(toDelimited(columns, shownRows, sel, ',')) },
           { label: m().results.copyJson, onSelect: () => write(toJson(columns, shownRows, sel)) },
+          { label: m().results.copyMarkdown, onSelect: () => write(toMarkdown(columns, shownRows, sel)) },
         ]
       : [];
+  // Generate INSERT (cell and row gutter menus): the rows of the selection, with or without the primary key
+  const insertEntries = (): MenuEntry[] => {
+    if (!active || !insertTarget?.insertable || !sel) return [];
+    const picked = Array.from({ length: sel.r2 - sel.r1 + 1 }, (_, i) => sel.r1 + i);
+    const out: MenuEntry[] = [
+      {
+        label: m().grid.menu.insert,
+        onSelect: () => {
+          setHint(null);
+          generateInserts(tabId, active, picked, true);
+        },
+      },
+    ];
+    if (insertTarget.key) {
+      out.push({
+        label: m().grid.menu.insertNoKey,
+        onSelect: () => {
+          setHint(null);
+          generateInserts(tabId, active, picked, false);
+        },
+      });
+    }
+    return out;
+  };
+  // The rows a deletion acts on: those of the selection (the menu selects the clicked row first)
+  const selectedRows = (cell?: Cell): number[] =>
+    sel ? Array.from({ length: sel.r2 - sel.r1 + 1 }, (_, i) => sel.r1 + i) : cell ? [cell.r] : [];
+  // Delete row / Undo delete: any editable result (the same gate as editing), also on the row gutter
+  const deleteEntries = (cell?: Cell): MenuEntry[] => {
+    if (!active || !target?.editable || !cell || run?.running) return [];
+    const picked = selectedRows(cell);
+    const marked = picked.filter((r) => deletedSet.has(r)).length;
+    const out: MenuEntry[] = [];
+    if (marked < picked.length) {
+      out.push({
+        label: picked.length === 1 ? m().grid.menu.deleteRow : m().grid.menu.deleteRows({ count: picked.length }),
+        shortcut: shortcutText('deleteRows', window.cais.platform),
+        onSelect: () => {
+          setHint(null);
+          markRowsDeleted(tabId, active, picked, true);
+        },
+      });
+    }
+    if (marked > 0) {
+      out.push({ label: m().grid.menu.undoDelete, onSelect: () => markRowsDeleted(tabId, active, picked, false) });
+    }
+    return out;
+  };
+  // The delete key: marks the selected rows, or unmarks them when they all are marked already. A selection of whole
+  // columns (from the headers) is not a choice of rows: it marks nothing.
+  const deleteKey = () => {
+    if (!active || !target || run?.running) return;
+    if (isColumnSelection(sel, shownRows.length, columns?.length ?? 0)) return;
+    if (!target.editable) {
+      setHint(render(target.reason));
+      return;
+    }
+    const picked = selectedRows(focus ?? undefined);
+    if (picked.length === 0) return;
+    setHint(null);
+    markRowsDeleted(tabId, active, picked, !picked.every((r) => deletedSet.has(r)));
+  };
   const menuEntries = (cell?: Cell): MenuEntry[] => {
-    const edit = cell ? cellEntries(cell) : [];
-    const copy = copyEntries();
-    if (edit.length > 0 && copy[0]) copy[0] = { ...copy[0], separatorBefore: true };
-    return [...edit, ...copy];
+    const groups = [cell ? cellEntries(cell) : [], deleteEntries(cell), cell ? insertEntries() : [], copyEntries()].filter((g) => g.length > 0);
+    return groups.flatMap((g, i) => (i > 0 ? [{ ...g[0]!, separatorBefore: true }, ...g.slice(1)] : g));
   };
   const readOnly = mode === 'read-only';
   const editArea = (
@@ -596,7 +740,7 @@ export function Results({ tabId }: { tabId: string }) {
           </button>
         </div>
       )}
-      {pending.changes > 0 && (
+      {pending.changes + pending.deletions > 0 && (
         <div className="grid-editbar" role="toolbar" aria-label={m().grid.bar.summary(pending)} data-testid="grid-edit-bar">
           <span className="summary" data-testid="grid-edit-summary">
             {m().grid.bar.summary(pending)}
@@ -617,6 +761,13 @@ export function Results({ tabId }: { tabId: string }) {
           <button className="btn small ghost" data-testid="edit-discard" onClick={() => discardEdits(tabId)}>
             {m().grid.bar.discard}
           </button>
+        </div>
+      )}
+      {reach.length > 0 && (
+        <div className="grid-delete-warn" role="alert" data-testid="grid-delete-warning">
+          {reach.map((line) => (
+            <div key={line}>{line}</div>
+          ))}
         </div>
       )}
       {hint && (
@@ -659,6 +810,8 @@ export function Results({ tabId }: { tabId: string }) {
               anchor={anchor}
               scroller={scroller}
               edited={edits}
+              deleted={deletedSet}
+              onDeleteKey={deleteKey}
               editing={
                 editing && target?.editable
                   ? {
@@ -690,7 +843,7 @@ export function Results({ tabId }: { tabId: string }) {
               }}
               onCopy={(e) => {
                 e.preventDefault();
-                e.clipboardData.setData('text/plain', toDelimited(columns, shownRows, sel, '\t'));
+                e.clipboardData.setData('text/plain', isSingleCell(sel) ? copyValue() : toDelimited(columns, shownRows, sel, '\t'));
               }}
             />
           )}

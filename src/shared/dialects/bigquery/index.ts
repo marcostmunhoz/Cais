@@ -3,6 +3,7 @@ import { classify, identifiers, warnings } from './classifier';
 import { GOOGLESQL_KEYWORDS } from './keywords';
 import { isUnknownUnqualifiedFunction } from './functions';
 import { agentCodeProblem } from './lexer';
+import { analyze } from './scope';
 import { appendStatements, splitStatements } from './splitter';
 
 /** A dataset name: letters, digits and underscore, up to 1024 characters. */
@@ -17,10 +18,10 @@ const agentRules: AgentRules = {
   isValidDatabaseName: (name) => DATASET_NAME.test(name),
   isUnknownFunction: isUnknownUnqualifiedFunction,
   messages: {
-    systemSchemaWrite: 'Agentes não escrevem no INFORMATION_SCHEMA.',
-    systemSchemaRead: 'Agentes não leem esse esquema.',
+    systemSchemaWrite: 'Agents do not write to INFORMATION_SCHEMA.',
+    systemSchemaRead: 'Agents do not read this schema.',
     jobsMetadata:
-      'Agentes não leem INFORMATION_SCHEMA.JOBS* nem SESSIONS*: essas visões mostram o SQL de outras pessoas do projeto.',
+      'Agents do not read INFORMATION_SCHEMA.JOBS* or SESSIONS*: those views show the SQL of other people in the project.',
   },
 };
 
@@ -44,6 +45,7 @@ export const bigqueryDialect: Dialect = {
   classify,
   warnings,
   identifiers,
+  analyze,
   agentCodeProblem,
   quoteIdent,
   agentRules,
@@ -51,6 +53,9 @@ export const bigqueryDialect: Dialect = {
   valueKind: () => 'unsupported',
   quoteLiteral: unsupported('writing a literal'),
   buildUpdate: unsupported('UPDATE'),
+  buildUpdateLocated: unsupported('UPDATE'),
+  buildInsert: unsupported('INSERT'),
+  buildDelete: unsupported('DELETE'),
 };
 
 export { splitStatements, appendStatements, classify, warnings, identifiers, agentCodeProblem };

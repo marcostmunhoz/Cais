@@ -1,4 +1,4 @@
-import { rmSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
 import { FakeBigquery } from '../support/bigquery-fake';
@@ -38,6 +38,8 @@ test.beforeAll(async () => {
     pedidos_snap: { type: 'SNAPSHOT', schema: [{ name: 'id', type: 'INTEGER' }] },
   });
   fake.addDataset('logs', { acessos: { schema: [{ name: 'ip', type: 'STRING' }] } });
+  // a dataset only the editor reads (the tree never opens it)
+  fake.addDataset('extras', { itens: { schema: [{ name: 'sku', type: 'STRING' }, { name: 'qtd', type: 'INTEGER' }] } });
   // what a statement reads: eventos is large (3 GiB), everything else is small
   fake.bytesFor = (sql) => (/\beventos\b/.test(sql) ? 3 * GIB : 10 * 1024 * 1024);
   fake.resultFor = (sql) => {
@@ -99,7 +101,7 @@ test('a Google IAM credential and a BigQuery environment are registered in the f
   // only Google IAM credentials are offered, the password one is not
   const credential = form.getByLabel('Credencial');
   await expect(credential.locator('option', { hasText: 'conta google' })).toHaveCount(1);
-  await expect(credential.locator('option', { hasText: 'usuário de teste' })).toHaveCount(0);
+  await expect(credential.locator('option', { hasText: 'test user' })).toHaveCount(0);
 
   // validation: project id and a whole number of GiB from 1
   await form.getByLabel('Projeto do Google Cloud').fill('Projeto Errado');
@@ -115,7 +117,7 @@ test('a Google IAM credential and a BigQuery environment are registered in the f
   await form.getByLabel('Limite de bytes por consulta (GiB)').fill('1');
   await form.getByLabel('Dataset padrão (opcional)').fill('vendas');
 
-  // Testar conexão: token, datasets.list and a dry run, all against the fake server
+  // Test connection: token, datasets.list and a dry run, all against the fake server
   await form.getByRole('button', { name: 'Testar conexão' }).click();
   await expect(form.getByTestId('test-result')).toContainText('Conectado ao BigQuery');
   expect(fake.requests.every((r) => r.authorization === `Bearer ${E2E_TOKEN}`)).toBe(true);
@@ -148,11 +150,17 @@ test('the tab opens read-only with the dataset in the bar and the tree reads col
   await expect(page.getByTestId('statusbar')).toContainText('BigQuery');
   await expect(page.getByTestId('statusbar')).not.toContainText('BigQuery BigQuery');
 
-  const modeGroup = page.getByRole('radiogroup', { name: 'Modo da sessão' });
-  await expect(modeGroup.getByRole('radio', { name: 'Somente leitura' })).toBeChecked();
-  await expect(modeGroup.getByRole('radio', { name: 'Transação' })).toBeDisabled();
-  await expect(modeGroup.getByRole('radio', { name: 'Auto-commit' })).toBeDisabled();
-  await expect(modeGroup.getByRole('radio', { name: 'Transação' })).toHaveAttribute('title', 'BigQuery não aceita este modo.');
+  // the engine accepts one mode only: no picker, a fixed badge with the reason in the tooltip
+  await expect(page.getByRole('radiogroup', { name: 'Modo da sessão' })).toHaveCount(0);
+  await expect(page.getByRole('radio')).toHaveCount(0);
+  const badge = page.getByTestId('mode-badge');
+  await expect(badge).toBeVisible();
+  await expect(badge).toHaveText('Somente leitura');
+  await expect(badge).toHaveAttribute('aria-label', 'Modo da sessão: Somente leitura');
+  await expect(badge).toHaveAttribute('title', 'BigQuery só lê nesta versão');
+  // it is not a control: nothing to click or focus
+  await expect(badge).not.toHaveAttribute('tabindex', /.*/);
+  await expect(page.getByTestId('sessionbar').getByRole('button', { name: 'Somente leitura' })).toHaveCount(0);
   // the bar says dataset, not database
   const picker = page.getByLabel('Dataset atual');
   await expect(picker).toHaveValue('vendas');
@@ -215,6 +223,15 @@ test('a query shows rows, bytes processed and billed in the footer, and the grid
   // the engine does not edit in the grid: a double click opens no editor
   await grid.getByText('99.90').dblclick();
   await expect(page.getByTestId('cell-editor')).toHaveCount(0);
+  // nor does it offer Generate INSERT, from a cell or from the row gutter; the Copy entries are there
+  await grid.getByText('99.90').click({ button: 'right' });
+  await expect(page.getByRole('menuitem', { name: 'Copiar como tabela Markdown' })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: /Gerar INSERT/ })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await page.locator('[data-gr="0"]').click({ button: 'right' });
+  await expect(page.getByRole('menuitem', { name: 'Copiar como tabela Markdown' })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: /Gerar INSERT/ })).toHaveCount(0);
+  await page.keyboard.press('Escape');
 
   await setTheme(app, page, 'light');
   await page.screenshot({ path: join(shots, 'bigquery-results-light.png') });
@@ -232,7 +249,7 @@ test('DML is refused by the app before anything reaches the server', async () =>
   expect(fake.realQueries.some((q) => /DELETE/i.test(String(q.body?.query)))).toBe(false);
 });
 
-test('a read above the byte limit asks first, Cancelar leaves nothing run, and confirming runs with the ceiling raised', async () => {
+test('a read above the byte limit asks first, Cancel leaves nothing run, and confirming runs with the ceiling raised', async () => {
   const realBefore = fake.realQueries.length;
   await setSql(page, 'SELECT * FROM vendas.eventos');
   await runCurrent();
@@ -243,7 +260,7 @@ test('a read above the byte limit asks first, Cancelar leaves nothing run, and c
   await expect(ask.getByTestId('bytes-item')).toContainText('SELECT * FROM vendas.eventos');
   await expect(ask).toContainText('O limite do ambiente é 1 GiB');
   await expect(ask).toContainText('sobe para 3 GiB');
-  // Cancelar has the focus: Enter never confirms by accident
+  // Cancel has the focus: Enter never confirms by accident
   await expect(ask.getByTestId('bytes-cancel')).toBeFocused();
   // behind the question the tab is connected and idle, not "Executando…"
   await expect(chip()).toHaveAttribute('data-status', 'connected');
@@ -278,6 +295,111 @@ test('Rodar todos lists every statement above the limit together', async () => {
   expect(fake.realQueries.length).toBe(realBefore);
 });
 
+test('Estimate while typing: off by default; on, the statement under the cursor is dry-run after a pause, never run, and an error is marked in the editor', async () => {
+  const sw = page.getByRole('switch', { name: 'Estimar ao digitar' });
+  const estimate = page.getByTestId('estimate');
+  const settingsFile = join(userData, 'settings.json');
+  const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  // off: typing sends nothing, whatever is typed
+  await expect(sw).toBeVisible();
+  await expect(sw).toHaveAttribute('aria-checked', 'false');
+  await expect(sw).toHaveAttribute('title', /O texto dela vai ao Google a cada vez/);
+  const dryBefore = fake.dryRuns.length;
+  await setSql(page, 'SELECT * FROM vendas.pedidos');
+  await wait(1500);
+  expect(fake.dryRuns.length).toBe(dryBefore);
+  await expect(estimate).toHaveCount(0);
+
+  // on: kept in settings.json; the statement already in the editor is estimated at once
+  await sw.click();
+  await expect(sw).toHaveAttribute('aria-checked', 'true');
+  expect(JSON.parse(readFileSync(settingsFile, 'utf8')).estimateAsYouType).toBe(true);
+  await expect(estimate).toHaveText('Vai processar 10 MiB');
+  await expect(estimate).toHaveAttribute('data-state', 'ok');
+  expect(fake.dryRuns.length).toBe(dryBefore + 1);
+
+  // a pause after typing sends the new text; over the limit of the environment the bar says it will ask first
+  const realBefore = fake.realQueries.length;
+  const tablesBefore = fake.requestsTo('/tables/', 'GET').length;
+  await setSql(page, 'SELECT * FROM vendas.eventos');
+  await expect(estimate).toContainText('Vai processar 3 GiB, acima do limite de 1 GiB');
+  await expect(estimate).toHaveAttribute('data-state', 'over');
+  // texts asked before are answered from memory: going back and forth sends nothing new
+  const dryAfterEventos = fake.dryRuns.length;
+  await setSql(page, 'SELECT * FROM vendas.pedidos');
+  await expect(estimate).toHaveText('Vai processar 10 MiB');
+  await setSql(page, 'SELECT * FROM vendas.eventos');
+  await expect(estimate).toContainText('3 GiB');
+  await wait(1200);
+  expect(fake.dryRuns.length).toBe(dryAfterEventos);
+  // the text that was dry-run is the statement, with the dataset of the tab as default
+  expect(fake.dryRuns.at(-1)!.body?.configuration?.query?.query).toBe('SELECT * FROM vendas.eventos');
+  expect(fake.dryRuns.at(-1)!.body?.configuration?.query?.defaultDataset?.datasetId).toBe('vendas');
+
+  // a fault of the text: the server's error is the editor's diagnostic, at the word it points to
+  fake.dryRunError = (sql) =>
+    /\bvalr\b/.test(sql) ? { status: 400, reason: 'invalidQuery', message: 'Unrecognized name: valr at [1:8]' } : undefined;
+  try {
+    await setSql(page, 'SELECT valr FROM vendas.pedidos');
+    await expect(estimate).toHaveText('A consulta tem erro');
+    await expect(estimate).toHaveAttribute('data-state', 'error');
+    const mark = page.locator('.cm-lintRange-error');
+    await expect(mark).toHaveCount(1);
+    await expect(mark).toHaveText('valr');
+    await mark.hover();
+    await expect(page.locator('.cm-tooltip-lint')).toContainText('Unrecognized name: valr');
+    await setTheme(app, page, 'light');
+    await page.screenshot({ path: join(shots, 'bigquery-estimate-error-light.png') });
+    await setTheme(app, page, 'dark');
+    await page.screenshot({ path: join(shots, 'bigquery-estimate-error-dark.png') });
+    await setTheme(app, page, 'light');
+    // fixed: the mark goes away with the next answer
+    await setSql(page, 'SELECT id FROM vendas.pedidos');
+    await expect(estimate).toHaveText('Vai processar 10 MiB');
+    await expect(page.locator('.cm-lintRange-error')).toHaveCount(0);
+  } finally {
+    fake.dryRunError = () => undefined;
+  }
+
+  // what the app refuses is refused here, and nothing is sent
+  const dryRefused = fake.dryRuns.length;
+  const requestsRefused = fake.requests.length;
+  await setSql(page, 'DELETE FROM vendas.pedidos WHERE id = 1');
+  await expect(estimate).toHaveAttribute('data-state', 'refused');
+  await expect(estimate).toContainText('Não estimado');
+  await wait(300);
+  expect(fake.dryRuns.length).toBe(dryRefused);
+  expect(fake.requests.length).toBe(requestsRefused);
+
+  // nothing ran, nothing was billed, and no line went to the trail (the dry run is not a command)
+  expect(fake.realQueries.length).toBe(realBefore);
+  expect(fake.requestsTo('/tables/', 'GET').length).toBe(tablesBefore);
+  await page.getByTestId('trail-entry').click();
+  const trail = dialog('Trilha');
+  await trail.getByTestId('trail-search').fill('vendas.pedidos WHERE id = 1');
+  await expect(trail.getByTestId('trail-row')).toHaveCount(0);
+  await trail.getByRole('button', { name: 'Fechar' }).click();
+
+  // off again: the readout and the marks go, and typing sends nothing
+  await setSql(page, 'SELECT valr FROM vendas.pedidos');
+  fake.dryRunError = () => ({ status: 400, reason: 'invalidQuery', message: 'Unrecognized name: valr at [1:8]' });
+  try {
+    await sw.click();
+    await expect(sw).toHaveAttribute('aria-checked', 'false');
+    expect(JSON.parse(readFileSync(settingsFile, 'utf8')).estimateAsYouType).toBe(false);
+    await expect(estimate).toHaveCount(0);
+    await expect(page.locator('.cm-lintRange-error')).toHaveCount(0);
+    const dryOff = fake.dryRuns.length;
+    await setSql(page, 'SELECT valr, id FROM vendas.pedidos');
+    await wait(1500);
+    expect(fake.dryRuns.length).toBe(dryOff);
+    await expect(page.locator('.cm-lintRange-error')).toHaveCount(0);
+  } finally {
+    fake.dryRunError = () => undefined;
+  }
+});
+
 test('a double click on a table runs its preview through the same confirmation', async () => {
   await page.locator('.tree-row', { hasText: /^eventos$/ }).dblclick();
   const ask = dialog('Consulta acima do limite de bytes');
@@ -286,7 +408,7 @@ test('a double click on a table runs its preview through the same confirmation',
   await ask.getByTestId('bytes-cancel').click();
 });
 
-test('Buscar até 50.000 reads more pages of the same job: no new dry run, no new query', async () => {
+test('Fetch up to 50,000 reads more pages of the same job: no new dry run, no new query', async () => {
   await page.getByTestId('tab').first().click();
   await setSql(page, 'SELECT n FROM vendas.muitos');
   await runCurrent();
@@ -306,7 +428,7 @@ test('the trail has the job id and the bytes of the person lines', async () => {
   const trail = dialog('Trilha');
   await expect(trail.getByTestId('trail-row').first()).toBeVisible();
   await trail.getByTestId('trail-search').fill('muitos');
-  // the "Buscar até 50.000" line of the same query points at the job and carries no bytes: it was billed once
+  // the "Fetch up to 50,000" line of the same query points at the job and carries no bytes: it was billed once
   const row = trail.getByTestId('trail-row').filter({ hasText: '10 MiB faturados' }).first();
   await expect(row).toBeVisible();
   await expect(trail.getByTestId('trail-row').first()).not.toContainText('MiB');
@@ -333,6 +455,49 @@ test('the trail has the job id and the bytes of the person lines', async () => {
   // after the whole run: the columns were read for one dataset only, once, and the other one never
   expect(fake.requestsTo('/tables/', 'GET')).toHaveLength(7);
   expect(fake.requestsTo('/datasets/logs/tables/', 'GET')).toHaveLength(0);
+});
+
+test('the editor reads the columns of a dataset the statement names, without opening it in the tree', async () => {
+  const reads = () => fake.requestsTo('/datasets/extras/tables/', 'GET').length;
+  const queriesBefore = fake.realQueries.length;
+  expect(reads()).toBe(0);
+  const popup = page.locator('.cm-tooltip-autocomplete');
+  await page.locator('.cm-content').click();
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('SELECT * FROM extras.itens WHERE s');
+  // after a pause the dataset's columns are read: one tables.get for its one table, and no query
+  await expect.poll(reads, { timeout: 10_000 }).toBe(1);
+  // the columns reach the editor when the read ends: asking again completes them
+  await expect(async () => {
+    await page.keyboard.press('Backspace');
+    await page.keyboard.type('s');
+    await expect(popup).toContainText('sku', { timeout: 1000 });
+  }).toPass({ timeout: 10_000 });
+  await expect(popup).not.toContainText('valor');
+  await page.keyboard.press('Escape');
+  // once per dataset: more typing reads nothing new
+  await page.keyboard.type(' AND q');
+  await page.waitForTimeout(1200);
+  expect(reads()).toBe(1);
+  expect(fake.realQueries.length).toBe(queriesBefore);
+  await page.keyboard.press('Escape');
+});
+
+test('a full path with the project completes the dataset tables, and a BigQuery tab never shows a syntax mark', async () => {
+  const popup = page.locator('.cm-tooltip-autocomplete');
+  await page.locator('.cm-content').click();
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('SELECT * FROM `proj.extras.it');
+  await expect(popup).toContainText('itens');
+  await page.keyboard.press('Escape');
+  // no grammar of GoogleSQL is bundled: a statement with an error gets no local mark
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('SELECT * FRM pedidos;');
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(1500);
+  await expect(page.locator('.cm-lintRange-error')).toHaveCount(0);
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.press('Delete');
 });
 
 // last on purpose: it opens the second dataset, which the tests above count on staying unread

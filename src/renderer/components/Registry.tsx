@@ -46,7 +46,7 @@ function CredentialForm({
   onDeleted?: () => void;
   /** Opened from a BigQuery environment: only the Google IAM kind, with no database user (BigQuery has none). */
   iamOnly?: boolean;
-  /** "Salvo" survives the remount that follows saving a new item. */
+  /** "Saved" survives the remount that follows saving a new item. */
   notice?: boolean;
   onDirty?: () => void;
 }) {
@@ -308,7 +308,7 @@ function EnvironmentForm({
   const [production, setProductionState] = useState(source?.production ?? false);
   const [productionTouched, setProductionTouched] = useState(!!source);
   const [agentLevel, setAgentLevel] = useState<AgentLevel>(source ? agentLevelOf(source) : 'free-reads');
-  // becoming production starts at "Tudo com aprovação": free reads there is the person's explicit choice. Leaving
+  // becoming production starts at "Everything needs approval": free reads there is the person's explicit choice. Leaving
   // production (the name "pro" on the way to "proxy", or the box unchecked) gives back the level from before.
   const [levelOutside, setLevelOutside] = useState<AgentLevel | null>(null);
   const setProduction = (next: boolean): void => {
@@ -321,7 +321,7 @@ function EnvironmentForm({
     }
     setProductionState(next);
   };
-  // BigQuery is read-only: agents never write there, so "Leitura e escrita liberadas" does not exist for it
+  // BigQuery is read-only: agents never write there, so "Reads and writes allowed" does not exist for it
   const levels: readonly AgentLevel[] = bigquery ? ['approve-all', 'free-reads'] : agentLevelsFor(production);
   const shownLevel: AgentLevel = catalog.agentLevelsLocked ? 'approve-all' : levels.includes(agentLevel) ? agentLevel : 'approve-all';
   const [error, setError] = useState<string | null>(null);

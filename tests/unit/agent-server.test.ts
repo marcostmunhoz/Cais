@@ -186,7 +186,7 @@ describe('AgentServer: protocol', () => {
       throw new Error('secret path /etc/x');
     };
     const reply = (await raw(socketPath, JSON.stringify({ id: 1, method: 'envs' }) + '\n')).reply!;
-    expect(reply.error).toEqual({ code: 'internal_error', message: 'Erro interno do Cais.' });
+    expect(reply.error).toEqual({ code: 'internal_error', message: 'Internal Cais error.' });
   });
 });
 

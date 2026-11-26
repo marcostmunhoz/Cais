@@ -1,5 +1,5 @@
 import net from 'node:net';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { send } from '../../src/cli/client';
@@ -7,6 +7,7 @@ import { parseArgs, UsageError } from '../../src/cli/args';
 import { discoverEndpoint, userDataDir } from '../../src/cli/endpoint';
 import { EXIT, exitForError, exitForResult } from '../../src/cli/exit';
 import { GUIDE } from '../../src/cli/guide';
+import { SKILL } from '../../src/cli/skill';
 import { finalExitCode, guardPipe, writeTo } from '../../src/cli/output';
 import { EventEmitter } from 'node:events';
 
@@ -31,10 +32,10 @@ describe('cais llm: argument parsing', () => {
   it('takes the SQL from --file or from stdin (-), exactly one source', () => {
     expect(parse('query', 'api/dev', '--file', 'q.sql').command).toMatchObject({ sql: { kind: 'file', path: 'q.sql' } });
     expect(parse('query', 'api/dev', '-').command).toMatchObject({ sql: { kind: 'stdin' } });
-    expect(() => parse('query', 'api/dev')).toThrow('exatamente uma opção');
-    expect(() => parse('query', 'api/dev', '--sql', 'a', '--file', 'b')).toThrow('exatamente uma opção');
-    expect(() => parse('query', 'api/dev', '--sql', 'a', '-')).toThrow('exatamente uma opção');
-    expect(() => parse('query', 'api/dev', '--sql', '  ')).toThrow('vazio');
+    expect(() => parse('query', 'api/dev')).toThrow('exactly one option');
+    expect(() => parse('query', 'api/dev', '--sql', 'a', '--file', 'b')).toThrow('exactly one option');
+    expect(() => parse('query', 'api/dev', '--sql', 'a', '-')).toThrow('exactly one option');
+    expect(() => parse('query', 'api/dev', '--sql', '  ')).toThrow('empty');
   });
 
   it('parses the other commands', () => {
@@ -71,7 +72,7 @@ describe('cais llm: argument parsing', () => {
 
   it('has no command to approve, commit, toggle access, edit or delete', () => {
     for (const sub of ['approve', 'reject', 'commit', 'rollback', 'enable', 'script-edit', 'script-delete', 'script-update']) {
-      expect(() => parse(sub, 'x'), sub).toThrow('Comando desconhecido');
+      expect(() => parse(sub, 'x'), sub).toThrow('Unknown command');
     }
   });
 });
@@ -136,9 +137,9 @@ describe('cais llm: finding the endpoint', () => {
 });
 
 describe('cais llm guide', () => {
-  it('explains the flow in pt-BR, with the rules that matter', () => {
-    expect(GUIDE).toContain('Você não executa, você pede');
-    for (const word of ['--reason', '--wait', 'awaiting', 'Rollback', 'result_withheld', 'cais llm envs', '5  tempo']) expect(GUIDE).toContain(word.replace('awaiting', 'Commit'));
+  it('explains the flow in English, with the rules that matter', () => {
+    expect(GUIDE).toContain('You do not execute, you ask');
+    for (const word of ['--reason', '--wait', 'awaiting', 'Rollback', 'result_withheld', 'cais llm envs', '5  wait timed out']) expect(GUIDE).toContain(word.replace('awaiting', 'Commit'));
     expect(GUIDE).not.toMatch(/!/);
     // the BigQuery section: read only, the estimate, the approval above 10 GiB and the codes
     for (const word of ['BigQuery', 'engine_read_only', '10 GiB', 'bytes_over_approved', 'bytes_billed', 'EXTERNAL_QUERY', 'system_schema', 'ML.*, AI.*']) {
@@ -147,7 +148,28 @@ describe('cais llm guide', () => {
   });
 
   it('tells who decided and that a closed pipe keeps the exit code', () => {
-    for (const word of ['"decided_by": "person"', '"policy"', '"auto_commit": true', 'false (a pessoa deu o Commit)', '| head']) expect(GUIDE).toContain(word);
+    for (const word of ['"decided_by": "person"', '"policy"', '"auto_commit": true', 'false (the user clicked Commit)', '| head']) expect(GUIDE).toContain(word);
+  });
+});
+
+describe('cais llm skill', () => {
+  it('parses with no arguments (and only --client)', () => {
+    expect(parse('skill').command).toEqual({ name: 'skill' });
+    expect(parse('skill', '--client', 'Codex').command).toEqual({ name: 'skill' });
+    expect(() => parse('skill', 'extra')).toThrow('takes no arguments');
+    expect(() => parse('skill', '--sql', 'x')).toThrow('Unknown option for skill');
+    expect(parseArgs(['llm', 'skill'], {}).client).toBe('agente');
+  });
+
+  it('embeds skills/cais/SKILL.md byte for byte (the one source file) and keeps its frontmatter', () => {
+    const file = readFileSync(join(__dirname, '../../skills/cais/SKILL.md'), 'utf8');
+    expect(SKILL).toBe(file);
+    expect(SKILL.startsWith('---\nname: cais\n')).toBe(true);
+    expect(SKILL).toContain('cais llm');
+  });
+
+  it('is listed in the guide in one line', () => {
+    expect(GUIDE.split('\n').filter((l) => l.includes('cais llm skill'))).toHaveLength(1);
   });
 });
 

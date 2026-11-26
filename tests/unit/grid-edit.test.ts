@@ -1,15 +1,27 @@
 import { describe, expect, it } from 'vitest';
 import { mysqlDialect } from '@shared/dialects/mysql';
-import { buildUpdate, quoteLiteral, valueKind } from '@shared/dialects/mysql/literals';
+import { bigqueryDialect } from '@shared/dialects/bigquery';
+import { buildDelete, buildInsert, buildUpdate, buildUpdateLocated, quoteLiteral, valueKind } from '@shared/dialects/mysql/literals';
 import {
+  buildCellUpdates,
+  buildGridInsert,
+  buildGridStatements,
   buildGridUpdates,
+  deleteReach,
+  hasPending,
   cellLock,
   gridEditability,
+  insertability,
+  MAX_INSERT_ROWS,
   parseCellInput,
   pendingCount,
+  planAppend,
   remapCells,
+  remapRows,
   sameCell,
+  withDeleted,
   type EditTarget,
+  type InsertTarget,
 } from '@shared/grid';
 import { render } from '@shared/i18n';
 import type { CellValue, ColumnMeta, SchemaTable, SchemaTree } from '@shared/results';
@@ -432,7 +444,7 @@ describe('grid edits to UPDATEs', () => {
       "UPDATE `app`.`people` SET `name` = 'Caio d''Ávila' WHERE `id` = 3",
     ]);
     expect(mysqlDialect.splitStatements(sql.map((s) => s + ';').join('\n'))).toHaveLength(2);
-    expect(pendingCount({ 2: { 1: 'x' }, 0: { 2: null, 1: 'y' } })).toEqual({ changes: 3, rows: 2 });
+    expect(pendingCount({ 2: { 1: 'x' }, 0: { 2: null, 1: 'y' } })).toEqual({ changes: 3, rows: 2, deletions: 0, total: 3 });
   });
 
   it('parses what the person typed by column type', () => {
@@ -463,6 +475,102 @@ describe('grid edits to UPDATEs', () => {
   });
 });
 
+describe('Generate cell UPDATE', () => {
+  const e = editability([src('id'), src('name', { name: 'nome' }), src('email')], [
+    [1, 'Ana', 'ana@x'],
+    [2, 'Bia', null],
+    [3, "d'Ávila\\", 'c@x'],
+  ]) as EditTarget;
+  const rows: CellValue[][] = [
+    [1, 'Ana', 'ana@x'],
+    [2, 'Bia', null],
+    [3, "d'Ávila\\", 'c@x'],
+  ];
+
+  it('buildUpdateLocated says where each SET literal is, and buildUpdate is the same text', () => {
+    const spec = {
+      database: 'app',
+      table: 'people',
+      set: [
+        { column: 'name', type: 'varchar(20)', value: "d'A" as CellValue },
+        { column: 'email', type: 'varchar(20)', value: null as CellValue },
+        { column: 'bio', type: 'varchar(20)', value: 'caf\\é' as CellValue },
+      ],
+      where: [{ column: 'id', type: 'int', value: 7 as CellValue }],
+    };
+    const { sql, setValues } = buildUpdateLocated(spec);
+    expect(sql).toBe(buildUpdate(spec));
+    expect(setValues.map((r) => sql.slice(r.from, r.to))).toEqual([
+      "'d''A'",
+      'NULL',
+      quoteLiteral('caf\\é', 'varchar(20)'),
+    ]);
+    expect(() => buildUpdateLocated({ ...spec, where: [] })).toThrow();
+  });
+
+  it('one UPDATE per row, one per line, with the value literal as the range', () => {
+    const { text, ranges } = buildCellUpdates(mysqlDialect, e, rows, 1, [
+      { row: 0, value: 'Ana' },
+      { row: 2, value: rows[2]![1]! },
+    ]);
+    const lines = text.split('\n');
+    // a backslash goes as hex, so the splitter and the server read it the same way
+    const hexLiteral = quoteLiteral(rows[2]![1]!, 'varchar(200)');
+    expect(hexLiteral).toMatch(/^_utf8mb4 X'[0-9a-f]+'$/);
+    expect(lines).toEqual([
+      "UPDATE `app`.`people` SET `name` = 'Ana' WHERE `id` = 1;",
+      `UPDATE \`app\`.\`people\` SET \`name\` = ${hexLiteral} WHERE \`id\` = 3;`,
+    ]);
+    expect(ranges.map((r) => text.slice(r.from, r.to))).toEqual(["'Ana'", hexLiteral]);
+    // the text splits into exactly the statements, each a plain UPDATE
+    const parts = mysqlDialect.splitStatements(text);
+    expect(parts.map((p) => p.text + ';')).toEqual(lines);
+    for (const p of parts) expect(mysqlDialect.classify(p.text)).toMatchObject({ kind: 'write', verb: 'UPDATE' });
+  });
+
+  it('writes the value as shown (a pending edit, NULL, a number) and keys on the row as the server sent it', () => {
+    // the cell was edited to 'Zed' and the key cell of that row too: the WHERE keeps the key the server has
+    const { text, ranges } = buildCellUpdates(mysqlDialect, e, rows, 1, [
+      { row: 1, value: 'Zed' },
+      { row: 0, value: null },
+    ]);
+    expect(text).toBe(
+      "UPDATE `app`.`people` SET `name` = 'Zed' WHERE `id` = 2;\nUPDATE `app`.`people` SET `name` = NULL WHERE `id` = 1;",
+    );
+    expect(ranges.map((r) => text.slice(r.from, r.to))).toEqual(["'Zed'", 'NULL']);
+    const key = buildCellUpdates(mysqlDialect, e, rows, 0, [{ row: 1, value: 20 }]);
+    expect(key.text).toBe('UPDATE `app`.`people` SET `id` = 20 WHERE `id` = 2;');
+    expect(key.text.slice(key.ranges[0]!.from, key.ranges[0]!.to)).toBe('20');
+  });
+
+  it('refuses a locked column or a row that is not there', () => {
+    expect(() => buildCellUpdates(mysqlDialect, e, rows, 5, [{ row: 0, value: 1 }])).toThrow();
+    expect(() => buildCellUpdates(mysqlDialect, e, rows, 1, [{ row: 9, value: 'x' }])).toThrow();
+  });
+
+  it('planAppend moves the ranges to where the text lands, after what the script leaves open', () => {
+    const text = "UPDATE `a`.`t` SET `c` = 'x' WHERE `id` = 1;\nUPDATE `a`.`t` SET `c` = 'y' WHERE `id` = 2;";
+    const ranges = [
+      { from: text.indexOf("'x'"), to: text.indexOf("'x'") + 3 },
+      { from: text.indexOf("'y'"), to: text.indexOf("'y'") + 3 },
+    ];
+    for (const doc of ['', 'SELECT 1;\n', 'SELECT 1', 'SELECT 1;\n\n', 'DELIMITER $$\nCREATE PROCEDURE p() BEGIN SELECT 1; END$$\n', 'DELIMITER $$\nSELECT 1']) {
+      const { changes, selections } = planAppend(mysqlDialect, doc, text, ranges);
+      let out = '';
+      let at = 0;
+      for (const c of [...changes].sort((a, b) => a.from - b.from)) {
+        out += doc.slice(at, c.from) + c.insert;
+        at = c.from;
+      }
+      out += doc.slice(at);
+      expect(selections.map((r) => out.slice(r.from, r.to))).toEqual(["'x'", "'y'"]);
+    }
+    // no ranges: the whole appended text, as before
+    const whole = planAppend(mysqlDialect, 'SELECT 1;', text);
+    expect(whole.selections).toEqual([mysqlDialect.appendStatements('SELECT 1;', text).selection]);
+  });
+});
+
 describe('gridEditability: engine capability', () => {
   const result = read([src('id'), src('name')], [[1, 'Ana']]);
   it('an engine without grid editing gives its own reason, before any other', () => {
@@ -476,5 +584,351 @@ describe('gridEditability: engine capability', () => {
   it('an engine with grid editing, or none given, edits as before', () => {
     expect(gridEditability(result, schema, mysqlDialect.valueKind, { gridEdit: true, name: 'MySQL' }).editable).toBe(true);
     expect(gridEditability(result, schema, mysqlDialect.valueKind).editable).toBe(true);
+  });
+});
+
+// --- Generate INSERT --------------------------------------------------------------------------------
+
+/** The generated statement must read as exactly one plain INSERT to the Cais itself. */
+function expectOneInsert(sql: string): void {
+  const parts = mysqlDialect.splitStatements(sql + ';');
+  expect(parts).toHaveLength(1);
+  expect(parts[0]!.text).toBe(sql);
+  const c = mysqlDialect.classify(sql);
+  expect(c.kind).toBe('write');
+  expect(c.verb).toBe('INSERT');
+  expect(c.executableComment).toBeUndefined();
+  expect(mysqlDialect.warnings(sql)).toEqual([]);
+}
+
+describe('buildInsert (MySQL)', () => {
+  const spec = (rows: CellValue[][]) => ({
+    database: 'app',
+    table: 'people',
+    columns: [
+      { column: 'id', type: 'int' },
+      { column: 'name', type: 'varchar(50)' },
+    ],
+    rows,
+  });
+
+  it('one row is one line, several rows are one per line, and the table is qualified with backticks', () => {
+    const one = buildInsert(spec([[1, 'Ana']]));
+    expect(one).toBe("INSERT INTO `app`.`people` (`id`, `name`) VALUES (1, 'Ana')");
+    expectOneInsert(one);
+    const many = buildInsert(spec([[1, 'Ana'], [2, null], [3, "d'Ávila"]]));
+    expect(many).toBe("INSERT INTO `app`.`people` (`id`, `name`) VALUES\n  (1, 'Ana'),\n  (2, NULL),\n  (3, 'd''Ávila')");
+    expectOneInsert(many);
+  });
+
+  it('writes every kind of value like an UPDATE does, so the splitter and the server read the same thing', () => {
+    const sql = buildInsert({
+      database: 'a`b',
+      table: 't;x',
+      columns: [
+        { column: 's', type: 'text' },
+        { column: 'bin', type: 'varbinary(16)' },
+        { column: 'bits', type: 'bit(8)' },
+        { column: 'd', type: 'decimal(10,2)' },
+        { column: 'j', type: 'json' },
+        { column: 'we`ird', type: 'int' },
+      ],
+      rows: [
+        ['/*! DROP TABLE t */ ; -- x', { kind: 'binary', hex: 'DEADbeef', length: 4 }, { kind: 'binary', hex: '05', length: 1 }, '-12.50', '{"a": "b\\"c"}', 7],
+        ['a\\b\nc', { kind: 'binary', hex: '', length: 0 }, null, null, null, null],
+      ],
+    });
+    expect(sql).toContain("'/*! DROP TABLE t */ ; -- x', X'deadbeef', b'00000101', -12.50, ");
+    expect(sql).toContain(`${quoteLiteral('a\\b\nc', 'text')}, X'', NULL, NULL, NULL, NULL)`);
+    expect(sql).toContain('(`s`, `bin`, `bits`, `d`, `j`, `we``ird`)');
+    expect(sql.startsWith('INSERT INTO `a``b`.`t;x` ')).toBe(true);
+    expectOneInsert(sql);
+  });
+
+  it('refuses no column, no row, a short row, a cut binary value and a type that cannot be written', () => {
+    expect(() => buildInsert({ ...spec([[1, 'a']]), columns: [] })).toThrow();
+    expect(() => buildInsert(spec([]))).toThrow();
+    expect(() => buildInsert(spec([[1]]))).toThrow();
+    const cut: CellValue = { kind: 'binary', hex: 'ab', length: 400 };
+    expect(() => buildInsert({ ...spec([[1, cut]]), columns: [{ column: 'id', type: 'int' }, { column: 'b', type: 'blob' }] })).toThrow();
+    expect(() => buildInsert({ ...spec([[1, 'x']]), columns: [{ column: 'id', type: 'int' }, { column: 'g', type: 'geometry' }] })).toThrow();
+    expect(() => buildInsert(spec([['abc', 'x']]))).toThrow();
+  });
+});
+
+describe('insertability', () => {
+  const ins = (columns: ColumnMeta[], rows: CellValue[][] = [], engine?: { gridEdit: boolean; name: string }) =>
+    insertability(read(columns, rows), schema, mysqlDialect.valueKind, engine);
+  const target = (columns: ColumnMeta[], rows: CellValue[][] = []): InsertTarget => {
+    const t = ins(columns, rows);
+    if (!t.insertable) throw new Error(render(t.reason));
+    return t;
+  };
+  const why = (t: ReturnType<typeof ins>): string => (t.insertable ? '' : render(t.reason));
+
+  it('a plain SELECT of one table: its columns under the table names, and the position of the key', () => {
+    const t = target([src('id'), src('name', { name: 'nome' }), src('email')]);
+    expect(t).toMatchObject({ database: 'app', table: 'people', omitted: [], key: [0] });
+    expect(t.columns).toEqual([
+      { index: 0, column: 'id', type: 'int' },
+      { index: 1, column: 'name', type: 'varchar(50)' },
+      { index: 2, column: 'email', type: 'varchar(80)' },
+    ]);
+  });
+
+  it('leaves out generated columns, expressions, repeated columns and types that cannot be written, and says which', () => {
+    const t = target([
+      src('id'),
+      src('upper_name'),
+      { name: 'two', type: 'bigint' },
+      src('name'),
+      src('name', { name: 'name2' }),
+      src('shape'),
+      src('email', { generated: true }),
+    ]);
+    expect(t.columns.map((c) => c.column)).toEqual(['id', 'name']);
+    expect(t.omitted).toEqual(['upper_name', 'two', 'name2', 'shape', 'email']);
+    // nothing left to write
+    expect(why(ins([src('upper_name'), src('shape')]))).toBe('Nenhuma coluna deste resultado pode ir num INSERT: são expressões, colunas geradas ou de tipo sem suporte.');
+  });
+
+  it('needs no primary key for the plain variant, and only knows the key when the result has all of it and more', () => {
+    // no key in the table: the INSERT is possible, the variant without the key is not
+    expect(target([src('a', {}, 'no_key')]).key).toBeNull();
+    // part of a composite key is not the key
+    expect(target([src('order_id', {}, 'items'), src('qty', {}, 'items')]).key).toBeNull();
+    expect(target([src('order_id', {}, 'items'), src('line', {}, 'items'), src('qty', {}, 'items')]).key).toEqual([0, 1]);
+    // the whole key and nothing else: the variant would be all defaults, so it is not offered
+    expect(target([src('order_id', {}, 'items'), src('line', {}, 'items')]).key).toBeNull();
+    // a non-key column that cannot be written (generated) does not count
+    expect(target([src('id'), src('email', { generated: true })]).key).toBeNull();
+    // the key columns anywhere in the result, and only the key is nothing to insert without it
+    expect(target([src('qty', {}, 'items'), src('line', {}, 'items'), src('order_id', {}, 'items')]).key).toEqual([2, 1]);
+    // only the key: the variant without it would be all defaults, so it is not offered
+    expect(target([src('id')]).key).toBeNull();
+    // the key of a table the grid cannot edit by (FLOAT, TIMESTAMP, NULL, repeated values) is still a key to leave out
+    expect(target([src('v', {}, 'measures'), src('n', {}, 'measures')], [[1.5, 1], [1.5, 2]]).key).toEqual([0]);
+    expect(target([src('sensor_id', {}, 'readings'), src('ts', {}, 'readings'), src('v', {}, 'readings')], [[1, '2026-01-01 00:00:00', '1.00']]).key).toEqual([0, 1]);
+    expect(target([src('id'), src('name')], [[null, 'x'], [null, 'y']]).key).toEqual([0]);
+  });
+
+  it('does not offer the key variant when the server flags another key than the schema', () => {
+    expect(target([src('id', { primaryKeyPart: false }), src('name')]).key).toBeNull();
+    expect(target([src('id'), src('name', { primaryKeyPart: true })]).key).toBeNull();
+  });
+
+  it('refuses what is not a plain read of one base table, like editing does', () => {
+    expect(why(ins([src('id'), src('name', {}, 'Users')], []))).toMatch(/Edição na grade só para resultado de uma tabela \(este vem de/);
+    expect(why(ins([src('id', {}, 'people_v')]))).toMatch(/é uma view/);
+    expect(why(ins([{ name: 'x', type: 'int' }]))).toMatch(/não vêm de uma tabela/);
+    expect(why(insertability(read([src('id')], []), undefined, mysqlDialect.valueKind))).toMatch(/Carregando o schema/);
+    expect(why(insertability({ kind: 'ddl', verb: 'CREATE' }, schema, mysqlDialect.valueKind))).toBe('Edição na grade só para o resultado de um SELECT.');
+    expect(why(insertability({ ...read([src('id')], []), error: { message: 'x' } }, schema, mysqlDialect.valueKind))).toBe('Edição na grade só para o resultado de um SELECT.');
+    expect(why(ins([src('id')], [], { gridEdit: false, name: 'Motor X' }))).toBe('Nesta versão o Motor X é só leitura.');
+    expect(ins([src('id')], [], { gridEdit: true, name: 'MySQL' }).insertable).toBe(true);
+  });
+
+  it('refuses a column the schema does not know and one whose type changed since the schema was read', () => {
+    expect(why(ins([src('id'), src('ghost', { source: { database: 'app', table: 'people', column: 'ghost', alias: 'people' } })]))).toMatch(/ghost não está no schema/);
+    expect(why(ins([src('id'), src('name', { type: 'int' })]))).toMatch(/O tipo de name mudou/);
+  });
+});
+
+describe('Generate INSERT: buildGridInsert', () => {
+  const t = insertability(
+    read([src('id'), src('name'), src('upper_name'), src('avatar')], []),
+    schema,
+    mysqlDialect.valueKind,
+  ) as InsertTarget;
+  const row = (r: number, values: CellValue[]) => ({ row: r, values });
+
+  it('writes the columns of the result without the generated ones, the rows in the order given', () => {
+    expect(t.insertable).toBe(true);
+    const built = buildGridInsert(mysqlDialect, t, [row(0, [1, 'Ana', 'ANA', null]), row(2, [3, "d'A", 'D', { kind: 'binary', hex: 'ff00', length: 2 }])], true);
+    expect(built).toEqual({
+      sql: "INSERT INTO `app`.`people` (`id`, `name`, `avatar`) VALUES\n  (1, 'Ana', NULL),\n  (3, 'd''A', X'ff00')",
+    });
+    expectOneInsert((built as { sql: string }).sql);
+  });
+
+  it('without the key: the primary key columns are left out', () => {
+    expect(t.key).toEqual([0]);
+    expect(buildGridInsert(mysqlDialect, t, [row(0, [1, 'Ana', 'ANA', null])], false)).toEqual({
+      sql: "INSERT INTO `app`.`people` (`name`, `avatar`) VALUES ('Ana', NULL)",
+    });
+    // a result with nothing but the key has no variant without it (it would be all defaults): no key to leave out
+    const keyOnly = insertability(read([src('id')], []), schema, mysqlDialect.valueKind) as InsertTarget;
+    expect(keyOnly.key).toBeNull();
+    // the builder itself still writes the all-defaults INSERT of a target that does name the key
+    const onlyKey: InsertTarget = { ...keyOnly, key: [0] };
+    expect(buildGridInsert(mysqlDialect, onlyKey, [row(0, [1]), row(1, [2])], false)).toEqual({ sql: 'INSERT INTO `app`.`people` () VALUES\n  (),\n  ()' });
+    expect(buildGridInsert(mysqlDialect, onlyKey, [row(0, [1])], false)).toEqual({ sql: 'INSERT INTO `app`.`people` () VALUES ()' });
+    const noKey = { ...t, key: null };
+    expect(() => buildGridInsert(mysqlDialect, noKey, [row(0, [1, 'Ana', 'ANA', null])], false)).toThrow();
+  });
+
+  it('refuses a cut binary value in a column that goes in, naming the column and the row; one that stays out is no problem', () => {
+    const cut: CellValue = { kind: 'binary', hex: 'ab', length: 400 };
+    const built = buildGridInsert(mysqlDialect, t, [row(0, [1, 'Ana', 'ANA', null]), row(4, [5, 'Eva', 'EVA', cut])], true);
+    expect(built).toHaveProperty('error');
+    expect(render((built as { error: Parameters<typeof render>[0] }).error)).toBe('O valor binário de avatar na linha 5 está cortado na grade: não dá para gerar o INSERT.');
+    // the generated column is not written, so a cut value there does not matter
+    const fine = buildGridInsert(mysqlDialect, t, [row(0, [1, 'Ana', cut, null])], true);
+    expect(fine).toHaveProperty('sql');
+  });
+
+  it('has a row limit', () => {
+    expect(MAX_INSERT_ROWS).toBe(1000);
+  });
+});
+
+describe('buildDelete (MySQL)', () => {
+  it('qualifies the table and matches the whole key, without LIMIT', () => {
+    const sql = buildDelete({
+      database: 'app',
+      table: 'order_items',
+      where: [
+        { column: 'order_id', type: 'bigint', value: '9007199254740993' },
+        { column: 'sku', type: 'varchar(20)', value: "A'1" },
+      ],
+    });
+    expect(sql).toBe("DELETE FROM `app`.`order_items` WHERE `order_id` = 9007199254740993 AND `sku` = 'A''1'");
+    expect(sql).not.toMatch(/LIMIT/i);
+    // it reads as exactly one DELETE to the Cais itself, so the main accepts it under the grid label
+    const parts = mysqlDialect.splitStatements(sql + ';');
+    expect(parts).toHaveLength(1);
+    const c = mysqlDialect.classify(sql);
+    expect(c.kind).toBe('write');
+    expect(c.verb).toBe('DELETE');
+    expect(mysqlDialect.warnings(sql)).toEqual([]);
+  });
+
+  it('quotes hostile identifiers and values so nothing escapes the statement', () => {
+    const sql = buildDelete({
+      database: 'a`b',
+      table: 'c; DROP TABLE x',
+      where: [{ column: 'id', type: 'varchar(20)', value: "1' OR '1'='1" }],
+    });
+    expect(sql).toBe("DELETE FROM `a``b`.`c; DROP TABLE x` WHERE `id` = '1'' OR ''1''=''1'");
+    expect(mysqlDialect.splitStatements(sql + ';')).toHaveLength(1);
+  });
+
+  it('refuses a NULL key value and an empty key', () => {
+    expect(() => buildDelete({ database: 'app', table: 't', where: [{ column: 'id', type: 'int', value: null }] })).toThrow();
+    expect(() => buildDelete({ database: 'app', table: 't', where: [] })).toThrow();
+  });
+
+  it('BigQuery has none', () => {
+    expect(() => bigqueryDialect.buildDelete({ database: 'd', table: 't', where: [{ column: 'id', type: 'INT64', value: 1 }] })).toThrow();
+  });
+});
+
+describe('grid deletions', () => {
+  const e = editability([src('id'), src('name', { name: 'nome' }), src('email')], [
+    [1, 'Ana', 'ana@x'],
+    [2, 'Bia', null],
+    [3, 'Caio', 'c@x'],
+    [4, 'Duda', 'd@x'],
+  ]) as EditTarget;
+  const rows: CellValue[][] = [
+    [1, 'Ana', 'ana@x'],
+    [2, 'Bia', null],
+    [3, 'Caio', 'c@x'],
+    [4, 'Duda', 'd@x'],
+  ];
+
+  it('UPDATEs first, then the DELETEs, each in row order', () => {
+    const out = buildGridStatements(mysqlDialect, e, rows, { 3: { 1: 'D' }, 0: { 1: 'A' } }, [2, 1]);
+    expect(out.map((s) => [s.row, s.verb])).toEqual([
+      [0, 'UPDATE'],
+      [3, 'UPDATE'],
+      [1, 'DELETE'],
+      [2, 'DELETE'],
+    ]);
+    expect(out[2]!.sql).toBe('DELETE FROM `app`.`people` WHERE `id` = 2');
+    for (const s of out) expect(mysqlDialect.splitStatements(s.sql + ';')).toHaveLength(1);
+  });
+
+  it('a marked row gets no UPDATE, whatever edits it holds; unmarking brings them back', () => {
+    const cells = { 1: { 1: 'Bia2' }, 0: { 1: 'A' } };
+    const marked = buildGridStatements(mysqlDialect, e, rows, cells, [1]);
+    expect(marked.map((s) => [s.row, s.verb])).toEqual([
+      [0, 'UPDATE'],
+      [1, 'DELETE'],
+    ]);
+    expect(marked.some((s) => s.sql.includes('Bia2'))).toBe(false);
+    const unmarked = buildGridStatements(mysqlDialect, e, rows, cells, []);
+    expect(unmarked.map((s) => [s.row, s.verb])).toEqual([
+      [0, 'UPDATE'],
+      [1, 'UPDATE'],
+    ]);
+  });
+
+  it('only deletions: the statements are the DELETEs, and a key that is NULL throws', () => {
+    expect(buildGridStatements(mysqlDialect, e, rows, {}, [3]).map((s) => s.sql)).toEqual(['DELETE FROM `app`.`people` WHERE `id` = 4']);
+    expect(() => buildGridStatements(mysqlDialect, e, [[null, 'x', 'y']], {}, [0])).toThrow();
+    expect(() => buildGridStatements(mysqlDialect, e, rows, {}, [9])).toThrow();
+  });
+
+  it('counts: a marked row leaves the change count, and the total is what discarding loses', () => {
+    const cells = { 1: { 1: 'x', 2: 'y' }, 0: { 1: 'A' } };
+    expect(pendingCount(cells, [])).toEqual({ changes: 3, rows: 2, deletions: 0, total: 3 });
+    expect(pendingCount(cells, [1])).toEqual({ changes: 1, rows: 1, deletions: 1, total: 4 });
+    expect(pendingCount({}, [0, 2])).toEqual({ changes: 0, rows: 0, deletions: 2, total: 2 });
+    expect(hasPending({}, [])).toBe(false);
+    expect(hasPending({}, [3])).toBe(true);
+    expect(hasPending({ 0: { 1: 'x' } }, [])).toBe(true);
+  });
+
+  it('marks and unmarks rows, sorted and without repeats', () => {
+    expect(withDeleted([], [3, 1, 3], true)).toEqual([1, 3]);
+    expect(withDeleted([1, 3], [2, 3], true)).toEqual([1, 2, 3]);
+    expect(withDeleted([1, 2, 3], [2, 9], false)).toEqual([1, 3]);
+  });
+
+  it('finds the marked rows again by their key after a refresh; rows that are gone are dropped', () => {
+    const fresh: CellValue[][] = [
+      [4, 'Duda', 'd@x'],
+      [2, 'Bia', null],
+      [9, 'Nova', 'n@x'],
+    ];
+    expect(remapRows(e.key, rows, fresh, [1, 2, 3])).toEqual([0, 1]);
+    expect(remapRows(e.key, rows, fresh, [])).toEqual([]);
+  });
+});
+
+describe('deleteReach', () => {
+  const tree = (extra: Partial<SchemaTable>, db: Partial<SchemaTree['databases'][number]> = {}, complete: boolean | undefined = true): SchemaTree => ({
+    foreignKeysComplete: complete,
+    databases: [{ name: 'app', tables: [{ name: 'people', type: 'table', columns: [], ...extra }], ...db }],
+  });
+
+  it('knows nothing without the table', () => {
+    expect(deleteReach(undefined, 'app', 'people')).toBeNull();
+    expect(deleteReach(tree({}), 'app', 'other')).toBeNull();
+  });
+
+  it('a plain table reaches nothing else', () => {
+    expect(deleteReach(tree({}), 'app', 'people')).toEqual({ cascades: [], triggers: false, unknown: false });
+  });
+
+  it('reports cascades and triggers the schema shows', () => {
+    expect(deleteReach(tree({ cascadedBy: ['app.orders'], triggers: ['BEGIN END'] }), 'app', 'people')).toEqual({
+      cascades: ['app.orders'],
+      triggers: true,
+      unknown: false,
+    });
+  });
+
+  it('metadata that could not be read makes the absence of a cascade prove nothing', () => {
+    expect(deleteReach(tree({}, {}, false), 'app', 'people')!.unknown).toBe(true);
+    expect(deleteReach(tree({}, { partial: true }), 'app', 'people')!.unknown).toBe(true);
+    expect(deleteReach(tree({}, { triggersVisible: false }), 'app', 'people')!.unknown).toBe(true);
+    // a tree from a server that does not say (older snapshot) is not "incomplete"
+    expect(deleteReach(tree({}, {}, undefined), 'app', 'people')!.unknown).toBe(false);
+  });
+
+  it('is found by a name that differs only in case when it is the only one', () => {
+    expect(deleteReach(tree({ cascadedBy: ['app.o'] }), 'APP', 'People')!.cascades).toEqual(['app.o']);
   });
 });

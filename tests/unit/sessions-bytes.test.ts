@@ -288,7 +288,7 @@ describe('SessionManager: bytes of a BigQuery statement', () => {
     }
   });
 
-  it('Cancelar during the dry run: CANCELLED, nothing runs, the tab goes back to idle', async () => {
+  it('Cancel during the dry run: CANCELLED, nothing runs, the tab goes back to idle', async () => {
     let release: () => void = () => {};
     const gate = new Promise<void>((r) => (release = r));
     const original = session.prepare.bind(session);

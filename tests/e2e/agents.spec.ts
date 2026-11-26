@@ -76,14 +76,14 @@ test('access starts off: no socket, the CLI exits 4 and says what to do', async 
   expect(existsSync(join(userData, 'agent-endpoint.json'))).toBe(false);
   const out = await cli(['llm', 'envs']);
   expect(out.code).toBe(4);
-  expect(out.json.error).toBe('Peça para a pessoa abrir o Cais e ligar o acesso de agentes.');
+  expect(out.json.error).toBe('Ask the user to open Cais and turn on agent access.');
   // the output closed early: still exit 4, and no stack trace
   const closed = await cli(['llm', 'envs'], {}, { closeStdout: true });
   expect([closed.code, closed.stderr]).toEqual([4, '']);
   await expect(page.getByTestId('agents-status')).toHaveCount(0);
 });
 
-test('turning access on in the panel opens the socket and shows "Agentes ligado"', async () => {
+test('turning access on in the panel opens the socket and shows "Agents on"', async () => {
   await page.getByTestId('agents-entry').click();
   const panel = modal('Agentes');
   await expect(panel).toContainText('O que um agente roda sem pedir depende do ambiente');
@@ -109,13 +109,19 @@ test('envs lists projects and environments with no host, user or password', asyn
 });
 
 test('a reader that closes the output early (| head) is not an error: same exit code, nothing on stderr', async () => {
-  for (const args of [['llm', 'guide'], ['llm', 'envs'], ['llm', 'schema', 'api/pro'], ['llm', 'requests']]) {
+  for (const args of [['llm', 'guide'], ['llm', 'skill'], ['llm', 'envs'], ['llm', 'schema', 'api/pro'], ['llm', 'requests']]) {
     const out = await cli(args, {}, { closeStdout: true });
     expect([args.join(' '), out.code, out.stderr]).toEqual([args.join(' '), 0, '']);
   }
   // a usage error keeps its own code too
   const usage = await cli(['llm', 'query', 'api/dev'], {}, { closeStdout: true });
   expect([usage.code, usage.stderr]).toEqual([2, '']);
+});
+
+test('cais llm skill prints the shipped skill with the app unreachable: exit 0, nothing on stderr, no socket used', async () => {
+  const out = await cli(['llm', 'skill'], { CAIS_SOCKET: join(shortTempDir('cais-noskt-'), 'missing.sock') });
+  expect([out.code, out.stderr]).toEqual([0, '']);
+  expect(out.stdout).toBe(readFileSync(join(root, 'skills', 'cais', 'SKILL.md'), 'utf8'));
 });
 
 test('a read outside production runs at once, with no modal', async () => {
@@ -246,7 +252,7 @@ test('a write with many commands: each listed apart, blank lines and invisible m
     "UPDATE agent_items SET owner = 'z' WHERE id = 2;",
     'DELETE FROM agent_items WHERE id = 3;',
   ].join('\n');
-  const run = cli(['llm', 'query', 'api/dev', '--write', '--sql', sql, '--reason', 'Vários comandos de uma vez', '--wait']);
+  const run = cli(['llm', 'query', 'api/dev', '--write', '--sql', sql, '--reason', 'Several commands at once', '--wait']);
   const dialog = modal('Agente pede para escrever');
   await expect(dialog).toBeVisible();
   await expect(dialog.getByTestId('stmt')).toHaveCount(7);
@@ -275,7 +281,7 @@ test('a write with many commands: each listed apart, blank lines and invisible m
   expect(hidden.json).toMatchObject({ code: 'hidden_text' });
 });
 
-test('Recusar sends the reason back with exit 3', async () => {
+test('Reject sends the reason back with exit 3', async () => {
   const run = cli(['llm', 'query', 'api/dev', '--write', '--sql', "DELETE FROM agent_items", '--reason', 'limpar', '--wait']);
   const dialog = modal('Agente pede para escrever');
   await expect(dialog.getByRole('alert')).toContainText('DELETE sem WHERE');
@@ -287,7 +293,7 @@ test('Recusar sends the reason back with exit 3', async () => {
   expect((await dbRows('SELECT COUNT(*) AS n FROM agent_items'))[0]!.n).toBe(3);
 });
 
-test('Recusar while the output is already closed: still exit 3, silently', async () => {
+test('Reject while the output is already closed: still exit 3, silently', async () => {
   const run = cli(['llm', 'query', 'api/dev', '--write', '--sql', "UPDATE agent_items SET owner = 'y' WHERE id = 3", '--reason', 'teste do pipe', '--wait'], {}, { closeStdout: true });
   const dialog = modal('Agente pede para escrever');
   await expect(dialog).toBeVisible();
@@ -308,7 +314,7 @@ test('Rollback in the second decision exits 3 and changes nothing', async () => 
   expect((await dbRows("SELECT owner FROM agent_items WHERE id = 3"))[0]!.owner).toBe('caio@exemplo.com');
 });
 
-test('"o agente pode ver o resultado" unchecked: only counts come back', async () => {
+test('"The agent can see the result" unchecked: only counts come back', async () => {
   const run = cli(['llm', 'query', 'api/pro', '--sql', 'SELECT owner FROM agent_items', '--reason', 'conferir', '--wait']);
   const dialog = modal('Agente pede para ler');
   await dialog.getByLabel('O agente pode ver o resultado').uncheck();
@@ -320,7 +326,7 @@ test('"o agente pode ver o resultado" unchecked: only counts come back', async (
   expect(out.stdout).not.toContain('exemplo.com');
 });
 
-test('Esc leaves the request pending; Revisar in the panel brings it back; "mais N na fila"', async () => {
+test('Esc leaves the request pending; Review in the panel brings it back; "N more in the queue"', async () => {
   const first = await cli(['llm', 'query', 'api/pro', '--sql', 'SELECT 1', '--reason', 'primeiro']);
   const second = await cli(['llm', 'query', 'api/pro', '--sql', 'SELECT 2', '--reason', 'segundo']);
   expect([first.code, first.json.status, second.json.status]).toEqual([0, 'pending_approval', 'pending_approval']);
@@ -359,7 +365,7 @@ test('wait times out with exit 5 and the request stays valid', async () => {
   await modal('Agente pede para ler').getByRole('button', { name: 'Recusar' }).click();
 });
 
-test('agents create scripts (marked "agente") but cannot edit or delete them', async () => {
+test('agents create scripts (marked "agent") but cannot edit or delete them', async () => {
   const saved = await cli(['llm', 'script-save', '--project', 'api', '--name', 'Duplicados por documento', '--sql', 'SELECT national_id, COUNT(*) FROM companies GROUP BY 1', '--database', testDb().database]);
   expect(saved.code).toBe(0);
   expect(saved.json).toMatchObject({ name: 'Duplicados por documento', created_by: 'agent' });
@@ -373,7 +379,7 @@ test('agents create scripts (marked "agente") but cannot edit or delete them', a
   await expect(page.getByTestId('scripts-count-dev')).toHaveText('1');
 });
 
-test('"Leitura e escrita liberadas" in dev: with an alert the write waits for the person; without, it commits by itself; the Trilha panel shows it', async () => {
+test('"Reads and writes allowed" in dev: with an alert the write waits for the person; without, it commits by itself; the Trail panel shows it', async () => {
   await page.getByTestId('env-dev').click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Editar' }).click();
   const registry = page.getByRole('dialog', { name: 'Cadastro' });
@@ -388,7 +394,7 @@ test('"Leitura e escrita liberadas" in dev: with an alert the write waits for th
   await setTheme(app, page, 'dark');
   await page.screenshot({ path: join(shots, 'registry-agent-level-dark.png') });
   await setTheme(app, page, 'light');
-  // production: starts on "Tudo com aprovação", may free reads, never writes
+  // production: starts on "Everything needs approval", may free reads, never writes
   await registry.getByRole('tab', { name: 'Ambientes' }).click();
   await registry.getByRole('button', { name: 'pro', exact: true }).click();
   const proLevel = registry.getByLabel('Acesso de agentes');
@@ -406,7 +412,7 @@ test('"Leitura e escrita liberadas" in dev: with an alert the write waits for th
   const proWrite = await cli(['llm', 'query', 'api/pro', '--write', '--sql', "UPDATE agent_items SET status = 'x' WHERE id = 3", '--reason', 'teste']);
   expect([proWrite.code, proWrite.json.status]).toEqual([0, 'pending_approval']);
   await modal('Agente pede para escrever').getByRole('button', { name: 'Recusar' }).click();
-  // back to "Tudo com aprovação" for the tests that follow
+  // back to "Everything needs approval" for the tests that follow
   await page.getByTestId('env-pro').click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Editar' }).click();
   await registry.getByLabel('Acesso de agentes').selectOption('approve-all');
@@ -415,7 +421,7 @@ test('"Leitura e escrita liberadas" in dev: with an alert the write waits for th
   await registry.getByRole('button', { name: 'Fechar' }).click();
 
   // an alert (no WHERE): the write waits, saying why
-  const waiting = cli(['llm', 'query', 'api/dev', '--write', '--sql', "UPDATE agent_items SET status = 'auto'", '--reason', 'teste do nível', '--wait', '--client', 'Claude Code']);
+  const waiting = cli(['llm', 'query', 'api/dev', '--write', '--sql', "UPDATE agent_items SET status = 'auto'", '--reason', 'level test', '--wait', '--client', 'Claude Code']);
   const dialog = modal('Agente pede para escrever');
   await expect(dialog).toBeVisible();
   await expect(dialog.getByTestId('agent-approval-reason')).toContainText('libera escrita, mas o pedido tem alerta');
@@ -423,11 +429,11 @@ test('"Leitura e escrita liberadas" in dev: with an alert the write waits for th
   expect((await waiting).code).toBe(3);
 
   // the test account has no PROCESS: an UPDATE cannot rule out a hidden cascading foreign key and waits
-  const upd = await cli(['llm', 'query', 'api/dev', '--write', '--sql', "UPDATE agent_items SET status = 'auto' WHERE id = 3", '--reason', 'teste do nível', '--client', 'Claude Code']);
-  expect(upd.json.approval_reason).toContain('chaves estrangeiras');
+  const upd = await cli(['llm', 'query', 'api/dev', '--write', '--sql', "UPDATE agent_items SET status = 'auto' WHERE id = 3", '--reason', 'level test', '--client', 'Claude Code']);
+  expect(upd.json.approval_reason).toContain('cannot see every foreign key');
   await modal('Agente pede para escrever').getByRole('button', { name: 'Recusar' }).click();
   // a plain INSERT never cascades: it commits by itself
-  const out = await cli(['llm', 'query', 'api/dev', '--write', '--sql', "INSERT INTO agent_items VALUES (4, 'auto', 'teste')", '--reason', 'teste do nível', '--client', 'Claude Code']);
+  const out = await cli(['llm', 'query', 'api/dev', '--write', '--sql', "INSERT INTO agent_items VALUES (4, 'auto', 'teste')", '--reason', 'level test', '--client', 'Claude Code']);
   expect(out.json.approval_reason).toBeUndefined();
   expect(out.code).toBe(0);
   expect(out.json).toMatchObject({ status: 'committed', auto_commit: true, decided_by: 'policy' });
@@ -454,7 +460,7 @@ test('"Leitura e escrita liberadas" in dev: with an alert the write waits for th
   await expect(personRows.nth(1)).toContainText('acesso de agentes: Tudo com aprovação → Leitura liberada, escrita com aprovação');
   await expect(personRows.nth(2)).toContainText('acesso de agentes: Leitura liberada, escrita com aprovação → Leitura e escrita liberadas');
   await trail.getByTestId('trail-actor').selectOption('');
-  await trail.getByTestId('trail-search').fill('teste do nível');
+  await trail.getByTestId('trail-search').fill('level test');
   await expect(trail.getByTestId('trail-row')).toHaveCount(3); // the two refused ones and the automatic one
   await trail.getByRole('button', { name: 'Fechar' }).click();
 });

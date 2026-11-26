@@ -12,6 +12,7 @@ import {
   net,
   Notification,
   safeStorage,
+  shell,
   type MenuItemConstructorOptions,
 } from 'electron';
 import { CHANNELS } from '@shared/ipc';
@@ -24,6 +25,7 @@ import { AgentServer, socketPathFor } from './agents/server';
 import { AgentSessions, realScheduler } from './agents/sessions';
 import { connectParamsFor, type CredentialSources } from './auth/credentials';
 import { installCli } from './cli-install';
+import { installSkill, resolveSkillsDir } from './skill-install';
 import { GcloudTokenProvider, type SpawnFn } from './auth/gcloud';
 import { initMainLocale, mainLocale } from './i18n';
 import iconPath from '../../resources/icon.png?asset';
@@ -31,6 +33,7 @@ import { configureDrivers, getDriver } from './drivers/registry';
 import { registerIpc } from './ipc';
 import { SessionManager } from './sessions';
 import type { Environment } from '@shared/model';
+import { REPOSITORY_URL, ReleaseChecker } from './updates';
 import { CatalogStore } from './store/catalog';
 import { ScriptStore } from './store/scripts';
 import { SettingsStore } from './store/settings';
@@ -113,6 +116,58 @@ function installCliCommand(): void {
   });
 }
 
+/** Path of the skill file: next to the app resources when packaged (`extraResources`), from the repo in development. */
+function skillPath(): string {
+  return app.isPackaged ? join(process.resourcesPath, 'skill', 'SKILL.md') : join(app.getAppPath(), 'skills', 'cais', 'SKILL.md');
+}
+
+let skillDialogOpen = false;
+
+/** Menu only (no IPC channel, nothing an agent can reach): asks where the agent keeps its skills and copies SKILL.md there. */
+async function installSkillCommand(): Promise<void> {
+  if (skillDialogOpen) return;
+  skillDialogOpen = true;
+  try {
+    const t = m().native.skillDialog;
+    const choice = await dialog.showMessageBox({
+      type: 'question',
+      message: t.message,
+      detail: t.detail,
+      buttons: [t.claudeCode, t.chooseFolder, t.cancel],
+      defaultId: 0,
+      cancelId: 2,
+    });
+    let skillsDir: string;
+    if (choice.response === 0) {
+      skillsDir = join(homedir(), '.claude', 'skills');
+    } else if (choice.response === 1) {
+      const picked = await dialog.showOpenDialog({ title: t.chooseTitle, properties: ['openDirectory', 'createDirectory'] });
+      const folder = picked.filePaths[0];
+      if (picked.canceled || !folder) return;
+      skillsDir = resolveSkillsDir(folder);
+    } else {
+      return;
+    }
+    const result = installSkill({ source: skillPath(), skillsDir });
+    await dialog.showMessageBox({
+      type: result.ok ? 'info' : 'error',
+      message: !result.ok ? t.failed : result.status === 'unchanged' ? t.upToDate : t.done,
+      detail: result.message,
+      buttons: [m().native.ok],
+    });
+  } finally {
+    skillDialogOpen = false;
+  }
+}
+
+function openAbout(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+  mainWindow.webContents.send(CHANNELS.eventOpenAbout);
+}
+
 function buildMenu(): void {
   // Every item carries its own label (role items too), so the whole menu follows the app locale.
   const t = m().menu;
@@ -122,13 +177,17 @@ function buildMenu(): void {
     enabled: process.platform !== 'win32',
     click: installCliCommand,
   };
+  const installSkillItem: MenuItemConstructorOptions = { label: t.installSkill, click: () => void installSkillCommand() };
+  // The About window is the app's own (the same on both systems), so the item opens it instead of the native panel.
+  const about: MenuItemConstructorOptions = { label: t.about, click: openAbout };
   if (isMac) {
     template.push({
       label: t.app,
       submenu: [
-        { role: 'about', label: t.about },
+        about,
         { type: 'separator' },
         install,
+        installSkillItem,
         { type: 'separator' },
         { role: 'hide', label: t.hide },
         { role: 'hideOthers', label: t.hideOthers },
@@ -138,7 +197,7 @@ function buildMenu(): void {
       ],
     });
   } else {
-    template.push({ label: t.file, submenu: [install, { type: 'separator' }, { role: 'quit', label: t.quit }] });
+    template.push({ label: t.file, submenu: [install, installSkillItem, { type: 'separator' }, { role: 'quit', label: t.quit }] });
   }
   // The Edit menu item by item ({ role: 'editMenu' } would bring Electron's English labels).
   template.push({
@@ -163,6 +222,8 @@ function buildMenu(): void {
   const windowMenu: MenuItemConstructorOptions[] = [{ role: 'minimize', label: t.minimize }];
   if (isMac) windowMenu.push({ role: 'zoom', label: t.zoom });
   template.push({ label: t.window, submenu: windowMenu });
+  // macOS keeps About in the app menu; elsewhere it lives under Help
+  if (!isMac) template.push({ label: t.help, submenu: [about] });
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
@@ -309,6 +370,7 @@ async function bootstrap(): Promise<void> {
     resolveConnectParams: (environment) => resolveParams(environment, 'person'),
     getDriver,
     getDialect,
+    estimateEnabled: () => settings.estimateAsYouType,
     emit: (state) => {
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(CHANNELS.eventSessionState, state);
     },
@@ -414,10 +476,24 @@ async function bootstrap(): Promise<void> {
     return true;
   };
 
+  // The version check is the one request that is not to a database or BigQuery: on demand only (the About window).
+  // Test hook (unpackaged app only): CAIS_RELEASES_URL points it at a local fake. The e2e never reaches GitHub:
+  // without the hook the check fails at once, which the window shows as "could not check".
+  const releasesUrl = !app.isPackaged && process.env.CAIS_RELEASES_URL ? process.env.CAIS_RELEASES_URL : undefined;
+  const releases = new ReleaseChecker({
+    version: app.getVersion(),
+    fetch:
+      e2e && !releasesUrl
+        ? () => Promise.reject(new Error('offline under test'))
+        : (url, init) => net.fetch(url, init),
+    ...(releasesUrl ? { url: releasesUrl } : {}),
+  });
+
   registerIpc({
     store,
     tabs,
     scripts,
+    settings,
     agents: { access, broker },
     gcloud,
     // the e2e never runs gcloud: the registry offers a fixed account
@@ -436,6 +512,19 @@ async function bootstrap(): Promise<void> {
     },
     trail,
     recordConfig: (detail, env) => recordConfig(detail, env),
+    about: {
+      info: () => ({
+        version: app.getVersion(),
+        electron: process.versions.electron,
+        chromium: process.versions.chrome,
+        node: process.versions.node,
+        system: `${process.platform} ${process.arch}`,
+        repository: REPOSITORY_URL,
+      }),
+      releases,
+      // looked up on `shell` at call time, so a test can replace it
+      openExternal: (url) => shell.openExternal(url),
+    },
   });
 
   // Quitting: first the person's open transactions (a dialog), then the agents' (pending requests expire,

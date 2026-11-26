@@ -3,7 +3,11 @@ import type { ptBR } from './pt-BR';
 
 const f = createFormat('en');
 
-/** Area "agentsUi", English. */
+/**
+ * Area "agentsUi", English. Entries under `approval`, `commitStop`, `rejection` and `error` are also sent to agents,
+ * always rendered in AGENT_LOCALE (English, fixed), so their text here is part of the CLI's output: change it only
+ * on purpose.
+ */
 export const en: Shape<typeof ptBR> = {
   verbatim: (p) => p.text,
 
@@ -187,8 +191,8 @@ export const en: Shape<typeof ptBR> = {
     unexpected: 'Unexpected error while running the request.',
     timeout: 'Time limit for agents reached.',
     bytesOverApproved: (p) =>
-      `The estimate for this read went past ${f.formatBytes(p.ceiling)}, the approved ceiling (now ${f.formatBytes(p.bytes)}): it did not run. Ask again so the person sees the new estimate.`,
-    routineNotApproved: (p) => `This read reaches the routine ${p.name}, which nobody approved: it did not run. Ask again so the person sees it.`,
+      `The estimate for this read went past ${f.formatBytes(p.ceiling)}, the approved ceiling (now ${f.formatBytes(p.bytes)}): it did not run. Ask again so the user sees the new estimate.`,
+    routineNotApproved: (p) => `This read reaches the routine ${p.name}, which nobody approved: it did not run. Ask again so the user sees it.`,
     accessClosed: 'Agent access was turned off or the environment changed.',
     unexpectedCommit: 'The server ended the transaction during the request.',
     nonTransactionalWrite: 'The statement wrote outside the transaction (non-transactional or system table): Rollback does not undo it.',
@@ -196,7 +200,7 @@ export const en: Shape<typeof ptBR> = {
     connectFailed: 'Could not connect to the environment.',
     connectFailedDetail: (p) => `Could not connect to the environment. ${p.detail}`,
     loginRefused: 'Login refused by the server.',
-    credentialUnavailable: 'Could not get the environment’s credential. Ask the person to check the registry in Cais.',
+    credentialUnavailable: 'Could not get the environment’s credential. Ask the user to check the registry in Cais.',
     socketPathTaken: 'A file already exists at the agent socket path.',
     socketInUse: 'Another Cais already has agent access on.',
     socketFailed: (p) => `Could not open the agent socket: ${p.code}.`,

@@ -85,7 +85,7 @@ export class ScriptStore {
   private checkName(projectId: string, raw: string, ignoreId?: string): string {
     // bidi and invisible controls are removed (not rejected), then the name is NFC-normalized
     const name = stripInvisible(raw).normalize('NFC').trim();
-    // errors here can reach an agent saving a script: each keeps its ref (rendered in pt-BR for agents)
+    // errors here can reach an agent saving a script: each keeps its ref (rendered in English for agents)
     if (!name) throw CaisError.of(ref('mainScripts.nameRequired'));
     if (name.length > MAX_SCRIPT_NAME) throw CaisError.of(ref('mainScripts.nameTooLong', { max: MAX_SCRIPT_NAME }));
     if (this.isTaken(projectId, name, ignoreId)) {

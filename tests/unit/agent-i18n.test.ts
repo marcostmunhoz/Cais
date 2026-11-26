@@ -1,4 +1,4 @@
-// With the app in English the person reads English; the agent keeps reading the same pt-BR text.
+// The agent always reads English, whatever the app locale; the person reads the app locale (English here, pt-BR in the last block).
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -38,10 +38,10 @@ const free = () => {
 };
 
 describe('broker in English', () => {
-  it('approval reason and alerts: English in the modal, pt-BR for the agent', async () => {
+  it('approval reason and alerts: English in the modal, English for the agent', async () => {
     const h = free();
     const res = (await h.broker.query({ env: 'api/dev', sql: 'UPDATE cards SET blocked = 1', write: true, reason: 'r' })) as any;
-    expect(res.approval_reason).toBe('Este ambiente libera escrita, mas o pedido tem alerta: ele espera a sua aprovação.');
+    expect(res.approval_reason).toBe('This environment allows writes, but the request has an alert: it waits for your approval.');
     const view = h.broker.snapshot().pending[0]!;
     expect(view.approvalReason).toBe('This environment allows writes, but the request has an alert: it waits for your approval.');
     expect(view.warnings).toEqual(['UPDATE without WHERE']);
@@ -51,20 +51,20 @@ describe('broker in English', () => {
     const h = free();
     h.executor.writeOutcome = { results: [result({ kind: 'write', verb: 'UPDATE', affectedRows: 1001 })], open: true };
     const res = (await h.broker.query({ env: 'api/dev', sql: 'UPDATE cards SET a = 1 WHERE id > 0', write: true, reason: 'r' })) as any;
-    expect(res.commit_reason).toBe('Afetou 1.001 linhas; o commit automático vai até 1.000. Confira e decida.');
+    expect(res.commit_reason).toBe('It affected 1,001 rows; automatic commit goes up to 1,000. Check and decide.');
     expect(h.broker.snapshot().awaitingCommit[0]!.commitReason).toBe('It affected 1,001 rows; automatic commit goes up to 1,000. Check and decide.');
   });
 
-  it('an environment change: rejection in English for the person, "O ambiente mudou." for the agent', async () => {
+  it('an environment change: rejection in English for the person and for the agent', async () => {
     const h = makeBroker();
     const pending = (await h.broker.query({ env: 'api/pro', sql: 'SELECT 1', reason: 'r' })) as any;
     h.envs[1]!.host = 'elsewhere.example';
     await h.broker.environmentChanged('e-pro');
-    expect(await h.broker.status({ id: pending.request_id })).toMatchObject({ status: 'expired', rejection_reason: 'O ambiente mudou.' });
+    expect(await h.broker.status({ id: pending.request_id })).toMatchObject({ status: 'expired', rejection_reason: 'The environment changed.' });
     expect(h.broker.snapshot().recent[0]!.rejectionReason).toBe('The environment changed.');
   });
 
-  it('person-side errors: message in English, agent text in pt-BR', async () => {
+  it('person-side errors: message in English, agent text in English', async () => {
     const h = makeBroker();
     const err = (() => {
       try {
@@ -76,10 +76,10 @@ describe('broker in English', () => {
     })();
     expect(err).toBeInstanceOf(AgentError);
     expect(err.message).toBe('Request not found.');
-    expect(agentText(err)).toBe('Pedido não encontrado.');
+    expect(agentText(err)).toBe('Request not found.');
   });
 
-  it('a failed commit: English in the panel, pt-BR in the reply', async () => {
+  it('a failed commit: English in the panel, English in the reply', async () => {
     const h = makeBroker();
     const r = (await h.broker.query({ env: 'api/dev', sql: 'UPDATE cards SET a = 1 WHERE id = 1', write: true, reason: 'r' })) as any;
     h.broker.approve(r.request_id, { shareResult: true });
@@ -94,18 +94,18 @@ describe('broker in English', () => {
     expect(h.broker.snapshot().recent[0]!.errorMessage).toBe('The commit failed and the server rolled the transaction back.');
     expect(await h.broker.status({ id: rec.id })).toMatchObject({
       status: 'failed',
-      error: { message: 'O commit falhou e o servidor desfez a transação.', code: 'commit_failed' },
+      error: { message: 'The commit failed and the server rolled the transaction back.', code: 'commit_failed' },
     });
     // the reply never carries the reference itself
     expect(JSON.stringify(await h.broker.status({ id: rec.id }))).not.toContain('agentsUi');
   });
 
-  it('the socket replies in pt-BR whatever the app locale', async () => {
+  it('the socket replies in English whatever the app locale', async () => {
     const h = makeBroker();
     server = new AgentServer({ broker: h.broker, socketPath: join(dir, 'agent.sock'), endpointPath: join(dir, 'ep.json'), platform: process.platform, pid: process.pid, appVersion: 'x' });
     await server.start();
     h.broker.setEnabled(false);
-    expect(await send(join(dir, 'agent.sock'), 'envs', {})).toMatchObject({ kind: 'error', code: 'agent_access_off', message: 'O acesso de agentes está desligado.' });
+    expect(await send(join(dir, 'agent.sock'), 'envs', {})).toMatchObject({ kind: 'error', code: 'agent_access_off', message: 'Agent access is off.' });
   });
 
   it('a socket that cannot open: the panel says why in English', async () => {
@@ -157,7 +157,7 @@ function agentSessions(opts: { openError?: Error; onExecute?: (sql: string) => P
 }
 
 describe('main errors that reach an agent, with the app in English', () => {
-  it('a script name conflict: the store says it in English, the agent reads pt-BR', async () => {
+  it('a script name conflict: the store says it in English, the agent reads English', async () => {
     const store = new ScriptStore(dir, { getProject: (id) => projects.find((p) => p.id === id), getEnvironment: () => undefined, now: () => 1 });
     await store.save({ projectId: 'p-api', name: 'duplicados', sql: 'SELECT 1' }, 'user');
     const personSide = (await store.save({ projectId: 'p-api', name: 'Duplicados', sql: 'SELECT 2' }, 'user').catch((e) => e)) as Error;
@@ -169,10 +169,10 @@ describe('main errors that reach an agent, with the app in English', () => {
     expect(err).toBeInstanceOf(AgentError);
     expect(err.code).toBe('duplicate_name');
     expect(err.message).toBe('A script with this name already exists in api.');
-    expect(agentText(err)).toBe('Já existe um script com esse nome em api.');
+    expect(agentText(err)).toBe('A script with this name already exists in api.');
   });
 
-  it('a driver connection failure: English for the person, pt-BR for the agent, no address either way', async () => {
+  it('a driver connection failure: English for the person and for the agent, no address either way', async () => {
     const info = mapMysqlError({ code: 'ETIMEDOUT', message: 'connect ETIMEDOUT' }, ctx);
     expect(info.message).toBe(`No response from ${dev.host}:${dev.port}. Is the VPN on?`);
     const sessions = agentSessions({ openError: new DriverError(info.message, info) });
@@ -180,26 +180,26 @@ describe('main errors that reach an agent, with the app in English', () => {
     expect(err).toBeInstanceOf(AgentError);
     expect(err.code).toBe('connection_failed');
     expect(err.message).toBe('Could not connect to the environment. No response from <server>. Is the VPN on?');
-    expect(agentText(err)).toBe('Não foi possível conectar ao ambiente. Sem resposta de <servidor>. A VPN está ligada?');
+    expect(agentText(err)).toBe('Could not connect to the environment. No response from <server>. Is the VPN on?');
 
     // and through the broker: the reply the CLI prints
     const h = makeBroker({ executor: sessions as any });
     h.envs[0]!.agentLevel = 'free-reads-writes';
     const reply = (await h.broker.query({ env: 'api/dev', sql: 'SELECT 1', reason: 'r' })) as any;
     expect(JSON.stringify(reply)).not.toContain(dev.host);
-    expect(reply).toMatchObject({ status: 'failed', error: { code: 'connection_failed', message: 'Não foi possível conectar ao ambiente. Sem resposta de <servidor>. A VPN está ligada?' } });
+    expect(reply).toMatchObject({ status: 'failed', error: { code: 'connection_failed', message: 'Could not connect to the environment. No response from <server>. Is the VPN on?' } });
     expect(h.broker.snapshot().recent[0]!.errorMessage).toBe('Could not connect to the environment. No response from <server>. Is the VPN on?');
   });
 
-  it('a statement error mapped by mapMysqlError: English in the panel, pt-BR in the reply', async () => {
+  it('a statement error mapped by mapMysqlError: English in the panel, English in the reply', async () => {
     const lost = mapMysqlError({ code: 'PROTOCOL_CONNECTION_LOST', message: 'Connection lost: The server closed the connection.', fatal: true }, ctx);
     expect(lost.message).toBe('Connection lost.');
     const sessions = agentSessions({ onExecute: () => ({ error: lost }) });
     const h = makeBroker({ executor: sessions as any });
     h.envs[0]!.agentLevel = 'free-reads-writes';
     const reply = (await h.broker.query({ env: 'api/dev', sql: 'SELECT 1', reason: 'r' })) as any;
-    expect(reply).toMatchObject({ status: 'failed', error: { code: 'PROTOCOL_CONNECTION_LOST', message: 'Conexão perdida.' } });
-    expect(JSON.stringify(reply)).not.toContain('Connection lost');
+    expect(reply).toMatchObject({ status: 'failed', error: { code: 'PROTOCOL_CONNECTION_LOST', message: 'Connection lost.' } });
+    expect(JSON.stringify(reply)).not.toContain('The server closed the connection');
     expect(h.broker.snapshot().recent[0]!.errorMessage).toBe('Connection lost.');
   });
 });
@@ -218,13 +218,63 @@ describe('shared helpers in English', () => {
     expect(noStatementMessage()).toBe('No statement under the cursor.');
   });
 
-  it('agent-facing checks stay pt-BR unless asked; markers are never translated', () => {
-    expect(mysql.agentCodeProblem!('SELECT 1 --\tx')).toBe('Comentário "--" sem espaço logo depois: use "-- " (traço, traço, espaço).');
+  it('agent-facing checks are English unless asked; markers are never translated', () => {
+    expect(mysql.agentCodeProblem!('SELECT 1 --\tx')).toBe('Comment "--" without a space right after it: use "-- " (dash, dash, space).');
     expect(hiddenTextProblem('SELECT 1‮')).toBe('The SQL has an invisible or text-direction character (⟨U+202E⟩). Rewrite it without that character.');
-    expect(hiddenTextProblem('SELECT 1‮', AGENT_LOCALE)).toBe('O SQL tem um caractere invisível ou de direção de texto (⟨U+202E⟩). Reescreva sem ele.');
+    expect(hiddenTextProblem('SELECT 1‮', AGENT_LOCALE)).toBe('The SQL has an invisible or text-direction character (⟨U+202E⟩). Rewrite it without that character.');
     expect(collapseBlankRuns('a\n\n\nb')).toBe('a\n⋯ 2 blank lines\nb');
     const target = { host: '10.1.2.3', port: 3306 };
-    expect(redactForAgent("Access denied for user 'u'@'10.1.2.3'", target)).toBe("Access denied for user '<usuário>'@'<servidor>'");
-    expect(redactForAgent("Access denied for user 'u'@'10.1.2.3'", target, 'en')).toBe("Access denied for user '<user>'@'<server>'");
+    expect(redactForAgent("Access denied for user 'u'@'10.1.2.3'", target)).toBe("Access denied for user '<user>'@'<server>'");
+    expect(redactForAgent("Access denied for user 'u'@'10.1.2.3'", target, 'pt-BR')).toBe("Access denied for user '<usuário>'@'<servidor>'");
+  });
+});
+
+describe('app in pt-BR: the person reads Portuguese, the agent reads English', () => {
+  it('approval reason, commit reason and a person-side error', async () => {
+    setLocale('pt-BR');
+    const h = free();
+    const res = (await h.broker.query({ env: 'api/dev', sql: 'UPDATE cards SET blocked = 1', write: true, reason: 'r' })) as any;
+    expect(res.approval_reason).toBe('This environment allows writes, but the request has an alert: it waits for your approval.');
+    expect(h.broker.snapshot().pending[0]!.approvalReason).toBe('Este ambiente libera escrita, mas o pedido tem alerta: ele espera a sua aprovação.');
+    const err = (() => {
+      try {
+        h.broker.approve('nope', { shareResult: true });
+      } catch (e) {
+        return e as AgentError;
+      }
+      throw new Error('approve should throw');
+    })();
+    expect(err.message).toBe('Pedido não encontrado.');
+    expect(agentText(err)).toBe('Request not found.');
+  });
+
+  it('commit reason: English for the agent, Portuguese for the person', async () => {
+    setLocale('pt-BR');
+    const h = free();
+    h.executor.writeOutcome = { results: [result({ kind: 'write', verb: 'UPDATE', affectedRows: 1001 })], open: true };
+    const res = (await h.broker.query({ env: 'api/dev', sql: 'UPDATE cards SET a = 1 WHERE id > 0', write: true, reason: 'r' })) as any;
+    expect(res.commit_reason).toBe('It affected 1,001 rows; automatic commit goes up to 1,000. Check and decide.');
+    expect(h.broker.snapshot().awaitingCommit[0]!.commitReason).toBe('Afetou 1.001 linhas; o commit automático vai até 1.000. Confira e decida.');
+  });
+
+  it('an environment change: English for the agent, Portuguese for the person', async () => {
+    setLocale('pt-BR');
+    const h = makeBroker();
+    const pending = (await h.broker.query({ env: 'api/pro', sql: 'SELECT 1', reason: 'r' })) as any;
+    h.envs[1]!.host = 'elsewhere.example';
+    await h.broker.environmentChanged('e-pro');
+    expect(await h.broker.status({ id: pending.request_id })).toMatchObject({ status: 'expired', rejection_reason: 'The environment changed.' });
+    expect(h.broker.snapshot().recent[0]!.rejectionReason).toBe('O ambiente mudou.');
+  });
+
+  it('Connection lost: English for the agent, Portuguese for the person', async () => {
+    setLocale('pt-BR');
+    const lost = mapMysqlError({ code: 'PROTOCOL_CONNECTION_LOST', message: 'Connection lost: The server closed the connection.', fatal: true }, ctx);
+    const sessions = agentSessions({ onExecute: () => ({ error: lost }) });
+    const h = makeBroker({ executor: sessions as any });
+    h.envs[0]!.agentLevel = 'free-reads-writes';
+    const reply = (await h.broker.query({ env: 'api/dev', sql: 'SELECT 1', reason: 'r' })) as any;
+    expect(reply).toMatchObject({ status: 'failed', error: { code: 'PROTOCOL_CONNECTION_LOST', message: 'Connection lost.' } });
+    expect(h.broker.snapshot().recent[0]!.errorMessage).toBe('Conexão perdida.');
   });
 });

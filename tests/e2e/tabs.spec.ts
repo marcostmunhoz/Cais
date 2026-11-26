@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
 import { launch, seedUserData, setSql, setTheme, shortTempDir, shots, testDb } from './helpers';
 
-// Connection state in the tab, click on the environment, Salvar button.
+// Connection state in the tab, click on the environment, Save button.
 // Own userData: the testids env-<name> would repeat across specs that duplicate environments.
 
 let userData: string;
@@ -36,7 +36,7 @@ const tabs = () => page.getByTestId('tab');
 const activeTab = () => page.locator('[data-testid=tab][aria-selected=true]');
 const chip = () => page.getByTestId('conn-chip');
 
-test('an environment on a closed port shows the error on the tab and the session bar, with Reconectar', async () => {
+test('an environment on a closed port shows the error on the tab and the session bar, with Reconnect', async () => {
   await page.getByTestId('env-offline').click();
   await expect(tabs()).toHaveCount(1);
   // opening the tab connects right away: the failure shows before any Run
@@ -58,10 +58,10 @@ test('an environment on a closed port shows the error on the tab and the session
   await page.screenshot({ path: join(shots, 'tabs-error-dark.png') });
   await setTheme(app, page, 'light');
 
-  // Reconectar goes through the open again and fails the same way
+  // Reconnect goes through the open again and fails the same way
   await page.getByTestId('btn-reconnect').click();
   await expect(chip()).toHaveAttribute('data-status', 'error', { timeout: 20_000 });
-  // Desconectar on the notice clears the error and keeps the tab
+  // Disconnect on the notice clears the error and keeps the tab
   await page.getByTestId('notice-disconnect').click();
   await expect(chip()).toHaveAttribute('data-status', 'disconnected');
   await expect(chip()).toHaveText('Desconectado');
@@ -81,7 +81,7 @@ test('a working environment connects on open', async () => {
   await expect(page.getByTestId('btn-disconnect')).toBeEnabled();
 });
 
-test('Desconectar keeps the tab, its text and its mode; Conectar brings them back', async () => {
+test('Disconnect keeps the tab, its text and its mode; Connect brings them back', async () => {
   await page.getByRole('radio', { name: 'Transação' }).click();
   await expect(page.getByRole('radio', { name: 'Transação' })).toHaveAttribute('aria-checked', 'true');
   await setSql(page, 'SELECT 1 AS um;');
@@ -97,7 +97,7 @@ test('Desconectar keeps the tab, its text and its mode; Conectar brings them bac
   await expect(page.getByRole('radio', { name: 'Transação' })).toHaveAttribute('aria-checked', 'true');
 });
 
-test('with an open transaction Desconectar is disabled and says why', async () => {
+test('with an open transaction Disconnect is disabled and says why', async () => {
   await setSql(page, 'UPDATE people SET name = name WHERE id = 1;');
   await page.getByTestId('run').click();
   await expect(page.getByTestId('txbar')).toBeVisible({ timeout: 20_000 });
@@ -136,7 +136,7 @@ test('single click on an environment focuses its tab; double click opens another
   await expect(tabs().nth(1)).toHaveAttribute('aria-selected', 'true');
 });
 
-test('Salvar in the session bar asks for a name on a loose tab and lights up on changes', async () => {
+test('Save in the session bar asks for a name on a loose tab and lights up on changes', async () => {
   const save = page.getByTestId('btn-save');
   await expect(save).toHaveAttribute(
     'title',

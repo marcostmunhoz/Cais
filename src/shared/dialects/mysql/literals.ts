@@ -1,5 +1,5 @@
 import type { CellValue } from '../../results';
-import type { UpdateSpec, ValueKind } from '../types';
+import type { DeleteSpec, InsertSpec, UpdateSpec, ValueKind } from '../types';
 import { m } from '../../i18n';
 
 // Literals for the UPDATEs the grid generates. Two readers must agree on every literal: the
@@ -114,14 +114,54 @@ export function quoteLiteral(value: CellValue, type: string): string {
 
 export const quoteIdent = (name: string): string => '`' + name.replace(/`/g, '``') + '`';
 
-export function buildUpdate(spec: UpdateSpec): string {
+/**
+ * `UPDATE db.table SET … WHERE <every key column> = …` and where each SET value literal sits in the text, so a caller
+ * can select the literal for the person to type over.
+ */
+export function buildUpdateLocated(spec: UpdateSpec): { sql: string; setValues: { from: number; to: number }[] } {
   if (spec.set.length === 0 || spec.where.length === 0) throw new Error(m().dialect.literal.noKey);
-  const assign = spec.set.map((c) => `${quoteIdent(c.column)} = ${quoteLiteral(c.value, c.type)}`);
+  const assign = spec.set.map((c) => ({ name: quoteIdent(c.column), literal: quoteLiteral(c.value, c.type) }));
   const match = spec.where.map((c) => {
     // "= NULL" never matches: a key value is never NULL
     if (c.value === null) throw new Error(m().dialect.literal.noKey);
     return `${quoteIdent(c.column)} = ${quoteLiteral(c.value, c.type)}`;
   });
   // one row by its whole key, and no LIMIT (unsafe with statement-based replication, and it would hide a stale key)
-  return `UPDATE ${quoteIdent(spec.database)}.${quoteIdent(spec.table)} SET ${assign.join(', ')} WHERE ${match.join(' AND ')}`;
+  let sql = `UPDATE ${quoteIdent(spec.database)}.${quoteIdent(spec.table)} SET `;
+  const setValues: { from: number; to: number }[] = [];
+  assign.forEach((a, i) => {
+    sql += `${i > 0 ? ', ' : ''}${a.name} = `;
+    setValues.push({ from: sql.length, to: sql.length + a.literal.length });
+    sql += a.literal;
+  });
+  return { sql: `${sql} WHERE ${match.join(' AND ')}`, setValues };
+}
+
+/** `DELETE FROM db.table WHERE <every key column> = …`: one row by its whole key, no LIMIT (the reasons of `buildUpdateLocated`). */
+export function buildDelete(spec: DeleteSpec): string {
+  if (spec.where.length === 0) throw new Error(m().dialect.literal.noKey);
+  const match = spec.where.map((c) => {
+    // "= NULL" never matches: a key value is never NULL
+    if (c.value === null) throw new Error(m().dialect.literal.noKey);
+    return `${quoteIdent(c.column)} = ${quoteLiteral(c.value, c.type)}`;
+  });
+  return `DELETE FROM ${quoteIdent(spec.database)}.${quoteIdent(spec.table)} WHERE ${match.join(' AND ')}`;
+}
+
+export const buildUpdate = (spec: UpdateSpec): string => buildUpdateLocated(spec).sql;
+
+/**
+ * `INSERT INTO db.table (cols) VALUES (…)`: every value a literal that reads the same way to the server and to the
+ * splitter (see the top of this file). Several rows go one per line, so a reviewer reads one row at a time.
+ */
+export function buildInsert(spec: InsertSpec): string {
+  // no columns is `() VALUES ()`: every column takes its default (the INSERT without the primary key, of a table that is only a key)
+  if (spec.rows.length === 0) throw new Error(m().dialect.literal.noColumns);
+  const names = spec.columns.map((c) => quoteIdent(c.column)).join(', ');
+  const tuples = spec.rows.map((row) => {
+    if (row.length !== spec.columns.length) throw new Error(m().dialect.literal.noColumns);
+    return `(${spec.columns.map((c, i) => quoteLiteral(row[i] ?? null, c.type)).join(', ')})`;
+  });
+  const head = `INSERT INTO ${quoteIdent(spec.database)}.${quoteIdent(spec.table)} (${names}) VALUES`;
+  return tuples.length === 1 ? `${head} ${tuples[0]}` : `${head}\n${tuples.map((t) => `  ${t}`).join(',\n')}`;
 }

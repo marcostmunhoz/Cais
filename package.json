@@ -3,7 +3,7 @@
   "productName": "Cais",
   "desktopName": "cais-app.desktop",
   "version": "0.1.1",
-  "description": "Cliente SQL de desktop organizado por projeto e ambiente",
+  "description": "Desktop SQL client organized by project and environment",
   "main": "out/main/index.js",
   "author": "Cais",
   "license": "MIT",
@@ -27,6 +27,7 @@
     "@codemirror/commands": "6.11.1",
     "@codemirror/lang-sql": "6.10.0",
     "@codemirror/language": "6.13.1",
+    "@codemirror/lint": "6.9.8",
     "@codemirror/state": "6.7.6",
     "@codemirror/view": "6.43.15",
     "@lezer/highlight": "1.2.5",
@@ -36,6 +37,7 @@
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.3.0",
+    "dt-sql-parser": "4.6.1",
     "electron": "45.3.0",
     "electron-builder": "26.18.0",
     "electron-vite": "6.0.0",
@@ -103,8 +105,8 @@
       "executableName": "cais-app",
       "icon": "build/icons",
       "category": "Development;Database",
-      "synopsis": "Cliente SQL de desktop",
-      "description": "Cliente SQL de desktop organizado por projeto e ambiente, com acesso de agentes de IA pelo CLI cais llm.",
+      "synopsis": "Desktop SQL client",
+      "description": "Desktop SQL client organized by project and environment, with AI agent access through the cais llm CLI.",
       "maintainer": "Cais <cais@localhost>"
     },
     "dmg": {
@@ -123,6 +125,10 @@
       {
         "from": "out/cli/cais.mjs",
         "to": "cli/cais.mjs"
+      },
+      {
+        "from": "skills/cais/SKILL.md",
+        "to": "skill/SKILL.md"
       }
     ]
   },

@@ -2,7 +2,9 @@ import { join } from 'node:path';
 
 export const PROTOCOL = 1;
 
-export const UNAVAILABLE_MESSAGE = 'Peça para a pessoa abrir o Cais e ligar o acesso de agentes.';
+export const UNAVAILABLE_MESSAGE = 'Ask the user to open Cais and turn on agent access.';
+
+export const PROTOCOL_MISMATCH_MESSAGE = 'This version of the cais command does not talk to this Cais. Update the app and reinstall the command.';
 
 /** The Cais user data folder: where `agent-endpoint.json` lives. */
 export function userDataDir(env: NodeJS.ProcessEnv, platform: NodeJS.Platform, home: string): string {

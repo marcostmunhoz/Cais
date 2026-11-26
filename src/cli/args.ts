@@ -14,6 +14,7 @@ export const MAX_SQL_BYTES = 100 * 1024;
 
 export type Command =
   | { name: 'guide' }
+  | { name: 'skill' }
   | { name: 'envs' }
   | { name: 'schema'; env: string; database?: string; table?: string }
   | {
@@ -47,6 +48,7 @@ const BOOL_FLAGS = new Set(['--write', '--wait']);
 
 const ALLOWED: Record<string, { flags: string[]; positionals: number }> = {
   guide: { flags: ['--client'], positionals: 0 },
+  skill: { flags: ['--client'], positionals: 0 },
   envs: { flags: ['--client'], positionals: 0 },
   schema: { flags: ['--database', '--table', '--client'], positionals: 1 },
   query: { flags: ['--sql', '--file', '--write', '--reason', '--database', '--max-rows', '--wait', '--timeout', '--client'], positionals: 1 },
@@ -58,18 +60,18 @@ const ALLOWED: Record<string, { flags: string[]; positionals: number }> = {
 };
 
 function integer(flag: string, raw: string, min: number, max: number): number {
-  if (!/^\d+$/.test(raw)) throw new UsageError(`${flag} precisa de um número inteiro.`);
+  if (!/^\d+$/.test(raw)) throw new UsageError(`${flag} needs a whole number.`);
   const n = Number(raw);
-  if (n < min || n > max) throw new UsageError(`${flag} precisa estar entre ${min} e ${max}.`);
+  if (n < min || n > max) throw new UsageError(`${flag} must be between ${min} and ${max}.`);
   return n;
 }
 
-/** `argv` is what comes after the script name: `["llm", "query", "loja/dev", "--sql", "SELECT 1"]`. */
+/** `argv` is what comes after the script name: `["llm", "query", "shop/dev", "--sql", "SELECT 1"]`. */
 export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = {}): Parsed {
-  if (argv[0] !== 'llm') throw new UsageError('Uso: cais llm <comando>. Rode "cais llm guide" para ver o fluxo.');
+  if (argv[0] !== 'llm') throw new UsageError('Usage: cais llm <command>. Run "cais llm guide" to see the flow.');
   const sub = argv[1];
   if (!sub || !Object.hasOwn(ALLOWED, sub)) {
-    throw new UsageError(`Comando desconhecido${sub ? `: ${sub}` : ''}. Rode "cais llm guide" para ver os comandos.`);
+    throw new UsageError(`Unknown command${sub ? `: ${sub}` : ''}. Run "cais llm guide" to see the commands.`);
   }
   const spec = ALLOWED[sub]!;
   const flags = new Map<string, string | true>();
@@ -82,29 +84,29 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = {}): Parsed {
     } else if (arg.startsWith('--')) {
       const eq = arg.indexOf('=');
       const flag = eq === -1 ? arg : arg.slice(0, eq);
-      if (!spec.flags.includes(flag)) throw new UsageError(`Opção desconhecida para ${sub}: ${flag}`);
+      if (!spec.flags.includes(flag)) throw new UsageError(`Unknown option for ${sub}: ${flag}`);
       if (BOOL_FLAGS.has(flag)) {
-        if (eq !== -1) throw new UsageError(`${flag} não recebe valor.`);
+        if (eq !== -1) throw new UsageError(`${flag} takes no value.`);
         flags.set(flag, true);
       } else if (VALUE_FLAGS.has(flag)) {
         let value: string | undefined;
         if (eq !== -1) value = arg.slice(eq + 1);
         else {
           value = argv[++i];
-          if (value === undefined) throw new UsageError(`${flag} precisa de um valor.`);
+          if (value === undefined) throw new UsageError(`${flag} needs a value.`);
         }
-        if (flags.has(flag)) throw new UsageError(`${flag} foi informado duas vezes.`);
+        if (flags.has(flag)) throw new UsageError(`${flag} was given twice.`);
         flags.set(flag, value);
       }
     } else if (arg.startsWith('-') && arg.length > 1) {
-      throw new UsageError(`Opção desconhecida: ${arg}`);
+      throw new UsageError(`Unknown option: ${arg}`);
     } else {
       positionals.push(arg);
     }
   }
   if (positionals.length !== spec.positionals) {
     throw new UsageError(
-      spec.positionals === 0 ? `${sub} não recebe argumentos.` : `${sub} precisa de ${spec.positionals} argumento${spec.positionals > 1 ? 's' : ''}.`,
+      spec.positionals === 0 ? `${sub} takes no arguments.` : `${sub} needs ${spec.positionals} argument${spec.positionals > 1 ? 's' : ''}.`,
     );
   }
   const str = (flag: string): string | undefined => {
@@ -116,17 +118,17 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = {}): Parsed {
 
   const sqlSource = (): SqlSource => {
     const sources = [flags.has('--sql'), flags.has('--file'), stdin].filter(Boolean).length;
-    if (sources !== 1) throw new UsageError('Informe o SQL com exatamente uma opção: --sql, --file ou - (entrada padrão).');
+    if (sources !== 1) throw new UsageError('Give the SQL with exactly one option: --sql, --file or - (standard input).');
     if (stdin) return { kind: 'stdin' };
     if (flags.has('--file')) return { kind: 'file', path: str('--file')! };
     const sql = str('--sql')!;
-    if (!sql.trim()) throw new UsageError('O SQL está vazio.');
+    if (!sql.trim()) throw new UsageError('The SQL is empty.');
     return { kind: 'inline', sql };
   };
-  if (stdin && !(sub === 'query' || sub === 'script-save')) throw new UsageError('A entrada padrão (-) só vale para query e script-save.');
+  if (stdin && !(sub === 'query' || sub === 'script-save')) throw new UsageError('Standard input (-) only works with query and script-save.');
   const required = (flag: string): string => {
     const v = str(flag);
-    if (!v?.trim()) throw new UsageError(`${flag} é obrigatório.`);
+    if (!v?.trim()) throw new UsageError(`${flag} is required.`);
     return v;
   };
   const opt = <K extends string, V>(key: K, value: V | undefined): { [P in K]?: V } => (value === undefined ? {} : ({ [key]: value } as { [P in K]: V }));
@@ -135,6 +137,9 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = {}): Parsed {
   switch (sub) {
     case 'guide':
       command = { name: 'guide' };
+      break;
+    case 'skill':
+      command = { name: 'skill' };
       break;
     case 'envs':
       command = { name: 'envs' };

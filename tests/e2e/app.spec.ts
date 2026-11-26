@@ -66,7 +66,7 @@ test('empty state, then register credential, project and environments', async ()
 
   const dialog = page.getByRole('dialog', { name: 'Cadastro' });
   // credential
-  await dialog.getByLabel('Nome', { exact: true }).fill('usuário de teste');
+  await dialog.getByLabel('Nome', { exact: true }).fill('test user');
   await dialog.getByLabel('Usuário', { exact: true }).fill(db.user);
   await dialog.getByLabel('Senha').fill(db.password);
   await dialog.getByRole('button', { name: 'Salvar' }).click();
@@ -118,12 +118,49 @@ test('dev: query shows rows in the grid; screenshots light and dark', async () =
   await page.locator('[role=gridcell][data-r="0"][data-c="3"]').click();
   await expect(page.getByTestId('cell-panel')).toContainText('Café Aurora Ltda');
 
+  const clipboardText = () => app.evaluate(({ clipboard }) => clipboard.readText());
+  // What the Edit > Copy menu role (Cmd/Ctrl+C) does: copy on the window's focused element, here the grid
+  const copyShortcut = () =>
+    app.evaluate(({ BrowserWindow }) => {
+      (BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0])?.webContents.copy();
+    });
+
   // Copiar as CSV copies the selection (one cell here) with its header
   await page.getByRole('button', { name: /Copiar/ }).click();
   await page.getByRole('menuitem', { name: 'Copiar como CSV' }).click();
-  await expect
-    .poll(() => app.evaluate(({ clipboard }) => clipboard.readText()))
-    .toBe('name\nCafé Aurora Ltda');
+  await expect.poll(clipboardText).toBe('name\nCafé Aurora Ltda');
+
+  // Cmd/Ctrl+C on one cell copies the raw value, with no header
+  await page.locator('[role=gridcell][data-r="0"][data-c="3"]').click();
+  await copyShortcut();
+  await expect.poll(clipboardText).toBe('Café Aurora Ltda');
+
+  // Copy value, from the Copy button and from the cell's context menu
+  await page.getByRole('button', { name: /Copiar/ }).click();
+  await page.getByRole('menuitem', { name: 'Copiar valor' }).click();
+  await expect.poll(clipboardText).toBe('Café Aurora Ltda');
+  await page.getByRole('button', { name: /Copiar/ }).click();
+  await page.getByRole('menuitem', { name: 'Copiar como tabela Markdown' }).click();
+  await expect.poll(clipboardText).toBe('| name |\n| --- |\n| Café Aurora Ltda |');
+  await page.locator('[role=gridcell][data-r="1"][data-c="3"]').click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Copiar valor' }).click();
+  await expect.poll(clipboardText).toBe(await page.locator('[role=gridcell][data-r="1"][data-c="3"]').innerText());
+
+  // A numeric column is right-aligned in the Markdown table
+  await page.locator('[role=gridcell][data-r="0"][data-c="0"]').click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Copiar como tabela Markdown' }).click();
+  await expect.poll(clipboardText).toMatch(/^\| id \|\n\| ---: \|\n\| \d+ \|$/);
+
+  // A range keeps the TSV with header on Cmd/Ctrl+C and has no "Copy value"
+  await page.locator('[role=gridcell][data-r="0"][data-c="0"]').click();
+  await page.locator('[role=gridcell][data-r="1"][data-c="1"]').click({ modifiers: ['Shift'] });
+  await copyShortcut();
+  await expect.poll(clipboardText).toMatch(/^id\tstatus\n\d+\t.+\n\d+\t.+$/);
+  await page.getByRole('button', { name: /Copiar/ }).click();
+  await expect(page.getByRole('menuitem', { name: 'Copiar valor' })).toHaveCount(0);
+  await page.getByRole('menuitem', { name: 'Copiar como tabela Markdown' }).click();
+  await expect.poll(clipboardText).toMatch(/^\| id \| status \|\n\| ---: \| --- \|\n\| \d+ \| .+ \|\n\| \d+ \| .+ \|$/);
+  await page.locator('[role=gridcell][data-r="0"][data-c="3"]').click();
 
   await setTheme('light');
   await page.screenshot({ path: join(shots, 'main-light.png') });
@@ -199,7 +236,7 @@ test('transaction mode: INSERT then Rollback removes the row; Commit keeps it', 
   await expect(page.locator('[role=gridcell]', { hasText: 'Kim' })).toBeVisible();
 });
 
-test('the Trilha has what the person ran: the refused INSERT in production, the transaction, Rollback and Commit', async () => {
+test('the Trail has what the person ran: the refused INSERT in production, the transaction, Rollback and Commit', async () => {
   await page.getByTestId('trail-entry').click();
   const trail = page.getByRole('dialog', { name: 'Trilha' });
   await expect(trail.getByTestId('trail-row').first()).toBeVisible();
@@ -258,6 +295,81 @@ test('autocomplete suggests tables, columns and alias columns from the schema', 
   await page.keyboard.type('SELECT * FROM cards c WHERE c.sta');
   await expect(tooltip).toContainText('status');
   await page.keyboard.press('Escape');
+});
+
+test('autocomplete offers the columns of the tables the statement reads, one per table when two share a name', async () => {
+  const tooltip = page.locator('.cm-tooltip-autocomplete');
+  await page.locator('.cm-content').click();
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('SELECT * FROM cards WHERE sta');
+  await expect(tooltip).toContainText('status');
+  // only the table of the statement: companies has national_id, cards does not
+  await expect(tooltip).not.toContainText('national_id');
+  await page.keyboard.press('Escape');
+
+  // the FROM after the cursor counts too
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('SELECT  FROM companies co JOIN cards c ON c.company_id = co.id');
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Home');
+  for (let i = 0; i < 'SELECT '.length; i++) await page.keyboard.press('ArrowRight');
+  await page.keyboard.type('nat');
+  await expect(tooltip).toContainText('national_id');
+  await page.keyboard.press('Escape');
+
+  // id is in both tables: one option each, the table in the detail
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('SELECT * FROM cards c JOIN companies co ON c.company_id = co.id WHERE i');
+  await expect(tooltip).toContainText('c · int');
+  await expect(tooltip).toContainText('co · int');
+  await page.keyboard.press('Escape');
+
+  // after FROM the tables come first (before the keywords that start with the same letters)
+  const firstLabel = page.locator('.cm-tooltip-autocomplete .cm-completionLabel').first();
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('SELECT * FROM ca');
+  await expect(firstLabel).toHaveText('cards');
+  await page.keyboard.press('Escape');
+
+  // after WHERE the columns come first, before any keyword (those are in upper case)
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('SELECT * FROM cards WHERE ');
+  await page.keyboard.press('Control+Space');
+  await expect(tooltip).toContainText('status');
+  await expect(firstLabel).toHaveText(/^[a-z_]+$/);
+  await page.keyboard.press('Escape');
+
+  // after UPDATE with an alias the alias columns
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('UPDATE cards x SET x.sta');
+  await expect(tooltip).toContainText('status');
+  await page.keyboard.press('Escape');
+});
+
+test('a syntax error is underlined after a pause, with the parser message in the tooltip, and goes away when fixed', async () => {
+  const marks = page.locator('.cm-lintRange-error');
+  await page.locator('.cm-content').click();
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('SELECT * FRM cards;');
+  await page.keyboard.press('Escape');
+  await expect(marks).toHaveCount(1, { timeout: 10_000 });
+  await expect(marks).toHaveText('FRM');
+  await marks.hover();
+  await expect(page.locator('.cm-tooltip-lint')).toContainText('Possível erro de sintaxe');
+  await expect(page.locator('.cm-tooltip-lint')).toContainText("'FRM' is not valid");
+  // fixed: the mark goes
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('SELECT * FROM cards;');
+  await page.keyboard.press('Escape');
+  await expect(marks).toHaveCount(0, { timeout: 10_000 });
+  // an unfinished statement under the cursor is not an error yet
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('SELECT * FROM cards WHERE');
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(1500);
+  await expect(marks).toHaveCount(0);
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.press('Delete');
 });
 
 test('Cmd+T picker filters by "api pro" and opens a tab; Cmd+W closes it', async () => {

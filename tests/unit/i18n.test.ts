@@ -132,8 +132,8 @@ describe('current locale', () => {
     expect(fmt().formatNumber(1234.5)).toBe('1,234.5');
   });
 
-  it('keeps agents in pt-BR', () => {
-    expect(AGENT_LOCALE).toBe('pt-BR');
+  it('keeps agents in English', () => {
+    expect(AGENT_LOCALE).toBe('en');
   });
 });
 

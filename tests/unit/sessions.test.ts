@@ -472,7 +472,7 @@ describe('SessionManager: connection state', () => {
     expect(events.at(-1)!.error).toBe('Conexão perdida.');
   });
 
-  it('Desconectar keeps the mode and the database, and reconnecting restores them', async () => {
+  it('Disconnect keeps the mode and the database, and reconnecting restores them', async () => {
     await manager.open('t', 'dev');
     await manager.setMode('t', 'transaction');
     await manager.useDatabase('t', 'other');
@@ -487,7 +487,7 @@ describe('SessionManager: connection state', () => {
     expect(sessions[1]!.modes).toEqual(['transaction']);
   });
 
-  it('Desconectar is refused in main with a transaction open or a statement running', async () => {
+  it('Disconnect is refused in main with a transaction open or a statement running', async () => {
     await manager.open('t', 'dev');
     await manager.setMode('t', 'transaction');
     sessions[0]!.txFlag = true;
@@ -513,7 +513,7 @@ describe('SessionManager: connection state', () => {
     await running;
   });
 
-  it('Desconectar on a connection error clears the error', async () => {
+  it('Disconnect on a connection error clears the error', async () => {
     await manager.open('t', 'dev');
     sessions[0]!.triggerFatal({ message: 'gone', fatal: true });
     const off = await manager.disconnect('t');
@@ -610,7 +610,7 @@ describe('SessionManager: idle disconnect', () => {
 });
 
 describe('SessionManager: grid edits', () => {
-  it('labels the UPDATEs of Aplicar on the trail, and the mode still decides', async () => {
+  it('labels the UPDATEs of Apply on the trail, and the mode still decides', async () => {
     const lines: PersonTrailLine[] = [];
     manager = makeManager({ trail: { append: (l) => lines.push(l) } });
     await manager.open('t1', 'dev');
@@ -628,10 +628,28 @@ describe('SessionManager: grid edits', () => {
     expect(sessions[1]!.executed).toHaveLength(0);
   });
 
-  it('refuses the grid label on anything but UPDATE', async () => {
+  it('labels DELETEs of Apply on the trail too, and the mode still decides', async () => {
+    const lines: PersonTrailLine[] = [];
+    manager = makeManager({ trail: { append: (l) => lines.push(l) } });
     await manager.open('t1', 'dev');
-    for (const sql of ['DELETE FROM t WHERE id = 1', "UPDATE t SET a = 1 WHERE id = 1; SELECT 1", 'SELECT 1']) {
-      await expect(run('t1', sql, { origin: 'grid' })).rejects.toMatchObject({ code: 'grid-not-update' });
+    const sql = "UPDATE `app`.`people` SET `name` = 'Ana' WHERE `id` = 1;\nDELETE FROM `app`.`people` WHERE `id` = 2;";
+    const res = await run('t1', sql, { origin: 'grid', maxRows: 1 });
+    expect(res.results).toHaveLength(2);
+    expect(sessions[0]!.executed).toHaveLength(2);
+    const done = lines.filter((l) => l.event === 'statement' && l.state === 'ok');
+    expect(done.map((l) => l.detail)).toEqual(['Edição na grade', 'Edição na grade']);
+
+    // read-only refuses a DELETE like any typed one: nothing leaves the app
+    await manager.open('t2', 'pro');
+    const refused = await run('t2', 'DELETE FROM `app`.`people` WHERE `id` = 2', { origin: 'grid', maxRows: 1 });
+    expect(refused.results[0]!.error?.code).toBe('REFUSED');
+    expect(sessions[1]!.executed).toHaveLength(0);
+  });
+
+  it('refuses the grid label on anything but UPDATE and DELETE', async () => {
+    await manager.open('t1', 'dev');
+    for (const sql of ['INSERT INTO t VALUES (1)', "UPDATE t SET a = 1 WHERE id = 1; SELECT 1", 'SELECT 1', 'TRUNCATE TABLE t']) {
+      await expect(run('t1', sql, { origin: 'grid' })).rejects.toMatchObject({ code: 'grid-not-edit' });
     }
     await expect(run('t1', 'UPDATE t SET a = 1 WHERE id = 1', { origin: 'grid', refetch: true })).rejects.toMatchObject({ code: 'refetch-not-read' });
     expect(sessions[0]!.executed).toHaveLength(0);
@@ -723,7 +741,7 @@ describe('SessionManager: races with a connect or a statement in flight', () => 
     expect((await manager.setMode('t', 'autocommit')).needsConfirmation).toEqual({ reason: 'production-autocommit' });
   });
 
-  it('Desconectar or the idle timer during a USE ends it cleanly, not with a TypeError', async () => {
+  it('Disconnect or the idle timer during a USE ends it cleanly, not with a TypeError', async () => {
     await manager.open('t', 'dev');
     const g = gate();
     const s = sessions[0]!;

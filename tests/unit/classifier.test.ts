@@ -293,7 +293,7 @@ describe('classify: agent bypasses', () => {
   });
 
   it.each(['COMMIT AND CHAIN', 'COMMIT WORK AND CHAIN', 'ROLLBACK AND CHAIN', 'commit and chain no release'])(
-    '%s opens a transaction (refused outside Transação)',
+    '%s opens a transaction (refused outside Transaction)',
     (sql) => {
       expect(classify(sql)).toMatchObject({ allowedInReadOnly: false, transactionControl: 'begin' });
     },

@@ -57,7 +57,7 @@ describe('refusals', () => {
   it('refuse writes in read mode and DDL, always with a code, and never reach the executor', async () => {
     const { broker, executor, audit } = makeBroker();
     const w = await refused(broker.query({ env: 'api/dev', sql: 'UPDATE t SET a = 1 WHERE id = 1' }));
-    expect([w.code, w.message]).toEqual(['writes_in_read', 'Este SQL escreve. Peça com --write.']);
+    expect([w.code, w.message]).toEqual(['writes_in_read', 'This SQL writes. Ask with --write.']);
     const ddl = await refused(broker.query({ env: 'api/dev', sql: 'DROP TABLE t', write: true, reason: 'x' }));
     expect(ddl.code).toBe('ddl_or_transaction');
     expect(executor.reads.length + executor.writes.length).toBe(0);
@@ -138,9 +138,9 @@ describe('approval of reads in production', () => {
   it('reject records the reason and the agent sees status rejected with it', async () => {
     const { broker, executor } = makeBroker();
     const { request_id } = (await broker.query({ env: 'api/pro', sql: 'SELECT 1', reason: 'r' })) as any;
-    broker.reject(request_id, 'Peça só as colunas necessárias');
+    broker.reject(request_id, 'Ask only for the columns you need');
     const res = (await broker.status({ id: request_id })) as any;
-    expect(res).toMatchObject({ status: 'rejected', rejection_reason: 'Peça só as colunas necessárias', decided_by: 'person' });
+    expect(res).toMatchObject({ status: 'rejected', rejection_reason: 'Ask only for the columns you need', decided_by: 'person' });
     expect(executor.reads).toHaveLength(0);
   });
 
@@ -311,7 +311,7 @@ describe('writes', () => {
   it('a connection failure ends as failed without leaking anything', async () => {
     const h = makeBroker();
     h.executor.runWrite = async () => {
-      throw new AgentError('Não foi possível conectar ao ambiente. Sem resposta de <servidor>.', 'connection_failed');
+      throw new AgentError('Could not connect to the environment. No response from <server>.', 'connection_failed');
     };
     const { broker, id } = await pendingWrite(h);
     broker.approve(id, { shareResult: true });
@@ -523,14 +523,14 @@ describe('the environment changes under a request or a grant', () => {
     ['credential', { credentialId: 'other-cred' }],
     ['default database', { defaultDatabase: 'other' }],
     ['production flag', { production: false }],
-  ])('editing the %s revokes the grant, expires pending requests with "O ambiente mudou." and closes the agent connections', async (_name, over) => {
+  ])('editing the %s revokes the grant, expires pending requests with "The environment changed." and closes the agent connections', async (_name, over) => {
     const h = await setup();
     const pending = (await h.broker.query({ env: 'api/pro', sql: 'UPDATE t SET a = 1 WHERE id = 1', write: true, reason: 'r' })) as any;
     edit(h, over);
     await h.broker.environmentChanged('e-pro');
     expect(h.broker.snapshot().grants).toEqual([]);
     const st = (await h.broker.status({ id: pending.request_id })) as any;
-    expect(st).toMatchObject({ status: 'expired', rejection_reason: 'O ambiente mudou.' });
+    expect(st).toMatchObject({ status: 'expired', rejection_reason: 'The environment changed.' });
     expect(h.executor.changed).toEqual(['e-pro']);
     // the next read asks again
     if (!('production' in over)) {
@@ -586,7 +586,7 @@ describe('renaming a project or an environment changes the slug', () => {
     // what ipc.ts does after CatalogStore.renameProject: every environment of the project changed
     for (const env of h.envs.filter((e) => e.projectId === 'p-api')) await h.broker.environmentChanged(env.id);
     expect(h.broker.snapshot().grants).toEqual([]);
-    expect(await h.broker.status({ id: h.pending.request_id })).toMatchObject({ status: 'expired', rejection_reason: 'O ambiente mudou.' });
+    expect(await h.broker.status({ id: h.pending.request_id })).toMatchObject({ status: 'expired', rejection_reason: 'The environment changed.' });
     expect(await h.broker.status({ id: devPending.request_id })).toMatchObject({ status: 'expired' });
     expect(h.executor.changed).toEqual(['e-dev', 'e-pro']);
     // the old slug no longer reaches anything; the new one asks again

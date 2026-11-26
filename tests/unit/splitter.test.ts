@@ -93,7 +93,7 @@ describe('statementAtCursor', () => {
   });
 });
 
-// Gerar UPDATE appends `;`-terminated statements to the editor: each one must split on its own, whatever the
+// Generate UPDATE appends `;`-terminated statements to the editor: each one must split on its own, whatever the
 // script leaves open, and the person's own text must not change.
 describe('appendStatements (MySQL)', () => {
   const updates = 'UPDATE t SET a = 1 WHERE id = 1;\nUPDATE t SET a = 2 WHERE id = 2;';

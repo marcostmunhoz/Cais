@@ -30,6 +30,7 @@ let token: string;
 let events: SessionState[];
 let trail: PersonTrailLine[];
 let manager: SessionManager;
+let estimateOn: boolean;
 
 function makeManager(baseUrl = fake.url): SessionManager {
   const driver = createBigqueryDriver({ baseUrl });
@@ -49,6 +50,7 @@ function makeManager(baseUrl = fake.url): SessionManager {
     }),
     getDriver: () => driver,
     getDialect,
+    estimateEnabled: () => estimateOn,
     emit: (s) => events.push(s),
     now: () => Date.now(),
     trail: { append: (line) => void trail.push(line) },
@@ -60,6 +62,7 @@ const run = (sql: string, over: Record<string, unknown> = {}) =>
 
 beforeEach(() => {
   current = env();
+  estimateOn = false;
   refreshes = 0;
   token = 'test-token';
   events = [];
@@ -88,7 +91,7 @@ afterEach(async () => {
 });
 
 describe('BigQuery through the SessionManager', () => {
-  it('opens a tab in Somente leitura, whatever the environment, and runs a SELECT', async () => {
+  it('opens a tab in Read-only, whatever the environment, and runs a SELECT', async () => {
     for (const production of [false, true]) {
       current = env({ production });
       await manager.close('t1');
@@ -109,7 +112,7 @@ describe('BigQuery through the SessionManager', () => {
     expect(r.stats).toMatchObject({ bytesEstimated: 2048, bytesProcessed: 2048, bytesBilled: 10_485_760, cacheHit: false, jobId: 'job_1' });
   });
 
-  it('refuses any mode but Somente leitura', async () => {
+  it('refuses any mode but Read-only', async () => {
     await expect(manager.open('t1', current.id, { mode: 'transaction' })).rejects.toThrow(/Transação não vale/);
     await expect(manager.open('t1', current.id, { mode: 'autocommit' })).rejects.toThrow();
     await manager.open('t1', current.id);
@@ -219,7 +222,7 @@ describe('BigQuery through the SessionManager', () => {
     await session.close();
   });
 
-  it('reads pages up to the cap and says it was cut; "Buscar até 50.000" reads the same job, with no new dry run or job', async () => {
+  it('reads pages up to the cap and says it was cut; "Fetch up to 50,000" reads the same job, with no new dry run or job', async () => {
     const rows = Array.from({ length: 2500 }, (_, i) => [String(i), `s${i}`]);
     fake.resultFor = () => ({ schema: [{ name: 'n', type: 'INTEGER' }, { name: 's', type: 'STRING' }], rows });
     await manager.open('t1', current.id);
@@ -291,7 +294,7 @@ describe('BigQuery through the SessionManager', () => {
     expect(fake.realQueries).toHaveLength(1);
   });
 
-  it('Cancelar stops the job with jobs.cancel, with no gcloud round before it', async () => {
+  it('Cancel stops the job with jobs.cancel, with no gcloud round before it', async () => {
     await manager.open('t1', current.id);
     const running = run('SELECT SLOW');
     for (let i = 0; i < 100 && fake.jobs.size === 0; i++) await new Promise((r) => setTimeout(r, 10));
@@ -468,7 +471,7 @@ describe('BigQuery through the SessionManager', () => {
     expect(line.detail).toContain('100 GiB');
   });
 
-  it('"Buscar até 50.000" neither dry-runs nor asks again, even when the estimate is over the limit', async () => {
+  it('"Fetch up to 50,000" neither dry-runs nor asks again, even when the estimate is over the limit', async () => {
     current = env({ maxBytesBilled: GIB });
     fake.bytesFor = () => 3 * GIB;
     fake.resultFor = () => ({ schema: [{ name: 'n', type: 'INTEGER' }], rows: Array.from({ length: 1500 }, (_, i) => [String(i)]) });
@@ -540,6 +543,107 @@ describe('BigQuery through the SessionManager', () => {
     await run('SELECT 1');
     expect(manager.state('t1').transaction.open).toBe(false);
     expect(manager.pendingTransactions()).toEqual([]);
+  });
+});
+
+describe('BigQuery "Estimate while typing": the dry run of the statement being typed', () => {
+  it('with the switch off nothing leaves, whatever the renderer asks', async () => {
+    await manager.open('t1', current.id);
+    expect(await manager.estimate('t1', 'SELECT n FROM sales.orders')).toEqual({ state: 'skipped', reason: 'off' });
+    expect(fake.requests).toHaveLength(0);
+  });
+
+  it('on: one dry run (jobs.insert, dryRun) and the bytes the server estimated; no job, no query, no trail line', async () => {
+    estimateOn = true;
+    fake.bytesFor = () => 123_456;
+    await manager.open('t1', current.id);
+    expect(await manager.estimate('t1', 'SELECT n FROM sales.orders;')).toEqual({ state: 'ok', bytes: 123_456 });
+    expect(fake.dryRuns).toHaveLength(1);
+    expect(fake.dryRuns[0]!.body?.configuration?.query?.query).toBe('SELECT n FROM sales.orders');
+    expect(fake.realQueries).toHaveLength(0);
+    expect(fake.requests.every((r) => r.authorization === 'Bearer test-token')).toBe(true);
+    expect(trail).toEqual([]);
+    expect(manager.state('t1').status).toBe('idle');
+  });
+
+  it('resolves unqualified names against the current dataset, as a run does', async () => {
+    estimateOn = true;
+    current = env({ defaultDatabase: 'sales' });
+    await manager.open('t1', current.id);
+    await manager.estimate('t1', 'SELECT n FROM orders');
+    expect(fake.dryRuns[0]!.body?.configuration?.query?.defaultDataset).toEqual({ projectId: 'my-project-1', datasetId: 'sales' });
+  });
+
+  it('what the app does not allow is refused locally and never sent', async () => {
+    estimateOn = true;
+    await manager.open('t1', current.id);
+    for (const sql of ['DELETE FROM sales.orders WHERE true', 'INSERT INTO sales.orders VALUES (1)', 'CREATE TABLE sales.x (a INT64)', 'DROP TABLE sales.orders', 'CALL sales.p()']) {
+      expect((await manager.estimate('t1', sql)).state, sql).toBe('refused');
+    }
+    expect(await manager.estimate('t1', 'SELECT 1; DELETE FROM sales.orders WHERE true')).toEqual({ state: 'skipped', reason: 'no-statement' });
+    expect(fake.requests).toHaveLength(0);
+  });
+
+  it('a read the server sees as another type is refused, and nothing ran', async () => {
+    estimateOn = true;
+    fake.statementType = () => 'DELETE';
+    await manager.open('t1', current.id);
+    const answer = await manager.estimate('t1', 'SELECT 1');
+    expect(answer).toMatchObject({ state: 'refused' });
+    expect(fake.realQueries).toHaveLength(0);
+  });
+
+  it('a syntax error is an error of the statement, with the server words and the place', async () => {
+    estimateOn = true;
+    fake.dryRunError = () => ({ status: 400, reason: 'invalidQuery', message: 'Syntax error: Unexpected keyword FROM at [1:8]' });
+    await manager.open('t1', current.id);
+    const answer = await manager.estimate('t1', 'SELECT FROM sales.orders');
+    expect(answer).toMatchObject({ state: 'error', error: { code: 'invalidQuery', inStatement: true } });
+    expect(answer.state === 'error' && answer.error.detail).toBe('Syntax error: Unexpected keyword FROM at [1:8]');
+    expect(fake.realQueries).toHaveLength(0);
+    expect(trail).toEqual([]);
+  });
+
+  it('a table that is not there (404) is about the statement; no permission (403) and a server failure are not', async () => {
+    estimateOn = true;
+    await manager.open('t1', current.id);
+    fake.dryRunError = () => ({ status: 404, reason: 'notFound', message: 'Not found: Table my-project-1:sales.nope was not found in location US' });
+    expect(await manager.estimate('t1', 'SELECT * FROM sales.nope')).toMatchObject({ state: 'error', error: { inStatement: true } });
+    fake.dryRunError = () => ({ status: 403, reason: 'accessDenied', message: 'Access Denied: Project my-project-1: User does not have bigquery.jobs.create permission' });
+    expect(await manager.estimate('t1', 'SELECT 1')).toMatchObject({ state: 'error', error: { inStatement: false } });
+    fake.dryRunError = () => ({ status: 500, reason: 'backendError', message: 'boom' });
+    expect(await manager.estimate('t1', 'SELECT 2')).toMatchObject({ state: 'error', error: { inStatement: false } });
+  });
+
+  it('a 404 for the default dataset or the project is about the environment, not the text, unless the text spells it', async () => {
+    estimateOn = true;
+    current = env({ defaultDatabase: 'sales' });
+    await manager.open('t1', current.id);
+    fake.dryRunError = () => ({ status: 404, reason: 'notFound', message: 'Not found: Dataset my-project-1:sales was not found in location US' });
+    expect(await manager.estimate('t1', 'SELECT * FROM orders')).toMatchObject({ state: 'error', error: { inStatement: false } });
+    expect(await manager.estimate('t1', 'SELECT * FROM sales.orders')).toMatchObject({ state: 'error', error: { inStatement: true } });
+    fake.dryRunError = () => ({ status: 404, reason: 'notFound', message: 'Not found: Dataset my-project-1:other was not found in location US' });
+    expect(await manager.estimate('t1', 'SELECT * FROM other.orders')).toMatchObject({ state: 'error', error: { inStatement: true } });
+    fake.dryRunError = () => ({ status: 404, reason: 'notFound', message: 'Not found: Project my-project-1' });
+    expect(await manager.estimate('t1', 'SELECT 1')).toMatchObject({ state: 'error', error: { inStatement: false } });
+  });
+
+  it('a tab that is not connected asks nothing', async () => {
+    estimateOn = true;
+    expect(await manager.estimate('t1', 'SELECT 1')).toEqual({ state: 'skipped', reason: 'not-connected' });
+    expect(fake.requests).toHaveLength(0);
+  });
+
+  it('the run that follows still asks the question about the limit: an estimate shown while typing grants nothing', async () => {
+    estimateOn = true;
+    current = env({ maxBytesBilled: GIB });
+    fake.bytesFor = () => 5 * GIB;
+    await manager.open('t1', current.id);
+    expect(await manager.estimate('t1', 'SELECT n FROM sales.orders')).toEqual({ state: 'ok', bytes: 5 * GIB });
+    const { results, needsConfirmation } = await run('SELECT n FROM sales.orders');
+    expect(results).toEqual([]);
+    expect(needsConfirmation).toMatchObject({ reason: 'bytes' });
+    expect(fake.realQueries).toHaveLength(0);
   });
 });
 

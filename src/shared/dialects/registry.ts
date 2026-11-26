@@ -74,3 +74,26 @@ export function statementAtCursor(
   }
   return -1;
 }
+
+/**
+ * The block a multi-range selection runs as, or null when it is not one. Only the selection "Generate cell UPDATE"
+ * leaves qualifies: every range sits inside a different statement, those statements are contiguous, and each statement of
+ * the span holds exactly one range. Anything else runs the main range alone.
+ */
+export function multiSelectionBlock(
+  statements: { start: number; end: number; rangeEnd: number }[],
+  ranges: readonly { from: number; to: number }[],
+  text: string,
+): { from: number; to: number } | null {
+  if (ranges.length < 2) return null;
+  const indexes: number[] = [];
+  for (const r of ranges) {
+    const a = statementAtCursor(statements, r.from, text);
+    const b = statementAtCursor(statements, r.to, text);
+    if (a === -1 || a !== b) return null;
+    indexes.push(a);
+  }
+  indexes.sort((x, y) => x - y);
+  for (let i = 1; i < indexes.length; i++) if (indexes[i] !== indexes[i - 1]! + 1) return null;
+  return { from: statements[indexes[0]!]!.start, to: statements[indexes[indexes.length - 1]!]!.end };
+}

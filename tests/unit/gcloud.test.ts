@@ -236,12 +236,13 @@ describe('GcloudTokenProvider: binary discovery', () => {
 describe('GcloudTokenProvider messages in English', () => {
   afterEach(() => setLocale('pt-BR'));
 
-  it('the person reads English, the ref renders in pt-BR, gcloud output is never translated', async () => {
+  it('the person reads English, the ref renders in English for agents, gcloud output is never translated', async () => {
     setLocale('en');
     const { p } = provider(() => ({ code: 1, stderr: 'ERROR: permission denied\nsecond line' }));
     const error = (await p.getToken('a@x.com').catch((e: unknown) => e)) as CaisError;
     expect(error.message).toBe('gcloud did not generate the login token for the account a@x.com. ERROR: permission denied');
-    expect(renderRef(error.ref!, AGENT_LOCALE)).toBe('O gcloud não gerou o token de login da conta a@x.com. ERROR: permission denied');
+    expect(renderRef(error.ref!, AGENT_LOCALE)).toBe('gcloud did not generate the login token for the account a@x.com. ERROR: permission denied');
+    expect(renderRef(error.ref!, 'pt-BR')).toBe('O gcloud não gerou o token de login da conta a@x.com. ERROR: permission denied');
     const reauth = provider(() => ({ code: 1, stderr: 'Reauthentication required' })).p;
     await expect(reauth.getToken('a@x.com')).rejects.toThrow('The account a@x.com needs to sign in again: run `gcloud auth login a@x.com` in the terminal.');
     const missing = provider(() => ({}), { existing: [], env: { PATH: '/nowhere' } }).p;

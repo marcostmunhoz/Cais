@@ -2,7 +2,7 @@ import { createHmac } from 'node:crypto';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
+import { _electron as electron, expect, type ElectronApplication, type Page } from '@playwright/test';
 import { FakeVault } from '../../src/main/store/vault';
 import { environmentSealText } from '../../src/main/store/seal';
 
@@ -45,7 +45,7 @@ export function seedUserData(
     env(ids.pro, 'pro', true),
     ...(extra.environments ?? []).map((e) => env(e.id, e.name, !!e.production, e.port)),
   ];
-  const credential = { id: ids.credential, name: 'usuário de teste', kind: 'password', username: db.user };
+  const credential = { id: ids.credential, name: 'test user', kind: 'password', username: db.user };
   const secret = new FakeVault().encrypt(db.password);
   writeFileSync(
     join(dir, 'catalog.json'),
@@ -89,4 +89,13 @@ export async function setSql(page: Page, sql: string): Promise<void> {
   await page.locator('.cm-content').click();
   await page.keyboard.press('ControlOrMeta+A');
   await page.keyboard.insertText(sql);
+}
+
+/** page.screenshot, retried: on a cold CI runner without a GPU, Chromium may have no copyable surface for a moment right after a theme flip on a fresh window ("Unable to capture screenshot"). */
+export async function shoot(page: Page, path: string): Promise<void> {
+  await expect(async () => {
+    // A string, because the node tsconfig has no DOM types.
+    await page.evaluate('new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))');
+    await page.screenshot({ path });
+  }).toPass({ intervals: [200, 500, 1000, 2000], timeout: 15_000 });
 }

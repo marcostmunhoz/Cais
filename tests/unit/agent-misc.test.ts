@@ -39,9 +39,9 @@ describe('broker trail end to end', () => {
 describe('redactForAgent', () => {
   it('removes the host, host:port, logins and IPs from error text', () => {
     const t = { host: 'db.internal.example', port: 3306 };
-    expect(redactForAgent('Sem resposta de db.internal.example:3306. A VPN está ligada?', t)).toBe('Sem resposta de <servidor>. A VPN está ligada?');
-    expect(redactForAgent("Access denied for user 'app'@'10.1.2.3' (using password: YES)", t)).toBe("Access denied for user '<usuário>'@'<servidor>' (using password: YES)");
-    expect(redactForAgent('connect ECONNREFUSED 10.1.2.3:3306', t)).toBe('connect ECONNREFUSED <servidor>');
+    expect(redactForAgent('No response from db.internal.example:3306. Is the VPN on?', t)).toBe('No response from <server>. Is the VPN on?');
+    expect(redactForAgent("Access denied for user 'app'@'10.1.2.3' (using password: YES)", t)).toBe("Access denied for user '<user>'@'<server>' (using password: YES)");
+    expect(redactForAgent('connect ECONNREFUSED 10.1.2.3:3306', t)).toBe('connect ECONNREFUSED <server>');
     expect(redactForAgent('Table x does not exist', t)).toBe('Table x does not exist');
   });
 });
@@ -278,9 +278,10 @@ describe('AgentSessions', () => {
     opened[0]!.session.script = [() => ({}), () => ({ error: { message: "Access denied for user 'u'@'10.1.1.1'", code: 'ER_X' } })];
     const out = await sessions.runRead(env, { statements: plan('SELECT 2', 'SELECT 3', 'SELECT 4'), maxRows: 10 });
     expect(out.results).toHaveLength(2);
+    // the person reads it in the app locale (pt-BR in unit tests): its own placeholders
     expect(out.error).toMatchObject({ message: "Access denied for user '<usuário>'@'<servidor>'", code: 'ER_X' });
-    // what the agent reads: the same redacted text, in pt-BR
-    expect(agentText(out.error!)).toBe("Access denied for user '<usuário>'@'<servidor>'");
+    // what the agent reads: the same redacted text, in English
+    expect(agentText(out.error!)).toBe("Access denied for user '<user>'@'<server>'");
   });
 
   it('the failing statement inside the results is redacted too, for reads and writes, all the way to the agent', async () => {
@@ -303,14 +304,14 @@ describe('AgentSessions', () => {
       expect(failed).toBeDefined();
       expect(JSON.stringify(out.results)).not.toMatch(leak);
       expect(failed!.error).toMatchObject({ code: 'ER_TABLEACCESS_DENIED_ERROR', errno: 1142, sqlState: '42000' });
-      expect(agentText(failed!.error!)).toBe("SELECT command denied to user '<usuário>'@'<servidor>' for table 't' on <servidor>");
+      expect(agentText(failed!.error!)).toBe("SELECT command denied to user '<user>'@'<server>' for table 't' on <server>");
     }
 
     // a failed read still returns its results to the agent: the error in them is the redacted one
     const h = makeBroker();
     h.executor.readOutcome = read;
     const reply = (await h.broker.query({ env: 'api/dev', sql: 'SELECT * FROM t' })) as { results?: { error?: { message: string } }[] };
-    expect(reply.results?.[0]?.error?.message).toBe("SELECT command denied to user '<usuário>'@'<servidor>' for table 't' on <servidor>");
+    expect(reply.results?.[0]?.error?.message).toBe("SELECT command denied to user '<user>'@'<server>' for table 't' on <server>");
     expect(JSON.stringify(reply)).not.toMatch(leak);
   });
 
@@ -368,7 +369,7 @@ describe('AgentSessions', () => {
 
   it('connection failures reach the agent without host, login or token', async () => {
     const { sessions, failOpen } = sessionsHarness();
-    failOpen(new DriverError('Sem resposta de db.internal.example:3306. A VPN está ligada?', { message: 'x', code: 'ETIMEDOUT' }));
+    failOpen(new DriverError('No response from db.internal.example:3306. Is the VPN on?', { message: 'x', code: 'ETIMEDOUT' }));
     const err = (await sessions.runRead(env, { statements: plan('SELECT 1'), maxRows: 1 }).catch((e) => e)) as AgentError;
     expect(err).toBeInstanceOf(AgentError);
     expect(err.code).toBe('connection_failed');
@@ -457,7 +458,7 @@ describe('AgentSessions: limits, pool, database and schema cache', () => {
     await clock.advance(1);
     const out = await slow;
     expect(out.error).toMatchObject({ message: 'Tempo limite para agentes esgotado.', code: 'agent_timeout' });
-    expect(agentText(out.error!)).toBe('Tempo limite para agentes esgotado.');
+    expect(agentText(out.error!)).toBe('Time limit for agents reached.');
     expect(opened[0]!.closed).toBe(true);
     await sessions.runRead(env, { statements: plan('SELECT 1'), maxRows: 1 });
     expect(opened).toHaveLength(2); // a new connection, the cut one is never reused

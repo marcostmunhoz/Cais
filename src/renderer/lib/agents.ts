@@ -6,12 +6,12 @@ export type AgentModal = { kind: 'commit' | 'approve'; request: AgentRequestView
 
 /** Dialogs that sit on top of the agent modals' turn: they wait until those close. */
 export function otherDialogOpen(s: AppState): boolean {
-  return !!(s.registry || s.picker || s.scriptPicker || s.scriptName || s.closeDirty || s.confirm || s.closeTx || s.quit || s.agentPanel || s.trailPanel);
+  return !!(s.registry || s.picker || s.scriptPicker || s.scriptName || s.closeDirty || s.confirm || s.closeTx || s.quit || s.agentPanel || s.trailPanel || s.about);
 }
 
 /**
  * The modal to show now, one request at a time: an open agent transaction first (it has a clock),
- * then the oldest pending request. A request the person closed with Esc waits for "Revisar".
+ * then the oldest pending request. A request the person closed with Esc waits for "Review".
  */
 export function currentAgentModal(s: AppState): AgentModal | null {
   if (otherDialogOpen(s)) return null;

@@ -67,9 +67,9 @@ export interface StatementResult {
   insertId?: string;
   warnings?: number;
   error?: StatementError;
-  /** Transaction state reported by the server after the statement (Transação mode only). */
+  /** Transaction state reported by the server after the statement (Transaction mode only). */
   inTransaction?: boolean;
-  /** Something the person must know about what the statement did to the session (pt-BR). */
+  /** Something the person must know about what the statement did to the session (in the app locale). */
   notice?: string;
   stats?: StatementStats;
 }

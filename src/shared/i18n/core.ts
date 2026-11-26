@@ -40,7 +40,7 @@ export interface Format {
   plural(n: number, forms: PluralForms): string;
   /** A size in bytes in binary units (1 GiB = 2^30 bytes): "512 B", "1,5 GiB", "2 TiB". */
   formatBytes(bytes: number): string;
-  /** The formatted number followed by the plural form: "1 linha", "1.234 linhas", "2 rows". */
+  /** The formatted number followed by the plural form: "1 row", "1,234 rows" (en), "1 linha", "1.234 linhas" (pt-BR). */
   count(n: number, forms: PluralForms): string;
 }
 

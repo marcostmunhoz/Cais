@@ -42,6 +42,11 @@ export function ConfirmDialog() {
       <DialogHead title={confirm.title} />
       <div className="dialog-body" style={{ width: 460 }}>
         <div>{confirm.body}</div>
+        {confirm.notes?.map((note) => (
+          <div key={note} className="muted">
+            {note}
+          </div>
+        ))}
         {confirm.items && (
           <pre className="confirm-list">{confirm.items.join('\n')}</pre>
         )}
@@ -425,7 +430,7 @@ export function ProjectNameDialog() {
   );
 }
 
-/** Cmd+O: search by "projeto · nome". */
+/** Cmd+O: search by "project · name". */
 export function ScriptPicker() {
   const open = useStore((s) => s.scriptPicker);
   const scripts = useStore((s) => s.scripts);

@@ -36,7 +36,7 @@ export function pickEnvironmentForScript(
   return own.find((e) => !e.production) ?? own[0];
 }
 
-/** "Nome (cópia)", then "Nome (cópia 2)"... that is free (scripts, environments, projects). Suffix in the app locale. */
+/** "Name (copy)", then "Name (copy 2)"... that is free (scripts, environments, projects). Suffix in the app locale. */
 export function duplicateName(name: string, taken: (candidate: string) => boolean, maxLength = 120): string {
   const fit = (suffix: string): string => `${name.slice(0, Math.max(1, maxLength - suffix.length))}${suffix}`;
   const words = m().common;
@@ -45,7 +45,7 @@ export function duplicateName(name: string, taken: (candidate: string) => boolea
   return candidate;
 }
 
-/** "há 2 dias" ("2 days ago"), in the app locale. */
+/** "2 days ago", in the app locale. */
 export function formatAgo(from: number, now: number): string {
   const t = m().scripts.ago;
   const seconds = Math.max(0, Math.floor((now - from) / 1000));
@@ -57,7 +57,7 @@ export function formatAgo(from: number, now: number): string {
   return t.days({ n: Math.floor(hours / 24) });
 }
 
-/** Tooltip text: "rodou em pro há 2 dias", or "ainda não rodou" (app locale). */
+/** Tooltip text: "ran on pro 2 days ago", or "not run yet" (app locale). */
 export function lastRunText(script: Pick<SavedScript, 'lastRun'>, environments: Environment[], now: number): string {
   const t = m().scripts;
   if (!script.lastRun) return t.neverRan;

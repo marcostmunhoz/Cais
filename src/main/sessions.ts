@@ -3,7 +3,7 @@ import type { Environment, SessionMode } from '@shared/model';
 import type { Dialect } from '@shared/dialects/types';
 import type { Classification } from '@shared/dialects/types';
 import { noStatementMessage, statementAtCursor } from '@shared/dialects/registry';
-import type { PendingTransaction, RunRequest, RunResponse, SetModeResponse } from '@shared/ipc';
+import type { EstimateResponse, EstimateSkip, PendingTransaction, RunRequest, RunResponse, SetModeResponse } from '@shared/ipc';
 import type { SessionState, StatementError, StatementResult, StatementStats } from '@shared/results';
 import { GIB, capabilitiesOf, initialModeFor, type EngineCapabilities } from '@shared/engines';
 import { fmt, m } from '@shared/i18n';
@@ -59,6 +59,8 @@ export interface SessionDeps {
   trail?: { append(line: PersonTrailLine): void };
   /** Timers for the idle disconnect. Real timers when absent. */
   scheduler?: Scheduler;
+  /** "Estimate while typing" is on (settings.json). Off when absent: nothing is estimated without it. */
+  estimateEnabled?(): boolean;
   /** How long a tab may stay without activity before it disconnects. Fixed in the product; only tests change it. */
   idleMs?: number;
 }
@@ -72,7 +74,7 @@ interface Entry {
   session?: DbSession;
   /** The environment was edited while a transaction was open: reconnect once it ends. */
   stale?: boolean;
-  /** Cancelar was pressed during this run: no further statement starts. */
+  /** Cancel was pressed during this run: no further statement starts. */
   cancelRequested?: boolean;
   /** The idle-disconnect timer, re-armed on every activity. */
   idleTimer?: unknown;
@@ -96,6 +98,8 @@ function opensTransaction(c: Classification): boolean {
  */
 export class SessionManager {
   private readonly entries = new Map<string, Entry>();
+  /** The dry run in flight for each tab: a newer request for the tab ends it. */
+  private readonly estimating = new Map<string, AbortController>();
   private readonly scheduler: Scheduler;
   private readonly idleMs: number;
 
@@ -433,6 +437,57 @@ export class SessionManager {
     return null;
   }
 
+  /**
+   * The dry run of one statement while it is typed ("Estimate while typing", BigQuery): what the server reads it as and
+   * how many bytes it would read. It never runs anything, so it is not on the trail (no job exists, nothing changes
+   * and nothing is billed; a line per pause would bury the lines that matter). What leaves the app is decided here:
+   * only while the switch is on, only one statement, only what the engine's classifier lets a read-only session run.
+   * A statement the app refuses is refused locally and never sent. It does not touch the idle clock or the state of
+   * the tab, and it can run beside a statement that is running.
+   */
+  async estimate(tabId: string, sql: string): Promise<EstimateResponse> {
+    const skipped = (reason: EstimateSkip): EstimateResponse => ({ state: 'skipped', reason });
+    // any newer request of the tab cancels the one in flight, even one that is itself skipped or refused: the text it
+    // was asked about is gone
+    this.estimating.get(tabId)?.abort();
+    this.estimating.delete(tabId);
+    if (!this.deps.estimateEnabled?.()) return skipped('off');
+    const entry = this.entries.get(tabId);
+    const session = entry?.session;
+    if (!entry || !session || (entry.state.status !== 'idle' && entry.state.status !== 'running')) return skipped('not-connected');
+    if (!this.capabilities(entry.environment.engine).dryRun || !session.prepare) return skipped('unsupported');
+    const dialect = this.deps.getDialect(entry.environment.engine);
+    const statements = dialect.splitStatements(sql);
+    if (statements.length !== 1) return skipped('no-statement');
+    const text = statements[0]!.text;
+    const refusal = this.refusal(entry.state.mode, dialect.classify(text));
+    if (refusal) return { state: 'refused', message: refusal };
+
+    const controller = new AbortController();
+    this.estimating.set(tabId, controller);
+    let prep: PrepareResult;
+    try {
+      prep = await session.prepare(text, { signal: controller.signal });
+    } catch (error) {
+      prep = { error: error instanceof DriverError ? error.info : { message: toCaisError(error).message } };
+    } finally {
+      if (this.estimating.get(tabId) === controller) this.estimating.delete(tabId);
+    }
+    // replaced by a newer request, or the connection changed while waiting: the answer is for nobody
+    if (controller.signal.aborted || entry.session !== session || prep.error?.code === 'CANCELLED') return skipped('cancelled');
+    if (prep.error) {
+      const { message, detail, hint, code } = prep.error;
+      return {
+        state: 'error',
+        error: { message, ...(detail ? { detail } : {}), ...(hint ? { hint } : {}), ...(code ? { code } : {}), inStatement: prep.errorInStatement === true },
+      };
+    }
+    // the server reads it as something other than a SELECT: the same second look a run makes
+    const failure = this.prepareFailure(prep);
+    if (failure) return { state: 'refused', message: failure.message };
+    return { state: 'ok', ...(prep.bytesEstimated !== undefined ? { bytes: prep.bytesEstimated } : {}) };
+  }
+
   /** Why the statement cannot run in the current mode, or null. */
   private refusal(mode: SessionMode, c: Classification): string | null {
     if (c.alwaysRefuse) return c.alwaysRefuse;
@@ -470,9 +525,9 @@ export class SessionManager {
       // fetching more rows runs the statement again: only for a plain read
       throw new CaisError(m().mainSessions.refetchNotRead, 'refetch-not-read');
     }
-    if (req.origin === 'grid' && (req.refetch || plan.some(({ c }) => c.kind !== 'write' || c.verb !== 'UPDATE'))) {
-      // the label "Edição na grade" on the trail is only for the UPDATEs the grid generates
-      throw new CaisError(m().mainSessions.gridNotUpdate, 'grid-not-update');
+    if (req.origin === 'grid' && (req.refetch || plan.some(({ c }) => c.kind !== 'write' || (c.verb !== 'UPDATE' && c.verb !== 'DELETE')))) {
+      // the label "Grid edit" on the trail is only for the UPDATEs and DELETEs the grid generates
+      throw new CaisError(m().mainSessions.gridNotEdit, 'grid-not-edit');
     }
 
     // 1. refuse before anything leaves the app
@@ -602,7 +657,7 @@ export class SessionManager {
       for (let i = 0; i < plan.length; i++) {
         const { text, c } = plan[i]!;
         if (entry.cancelRequested) {
-          // Cancelar between statements: the rest never starts
+          // Cancel between statements: the rest never starts
           const cancelled: StatementResult = { index: i, sql: text, kind: c.kind, verb: c.verb, durationMs: 0, error: { message: m().mainMisc.driver.cancelled, code: 'CANCELLED' } };
           results.push(cancelled);
           this.recordResult(entry, cancelled, entry.state.database);

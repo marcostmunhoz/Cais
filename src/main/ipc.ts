@@ -1,6 +1,6 @@
 import { ipcMain, type IpcMainInvokeEvent, type WebContents } from 'electron';
 import { z } from 'zod';
-import { CHANNELS, type IpcResult } from '@shared/ipc';
+import { CHANNELS, type AboutInfo, type IpcResult } from '@shared/ipc';
 import { getDialect } from '@shared/dialects/registry';
 import { AGENT_LEVEL_LABEL, agentLevelOf, type Environment, type EnvironmentDraft } from '@shared/model';
 import { TRAIL_RETENTION_DAYS } from '@shared/agents';
@@ -17,13 +17,16 @@ import { DriverError } from './drivers/types';
 import { SessionManager } from './sessions';
 import { changedForAgents, type CatalogStore } from './store/catalog';
 import type { ScriptStore } from './store/scripts';
+import type { SettingsStore } from './store/settings';
 import type { TabsStore } from './store/tabs';
 import type { Trail } from './trail';
+import type { ReleaseChecker } from './updates';
 
 export interface Services {
   store: CatalogStore;
   tabs: TabsStore;
   scripts: ScriptStore;
+  settings: SettingsStore;
   agents: { access: AgentAccess; broker: AgentBroker };
   gcloud: GcloudTokenProvider;
   /** Accounts the registry offers for Google IAM; the gcloud provider's when absent (the e2e hook replaces it with a fixed list). */
@@ -38,6 +41,13 @@ export interface Services {
   trail: Trail;
   /** A change to what agents may do, by the person, on the trail. */
   recordConfig(detail: string, environment?: Environment): void;
+  /** The About window: versions, the version check and the few pages it may open. */
+  about: {
+    info(): AboutInfo;
+    releases: Pick<ReleaseChecker, 'check' | 'linkUrl'>;
+    /** Opens an address in the system browser. Only ever called with addresses `releases.linkUrl` built. */
+    openExternal(url: string): Promise<void>;
+  };
 }
 
 const id = z.string().min(1).max(100);
@@ -148,7 +158,7 @@ function describeError(error: unknown): { message: string; code?: string } {
 }
 
 export function registerIpc(services: Services): void {
-  const { store, tabs, scripts, gcloud, sessions, agents } = services;
+  const { store, tabs, scripts, settings, gcloud, sessions, agents } = services;
   const schemaCache = new Map<string, SchemaTree>();
   /** Forgets the environment's schema, the per-dataset reads included (their keys start with the environment id). */
   const dropSchema = (envId: string): void => {
@@ -182,7 +192,7 @@ export function registerIpc(services: Services): void {
 
   handle(CHANNELS.catalogGet, none, () => store.snapshot());
   handle(CHANNELS.catalogSaveProject, t(projectInput), (input) => store.saveProject({ name: (input as z.infer<typeof projectInput>).name }));
-  // a rename changes the agents' "projeto/ambiente" slug of every environment of the project: each one is recorded
+  // a rename changes the agents' "project/environment" slug of every environment of the project: each one is recorded
   // and its grants and pending requests end
   handle(CHANNELS.catalogRenameProject, t(id, name), async (projectId, newName) => {
     const { project, previousName } = await store.renameProject(projectId as string, newName as string);
@@ -308,6 +318,17 @@ export function registerIpc(services: Services): void {
   );
   handle(CHANNELS.sessionDisconnect, t(id), (tabId) => sessions.disconnect(tabId as string));
   handle(CHANNELS.sessionState, t(id), (tabId) => sessions.state(tabId as string));
+  // a dry run only: main refuses it while the switch is off and reclassifies the text before anything is sent
+  handle(CHANNELS.sessionEstimate, t(id, z.string().max(1_100_000)), (tabId, sql) =>
+    sessions.estimate(tabId as string, sql as string),
+  );
+
+  const userSettings = () => ({ estimateAsYouType: settings.estimateAsYouType });
+  handle(CHANNELS.settingsGet, none, () => userSettings());
+  handle(CHANNELS.settingsSetEstimateAsYouType, t(z.boolean()), async (enabled) => {
+    await settings.setEstimateAsYouType(enabled as boolean);
+    return userSettings();
+  });
 
   handle(
     CHANNELS.schemaGet,
@@ -384,6 +405,17 @@ export function registerIpc(services: Services): void {
   handle(CHANNELS.tabsLoad, none, () => tabs.load());
   handle(CHANNELS.tabsSave, t(tabsFile), (file) => tabs.save(file as z.infer<typeof tabsFile>));
   handle(CHANNELS.appQuitCancelled, none, () => services.onQuitCancelled());
+  handle(CHANNELS.appAbout, none, () => services.about.info());
+  handle(CHANNELS.appCheckLatest, none, () => services.about.releases.check());
+  // the renderer names a page, never an address: main builds it from fixed constants and the validated tag
+  handle(CHANNELS.appOpenLink, t(z.enum(['repository', 'releases', 'release'])), async (target) => {
+    const url = services.about.releases.linkUrl(target as 'repository' | 'releases' | 'release');
+    try {
+      await services.about.openExternal(url);
+    } catch {
+      throw new CaisError(m().about.openFailed);
+    }
+  });
 }
 
 export { getDialect };

@@ -12,7 +12,7 @@ import { columnMeta, toCell, type FieldLike } from './values';
 
 const SERVER_STATUS_IN_TRANS = 0x0001;
 const SERVER_STATUS_AUTOCOMMIT = 0x0002;
-// built where they are used, so the text follows the app locale; the ref lets agents read them in pt-BR
+// built where they are used, so the text follows the app locale; the ref lets agents read them in English
 const lostError = (): DbSessionError => ({ message: m().mainMisc.driver.lost, ref: ref('mainMisc.driver.lost'), fatal: true });
 const cancelledError = (): DbSessionError => ({
   message: m().mainMisc.driver.cancelled,
@@ -52,7 +52,7 @@ export class MysqlSession implements DbSession {
   private executing = false;
   /**
    * Agent sessions: utf8mb4, the pinned sql_mode and the mode's autocommit are re-asserted before every
-   * statement in every mode. The person's read-only tabs get the same; their Auto-commit and Transação tabs keep
+   * statement in every mode. The person's read-only tabs get the same; their Auto-commit and Transaction tabs keep
    * their own session (sql_mode, SHOW WARNINGS, ROW_COUNT()).
    */
   private strict = false;
@@ -337,7 +337,7 @@ export class MysqlSession implements DbSession {
         if (status !== undefined) {
           result.inTransaction = (status & SERVER_STATUS_IN_TRANS) !== 0;
           if ((status & SERVER_STATUS_AUTOCOMMIT) !== 0) {
-            // Transação never turns into auto-commit: put it back and say what happened
+            // Transaction never turns into auto-commit: put it back and say what happened
             await this.call('SET SESSION autocommit = 0').catch(() => undefined);
             result.notice = m().mainMisc.driver.autocommitTurnedOn;
           }

@@ -5,9 +5,9 @@ export type RedactTarget = { host: string; port: number } | { gcpProject: string
 
 /**
  * Error text that goes to an agent must not carry the server address or the database login:
- * "Sem resposta de 10.0.0.5:3306", "Access denied for user 'app'@'10.0.0.9'", ...
+ * "No response from 10.0.0.5:3306", "Access denied for user 'app'@'10.0.0.9'", ...
  * BigQuery: the project id and the e-mail of any account (the person's or a service account).
- * The placeholders are in AGENT_LOCALE (pt-BR) unless the text is for the person (`locale`).
+ * The placeholders are in AGENT_LOCALE (English) unless the text is for the person (`locale`).
  */
 export function redactForAgent(text: string, target: RedactTarget, locale: Locale = AGENT_LOCALE): string {
   const { server, user, project, account } = messagesFor(locale).agentsUi.redact;

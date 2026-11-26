@@ -4,7 +4,7 @@ import { m } from '../../i18n';
 import { asciiUpper, lex, nameParts, type Tok } from './lexer';
 
 const bq = () => m().dialect.bigquery.classify;
-/** Every refusal reads "Somente leitura: <what>", like the MySQL dialect's. */
+/** Every refusal reads "Read-only: <what>", like the MySQL dialect's. */
 const refusal = (what: string): string => m().dialect.classify.readOnly({ what });
 
 /** Verbs by class (the first word of a statement, after any parentheses). */
@@ -299,7 +299,7 @@ export function warnings(_statement: string): string[] {
 
 /**
  * Lower-case names the statement mentions, for matching against the schema: every word and every part of a
- * quoted name (`proj.ds.t` gives proj, ds and t), and the dashed names a table path may have (`meu-projeto`).
+ * quoted name (`proj.ds.t` gives proj, ds and t), and the dashed names a table path may have (`my-project`).
  */
 export function identifiers(statement: string): string[] {
   const names = new Set<string>();

@@ -25,8 +25,8 @@ export const AUTO_COMMIT_MAX_ROWS = 1000;
 export const AUTO_COMMIT_WINDOW_ROWS = 5000;
 export const AUTO_COMMIT_WINDOW_MS = 15 * 60_000;
 /**
- * BigQuery: a read an agent asks for with more estimated bytes than this waits for the person, even in "Leitura
- * liberada", under a 15-minute grant and in an environment with no limit. Fixed: not an option.
+ * BigQuery: a read an agent asks for with more estimated bytes than this waits for the person, even in "Reads allowed,
+ * writes need approval", under a 15-minute grant and in an environment with no limit. Fixed: not an option.
  */
 export const AGENT_BYTES_APPROVAL = 10 * 1024 ** 3;
 export const AGENT_DEFAULT_ROWS = 200;
@@ -74,7 +74,7 @@ export interface AgentRequestView {
   createdAt: number;
   client: string;
   environmentId: string;
-  environmentLabel: string; // "loja · pro"
+  environmentLabel: string; // "shop · pro"
   database?: string;
   production: boolean;
   mode: AgentMode;
@@ -91,9 +91,9 @@ export interface AgentRequestView {
   decidedAt?: number;
   /** Write in a free-reads-writes environment: the Cais commits by itself when nothing calls for the person. */
   autoCommit?: boolean;
-  /** Why a request that the environment's level would let run is waiting for the person (app locale; the agent gets pt-BR). */
+  /** Why a request that the environment's level would let run is waiting for the person (app locale; the agent gets English). */
   approvalReason?: string;
-  /** Why an autonomous write did not commit by itself and waits for the second decision (app locale; the agent gets pt-BR). */
+  /** Why an autonomous write did not commit by itself and waits for the second decision (app locale; the agent gets English). */
   commitReason?: string;
   /** Who made the second decision of a write (Commit/Rollback); 'policy' is the automatic commit. */
   secondDecidedBy?: 'user' | 'timeout' | 'shutdown' | 'policy';
@@ -123,8 +123,8 @@ export interface AgentsSnapshot {
 }
 
 export interface ApproveOptions {
-  /** "O agente pode ver o resultado". */
+  /** "The agent can see the result". */
   shareResult: boolean;
-  /** "Aprovar leituras em <ambiente> por 15 min": only valid for a read that needed approval. */
+  /** "Approve reads on <environment> for 15 min": only valid for a read that needed approval. */
   grantReads?: boolean;
 }
