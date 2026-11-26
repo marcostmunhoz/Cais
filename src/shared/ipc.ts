@@ -24,6 +24,30 @@ export interface GcloudAccount {
 
 export type TestConnectionResult = { ok: true; serverVersion: string } | { ok: false; error: string };
 
+/** What the About window shows. Versions come from main; the renderer cannot know them. */
+export interface AboutInfo {
+  version: string;
+  electron: string;
+  chromium: string;
+  node: string;
+  /** `<platform> <arch>`, e.g. `linux x64`. */
+  system: string;
+  /** For display only: the renderer opens it through `openLink('repository')`, never by address. */
+  repository: string;
+}
+
+/**
+ * Answer of the version check. `latest` (e.g. `0.2.0`, no `v`) comes with `newer` and `current`.
+ * `unavailable` covers every failure (no network, rate limit, repository without releases, invalid answer).
+ */
+export type LatestCheck =
+  | { status: 'newer'; latest: string }
+  | { status: 'current'; latest: string }
+  | { status: 'unavailable' };
+
+/** The only pages the app opens in the browser. `release` is the page of the newest version the last check found. */
+export type AboutLink = 'repository' | 'releases' | 'release';
+
 export interface RunRequest {
   sql: string;
   scope: 'current' | 'all';
@@ -171,6 +195,12 @@ export interface CaisApi {
   app: {
     /** The user backed out of quitting while transactions were open. */
     quitCancelled(): Promise<void>;
+    /** What the About window shows: versions of the app and its runtime. */
+    about(): Promise<AboutInfo>;
+    /** Asks the GitHub releases API whether a newer version exists. Only when the person clicks; never automatic. */
+    checkLatest(): Promise<LatestCheck>;
+    /** Opens one of a few fixed pages in the system browser. Main builds the address; the renderer never sends one. */
+    openLink(target: AboutLink): Promise<void>;
   };
   events: {
     onSessionState(cb: (state: SessionState) => void): Unsubscribe;
@@ -180,6 +210,8 @@ export interface CaisApi {
     onAgents(cb: (snapshot: AgentsSnapshot) => void): Unsubscribe;
     /** Main asks the renderer to resolve open transactions before quitting. */
     onResolveTransactions(cb: (pending: PendingTransaction[]) => void): Unsubscribe;
+    /** The application menu asked for the About window. */
+    onOpenAbout(cb: () => void): Unsubscribe;
   };
 }
 
@@ -227,10 +259,14 @@ export const CHANNELS = {
   tabsLoad: 'tabs:load',
   tabsSave: 'tabs:save',
   appQuitCancelled: 'app:quitCancelled',
+  appAbout: 'app:about',
+  appCheckLatest: 'app:checkLatest',
+  appOpenLink: 'app:openLink',
   eventSessionState: 'event:sessionState',
   eventScriptsChanged: 'event:scriptsChanged',
   eventAgents: 'event:agents',
   eventResolveTransactions: 'event:resolveTransactions',
+  eventOpenAbout: 'event:openAbout',
 } as const;
 
 /** Envelope used on the wire so errors keep their friendly message. */

@@ -75,6 +75,9 @@ const api: CaisApi = {
   },
   app: {
     quitCancelled: () => invoke(CHANNELS.appQuitCancelled),
+    about: () => invoke(CHANNELS.appAbout),
+    checkLatest: () => invoke(CHANNELS.appCheckLatest),
+    openLink: (target) => invoke(CHANNELS.appOpenLink, target),
   },
   events: {
     onSessionState: (cb) => {
@@ -96,6 +99,11 @@ const api: CaisApi = {
       const listener = (_event: unknown, pending: Parameters<typeof cb>[0]): void => cb(pending);
       ipcRenderer.on(CHANNELS.eventResolveTransactions, listener);
       return () => ipcRenderer.removeListener(CHANNELS.eventResolveTransactions, listener);
+    },
+    onOpenAbout: (cb) => {
+      const listener = (): void => cb();
+      ipcRenderer.on(CHANNELS.eventOpenAbout, listener);
+      return () => ipcRenderer.removeListener(CHANNELS.eventOpenAbout, listener);
     },
   },
 };

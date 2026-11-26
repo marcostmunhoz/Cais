@@ -15,6 +15,7 @@ import {
   TabPicker,
   Toast,
 } from './components/Dialogs';
+import { AboutDialog } from './components/About';
 import { AgentModals, AgentsPanel } from './components/Agents';
 import { Editor } from './components/Editor';
 import { RegistryDialog } from './components/Registry';
@@ -29,7 +30,7 @@ import logoMark from '../../resources/logo-mark.png';
 
 function anyDialogOpen(): boolean {
   const s = getState();
-  return !!(s.registry || s.picker || s.scriptPicker || s.scriptName || s.projectName || s.closeDirty || s.confirm || s.bytesConfirm || s.closeTx || s.quit || s.agentPanel || s.trailPanel || currentAgentModal(s));
+  return !!(s.registry || s.picker || s.scriptPicker || s.scriptName || s.projectName || s.closeDirty || s.confirm || s.bytesConfirm || s.closeTx || s.quit || s.agentPanel || s.trailPanel || s.about || currentAgentModal(s));
 }
 
 function useGlobalShortcuts() {
@@ -215,6 +216,7 @@ export function App({ platform }: { platform: string }) {
       <BytesConfirmDialog />
       <CloseTransactionDialog />
       <QuitDialog />
+      <AboutDialog />
       <Toast />
     </div>
   );

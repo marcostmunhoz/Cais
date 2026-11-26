@@ -17,6 +17,7 @@ Como o Cais se comporta e por quê. Cada regra traz o motivo quando ele não é 
 - **Cadastro:** projetos, ambientes (com o acesso de agentes de cada um) e credenciais.
 - **Agentes:** o interruptor do acesso, os pedidos pendentes, as liberações ativas, o nível de cada ambiente e os pedidos recentes.
 - **Trilha:** tudo o que rodou no Cais, só leitura.
+- **Sobre:** versão, ambiente de execução e a verificação de versão nova, numa janela própria (veja [Sobre](#sobre)).
 - **Estados:** sem cadastro (estado vazio com o primeiro passo), desconectado (também por inatividade), conectando, conectado, executando, erro de conexão (com a mensagem), transação aberta (comandos e tempo) e resultado truncado.
 
 A interface segue o tema claro ou escuro do sistema e usa as fontes do sistema. Produção aparece com faixa e cor de alerta na aba e na barra.
@@ -240,6 +241,17 @@ Duas camadas: uma lista do que é permitido no app, que recusa o resto antes de 
 - **Cada linha é encadeada**: leva um HMAC da linha com o código da anterior do mesmo dia, com a chave da proteção do cadastro. Uma linha alterada, inserida, apagada no meio ou sem código, ou um dia que não dá para ler, aparece como "não confere". Apagar o arquivo de um dia inteiro ou cortar o fim de um arquivo não aparece (veja [seguranca.md](seguranca.md)). Sem o cofre do sistema não há chave: a Trilha grava sem encadeamento e a tela avisa que não há verificação.
 - **A tela Trilha** (barra lateral) é só leitura e filtra por período (últimas 24 horas, 7, 30 ou 90 dias), por quem (você e agentes, só você, só agentes, só o Cais), por ambiente e por texto no SQL, no motivo ou no cliente. Cada dia do período é conferido. A Trilha não reabre uma query em aba: ela registra o que rodou, não é um histórico de edição.
 
+## Sobre
+
+- **Onde:** no macOS, **Cais › Sobre o Cais**; no Linux, **Ajuda › Sobre o Cais**. É uma janela do próprio Cais, igual nos dois sistemas e no idioma do app, no lugar do painel nativo do sistema (que não tem link nem espaço para a verificação de versão). Esc ou **Fechar** a fecham.
+- **O que mostra:** o logo, a versão do app, as versões do Electron, do Chromium e do Node, o sistema (`linux x64`, por exemplo), a licença (MIT) e o endereço do repositório (`github.com/marcostmunhoz/Cais`), que abre no navegador do sistema. **Copiar informações** põe versão, runtime e sistema na área de transferência, para colar num relato de bug.
+- **A verificação de versão só acontece quando a pessoa clica em Verificar.** Abrir a janela não consulta nada, e o app nunca verifica na partida nem em segundo plano. O clique faz um único `GET` à API de releases do GitHub (`api.github.com`), sem token, sem cookie e com limite de 5 segundos. O que sai é o IP da máquina e a versão do Cais (no `User-Agent`), nada mais. O resultado fica guardado por 1 hora (a API sem token aceita 60 pedidos por hora por IP, e um clique repetido não precisa de resposta nova); uma falha fica guardada por 30 segundos.
+- **Os resultados:** "Você está na versão mais recente"; "Há uma versão nova: X.Y.Z" com o link da página dessa release (notas e arquivos), que o app monta a partir da tag, nunca a partir de um endereço da resposta; ou "Não foi possível verificar" com o link para a página de releases. Falha de rede, limite da API, repositório sem release ou privado (a API responde 404 sem autenticação), resposta inválida ou fora do tempo dão a mesma mensagem, sem texto técnico. Só vale uma tag no formato `vX.Y.Z`.
+- **O app só abre no navegador endereços fixos:** o repositório, a lista de releases e a página da release achada pela verificação. A interface escolhe a página; quem monta o endereço é o processo principal.
+- **Sem aviso fora da janela:** nada de selo, notificação nem toast quando há versão nova. A pessoa só vê o resultado se perguntar.
+- **Sem opção:** como a verificação nunca roda sozinha, não há o que ligar ou desligar (veja [Poucas opções](#princípios)). Uma verificação na partida exigiria um interruptor para quem não quer falar com o GitHub, e por isso ela não existe.
+- **Sem atualização automática:** o Cais não baixa nem instala nada (veja [O que o Cais não faz](#o-que-o-cais-não-faz)).
+
 ## Proteção do cadastro
 
 Um processo que escreve na pasta de dados poderia apontar o host de um ambiente para outro servidor (o Cais mandaria a credencial para lá; com `caching_sha2_password`, o servidor recebe a senha) ou tirar a marca de produção de um ambiente. A proteção do cadastro torna essas edições visíveis.
@@ -264,5 +276,6 @@ Um processo que escreve na pasta de dados poderia apontar o host de um ambiente 
 | DDL e comandos com commit implícito por agentes | Não dá para desfazer. Agente só lê ou faz DML dentro de transação. |
 | Túnel SSH, Cloud SQL Connector, sincronizar entre máquinas | O login IAM direto, com TLS, cobre o Cloud SQL sem proxy. |
 | TLS em credencial de usuário e senha, verificação do certificado do servidor | A conexão com usuário e senha vai sem TLS, pensada para servidores alcançados por rede privada ou VPN; o IAM exige TLS, mas o Cloud SQL usa uma CA própria, que o Cais não confere (veja [seguranca.md](seguranca.md#limites-conhecidos)). |
+| Atualização automática, verificação de versão sozinha ou aviso de versão nova fora da janela Sobre | Sem Developer ID no macOS o sistema não deixaria o app trocar a si mesmo, e o `.deb` do Linux se instala à mão. Uma consulta sozinha mandaria o IP e a versão ao GitHub sem a pessoa pedir, e exigiria uma opção para desligar. A janela Sobre consulta só quando a pessoa clica. |
 | Assinatura de desenvolvedor e notarização do app | O pacote recebe assinatura ad-hoc local (veja o README). |
 | Opções de idioma, tempo de inatividade, limites de linhas | Seguem o sistema ou são fixos (veja [Princípios](#princípios)). |

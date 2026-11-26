@@ -24,6 +24,7 @@ export const en: Shape<typeof ptBR> = {
   toggleFullScreen: 'Toggle Full Screen',
   reload: 'Reload',
   toggleDevTools: 'Toggle Developer Tools',
+  help: 'Help',
   window: 'Window',
   minimize: 'Minimize',
   zoom: 'Zoom',

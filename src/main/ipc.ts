@@ -1,6 +1,6 @@
 import { ipcMain, type IpcMainInvokeEvent, type WebContents } from 'electron';
 import { z } from 'zod';
-import { CHANNELS, type IpcResult } from '@shared/ipc';
+import { CHANNELS, type AboutInfo, type IpcResult } from '@shared/ipc';
 import { getDialect } from '@shared/dialects/registry';
 import { AGENT_LEVEL_LABEL, agentLevelOf, type Environment, type EnvironmentDraft } from '@shared/model';
 import { TRAIL_RETENTION_DAYS } from '@shared/agents';
@@ -20,6 +20,7 @@ import type { ScriptStore } from './store/scripts';
 import type { SettingsStore } from './store/settings';
 import type { TabsStore } from './store/tabs';
 import type { Trail } from './trail';
+import type { ReleaseChecker } from './updates';
 
 export interface Services {
   store: CatalogStore;
@@ -40,6 +41,13 @@ export interface Services {
   trail: Trail;
   /** A change to what agents may do, by the person, on the trail. */
   recordConfig(detail: string, environment?: Environment): void;
+  /** The About window: versions, the version check and the few pages it may open. */
+  about: {
+    info(): AboutInfo;
+    releases: Pick<ReleaseChecker, 'check' | 'linkUrl'>;
+    /** Opens an address in the system browser. Only ever called with addresses `releases.linkUrl` built. */
+    openExternal(url: string): Promise<void>;
+  };
 }
 
 const id = z.string().min(1).max(100);
@@ -397,6 +405,17 @@ export function registerIpc(services: Services): void {
   handle(CHANNELS.tabsLoad, none, () => tabs.load());
   handle(CHANNELS.tabsSave, t(tabsFile), (file) => tabs.save(file as z.infer<typeof tabsFile>));
   handle(CHANNELS.appQuitCancelled, none, () => services.onQuitCancelled());
+  handle(CHANNELS.appAbout, none, () => services.about.info());
+  handle(CHANNELS.appCheckLatest, none, () => services.about.releases.check());
+  // the renderer names a page, never an address: main builds it from fixed constants and the validated tag
+  handle(CHANNELS.appOpenLink, t(z.enum(['repository', 'releases', 'release'])), async (target) => {
+    const url = services.about.releases.linkUrl(target as 'repository' | 'releases' | 'release');
+    try {
+      await services.about.openExternal(url);
+    } catch {
+      throw new CaisError(m().about.openFailed);
+    }
+  });
 }
 
 export { getDialect };

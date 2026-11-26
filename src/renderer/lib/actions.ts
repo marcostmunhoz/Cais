@@ -129,6 +129,7 @@ export async function init(): Promise<void> {
   api().events.onScriptsChanged(() => void refreshScripts());
   api().events.onAgents(setAgents);
   api().events.onResolveTransactions((pending) => setState({ quit: pending }));
+  api().events.onOpenAbout(() => setState({ about: true }));
   window.addEventListener('beforeunload', flushTabs);
 }
 

@@ -12,6 +12,7 @@ import {
   net,
   Notification,
   safeStorage,
+  shell,
   type MenuItemConstructorOptions,
 } from 'electron';
 import { CHANNELS } from '@shared/ipc';
@@ -31,6 +32,7 @@ import { configureDrivers, getDriver } from './drivers/registry';
 import { registerIpc } from './ipc';
 import { SessionManager } from './sessions';
 import type { Environment } from '@shared/model';
+import { REPOSITORY_URL, ReleaseChecker } from './updates';
 import { CatalogStore } from './store/catalog';
 import { ScriptStore } from './store/scripts';
 import { SettingsStore } from './store/settings';
@@ -113,6 +115,14 @@ function installCliCommand(): void {
   });
 }
 
+function openAbout(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+  mainWindow.webContents.send(CHANNELS.eventOpenAbout);
+}
+
 function buildMenu(): void {
   // Every item carries its own label (role items too), so the whole menu follows the app locale.
   const t = m().menu;
@@ -122,11 +132,13 @@ function buildMenu(): void {
     enabled: process.platform !== 'win32',
     click: installCliCommand,
   };
+  // The About window is the app's own (the same on both systems), so the item opens it instead of the native panel.
+  const about: MenuItemConstructorOptions = { label: t.about, click: openAbout };
   if (isMac) {
     template.push({
       label: t.app,
       submenu: [
-        { role: 'about', label: t.about },
+        about,
         { type: 'separator' },
         install,
         { type: 'separator' },
@@ -163,6 +175,8 @@ function buildMenu(): void {
   const windowMenu: MenuItemConstructorOptions[] = [{ role: 'minimize', label: t.minimize }];
   if (isMac) windowMenu.push({ role: 'zoom', label: t.zoom });
   template.push({ label: t.window, submenu: windowMenu });
+  // macOS keeps About in the app menu; elsewhere it lives under Help
+  if (!isMac) template.push({ label: t.help, submenu: [about] });
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
@@ -415,6 +429,19 @@ async function bootstrap(): Promise<void> {
     return true;
   };
 
+  // The version check is the one request that is not to a database or BigQuery: on demand only (the About window).
+  // Test hook (unpackaged app only): CAIS_RELEASES_URL points it at a local fake. The e2e never reaches GitHub:
+  // without the hook the check fails at once, which the window shows as "could not check".
+  const releasesUrl = !app.isPackaged && process.env.CAIS_RELEASES_URL ? process.env.CAIS_RELEASES_URL : undefined;
+  const releases = new ReleaseChecker({
+    version: app.getVersion(),
+    fetch:
+      e2e && !releasesUrl
+        ? () => Promise.reject(new Error('offline under test'))
+        : (url, init) => net.fetch(url, init),
+    ...(releasesUrl ? { url: releasesUrl } : {}),
+  });
+
   registerIpc({
     store,
     tabs,
@@ -438,6 +465,19 @@ async function bootstrap(): Promise<void> {
     },
     trail,
     recordConfig: (detail, env) => recordConfig(detail, env),
+    about: {
+      info: () => ({
+        version: app.getVersion(),
+        electron: process.versions.electron,
+        chromium: process.versions.chrome,
+        node: process.versions.node,
+        system: `${process.platform} ${process.arch}`,
+        repository: REPOSITORY_URL,
+      }),
+      releases,
+      // looked up on `shell` at call time, so a test can replace it
+      openExternal: (url) => shell.openExternal(url),
+    },
   });
 
   // Quitting: first the person's open transactions (a dialog), then the agents' (pending requests expire,
