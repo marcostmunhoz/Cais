@@ -18,6 +18,42 @@ const cliFile = join(root, 'out', 'cli', 'cais.mjs');
 
 test.describe.configure({ mode: 'serial' });
 
+// English sample data of its own: the tables live only while this spec runs and never touch the pt-BR seed of the
+// other specs (which is why the names differ from the seeded ones).
+const sampleTables = ['contacts', 'products', 'tickets', 'customers'];
+
+async function withSampleDb<T>(fn: (db: mysql.Connection) => Promise<T>): Promise<T> {
+  const t = testDb();
+  const db = await mysql.createConnection({
+    host: t.host, port: t.port, user: t.user, password: t.password, database: t.database, multipleStatements: true,
+  });
+  try {
+    return await fn(db);
+  } finally {
+    await db.end().catch(() => undefined);
+  }
+}
+
+test.beforeAll(async () => {
+  await withSampleDb((db) =>
+    db.query(`
+      ${sampleTables.map((n) => `DROP TABLE IF EXISTS ${n};`).join('\n')}
+      CREATE TABLE customers (id INT PRIMARY KEY, name VARCHAR(80) NOT NULL, tax_id CHAR(14) NULL);
+      INSERT INTO customers VALUES (1, 'Aurora Coffee Ltd', '12345678000190'), (2, 'Horizon Stationery', NULL), (3, 'Central Market', '98765432000110');
+      CREATE TABLE contacts (id INT PRIMARY KEY AUTO_INCREMENT, name VARCHAR(50) NOT NULL, email VARCHAR(80));
+      INSERT INTO contacts (name, email) VALUES ('Ann', 'ann@example.com'), ('Bea', 'bea@example.com');
+      CREATE TABLE products (id INT PRIMARY KEY, name VARCHAR(60) NOT NULL, note VARCHAR(100) NULL, price DECIMAL(10,2) NOT NULL);
+      INSERT INTO products VALUES (1, 'Pen', 'blue', 2.50), (2, 'Notebook', NULL, 18.90), (3, 'Pencil', 'HB', 1.20), (4, 'Eraser', 'white', 0.90);
+      CREATE TABLE tickets (id INT PRIMARY KEY, status VARCHAR(20) NOT NULL, owner VARCHAR(60) NOT NULL);
+      INSERT INTO tickets VALUES (1, 'active', 'ann@example.com'), (2, 'active', 'bea@example.com'), (3, 'active', 'cal@example.com');
+    `),
+  );
+});
+
+test.afterAll(async () => {
+  await withSampleDb((db) => db.query(sampleTables.map((n) => `DROP TABLE IF EXISTS ${n};`).join('\n')));
+});
+
 let userData: string;
 let app: ElectronApplication;
 let page: Page;
@@ -40,8 +76,11 @@ test.afterEach(async () => {
 const dialog = (name: string) => page.getByRole('dialog', { name });
 const shot = (name: string) => page.screenshot({ path: join(shots, `${name}-en.png`) });
 
+// every call names its client, so the Trail shows a real client name instead of the default
+const CLIENT = 'Claude Code';
+
 function cli(socket: string, args: string[]): Promise<{ code: number; json: any }> {
-  const child = spawn(process.execPath, [cliFile, ...args], { env: { ...process.env, CAIS_SOCKET: socket } });
+  const child = spawn(process.execPath, [cliFile, ...args, '--client', CLIENT], { env: { ...process.env, CAIS_SOCKET: socket } });
   let stdout = '';
   child.stdout.on('data', (c) => (stdout += c));
   return new Promise((resolve) => {
@@ -67,15 +106,15 @@ test('transaction-light: a tab in Transaction mode with the Commit and Rollback 
   await page.getByTestId('tab').first().click();
   await page.getByRole('radio', { name: 'Transaction' }).click();
 
-  await setSql(page, "INSERT INTO people (name, email) VALUES ('Zed', 'zed@exemplo.com');");
+  await setSql(page, "INSERT INTO contacts (name, email) VALUES ('Zed', 'zed@example.com');");
   await page.keyboard.press('ControlOrMeta+Enter');
   await expect(page.getByTestId('affected')).toContainText('1 row affected');
   const txbar = page.getByTestId('txbar');
   await expect(txbar).toContainText('Transaction open · 1 statement');
 
-  await setSql(page, "SELECT id, name, email FROM people WHERE name = 'Zed';");
+  await setSql(page, "SELECT id, name, email FROM contacts WHERE name = 'Zed';");
   await page.keyboard.press('ControlOrMeta+Enter');
-  await expect(page.locator('[role=gridcell]', { hasText: 'zed@exemplo.com' })).toBeVisible();
+  await expect(page.locator('[role=gridcell]', { hasText: 'zed@example.com' })).toBeVisible();
   await expect(txbar).toContainText('2 statements');
 
   await setTheme(app, page, 'light');
@@ -92,12 +131,12 @@ test('grid-edit-dark: three pending changes in the results grid', async () => {
   const editor = page.getByTestId('cell-editor');
   await page.getByTestId('env-dev').click();
   await expect(page.getByTestId('conn-chip')).toHaveAttribute('data-status', 'connected', { timeout: 20_000 });
-  await setSql(page, 'SELECT id, name, note, price FROM grid_items ORDER BY id;');
+  await setSql(page, 'SELECT id, name, note, price FROM products ORDER BY id;');
   await page.keyboard.press('ControlOrMeta+Enter');
-  await expect(cell(0, 'name')).toHaveText('Caneta', { timeout: 20_000 });
+  await expect(cell(0, 'name')).toHaveText('Pen', { timeout: 20_000 });
 
   await cell(0, 'name').dblclick();
-  await editor.fill("Caneta d'ouro");
+  await editor.fill("Golden pen");
   await editor.press('Enter');
   await expect(editor).toHaveCount(0);
   await cell(0, 'note').click({ button: 'right' });
@@ -130,8 +169,8 @@ test('agent-write-approval-light: the modal for a write requested by an agent', 
     await expect(page.getByTestId('conn-chip')).toHaveAttribute('data-status', 'connected', { timeout: 20_000 });
 
     const run = cli(socket, [
-      'llm', 'query', 'api/dev', '--write', '--sql', "UPDATE agent_items SET status = 'blocked' WHERE id IN (1, 2);",
-      '--reason', 'Block the 2 duplicated items', '--wait', '--client', 'Claude Code',
+      'llm', 'query', 'api/dev', '--write', '--sql', "UPDATE tickets SET status = 'blocked' WHERE id IN (1, 2);",
+      '--reason', 'Block the 2 duplicated items', '--wait',
     ]);
     const modal = dialog('Agent asks to write');
     await expect(modal).toBeVisible();
@@ -149,10 +188,7 @@ test('trail-light: the Trail screen with agent requests and configuration change
   const dir = shortTempDir('cais-docsock-');
   const socket = join(dir, 'a.sock');
   const t = testDb();
-  const db = await mysql.createConnection({ host: t.host, port: t.port, user: t.user, password: t.password, database: t.database });
   try {
-    // the database is shared with the other specs: start without the row they may have left
-    await db.query('DELETE FROM agent_items WHERE id = 4');
     await open({ CAIS_SOCKET: socket });
     const ask = (args: string[]) => cli(socket, ['llm', ...args]);
     const reject = async () => {
@@ -182,33 +218,33 @@ test('trail-light: the Trail screen with agent requests and configuration change
     await expect(page.getByTestId('conn-chip')).toHaveAttribute('data-status', 'connected', { timeout: 20_000 });
 
     // an agent saves a script; a production read is approved; production reads are freed; its write is rejected
-    const saved = await ask(['script-save', '--project', 'api', '--name', 'Duplicates by document', '--sql', 'SELECT national_id, COUNT(*) FROM companies GROUP BY 1', '--database', t.database]);
+    const saved = await ask(['script-save', '--project', 'api', '--name', 'Duplicates by tax id', '--sql', 'SELECT tax_id, COUNT(*) FROM customers GROUP BY 1', '--database', t.database]);
     expect(saved.code).toBe(0);
-    expect((await ask(['script-save', '--project', 'api', '--name', 'duplicates by document', '--sql', 'SELECT 2'])).code).toBe(2);
+    expect((await ask(['script-save', '--project', 'api', '--name', 'duplicates by tax id', '--sql', 'SELECT 2'])).code).toBe(2);
     await setLevel('dev', 'free-reads-writes');
 
-    const read = ask(['query', 'api/pro', '--sql', 'SELECT COUNT(*) AS n FROM agent_items', '--reason', 'Check today’s incident', '--wait', '--client', 'Claude Code']);
+    const read = ask(['query', 'api/pro', '--sql', 'SELECT COUNT(*) AS n FROM tickets', '--reason', 'Check today’s incident', '--wait']);
     const readModal = dialog('Agent asks to read');
     await expect(readModal.getByRole('button', { name: 'Approve', exact: true })).toBeEnabled();
     await readModal.getByRole('button', { name: 'Approve', exact: true }).click();
     expect((await read).code).toBe(0);
 
     await setLevel('pro', 'free-reads');
-    expect((await ask(['query', 'api/pro', '--sql', 'SELECT COUNT(*) AS n FROM agent_items', '--reason', 'Check again'])).code).toBe(0);
-    const proWrite = await ask(['query', 'api/pro', '--write', '--sql', "UPDATE agent_items SET status = 'x' WHERE id = 3", '--reason', 'test']);
+    expect((await ask(['query', 'api/pro', '--sql', 'SELECT COUNT(*) AS n FROM tickets', '--reason', 'Check again'])).code).toBe(0);
+    const proWrite = await ask(['query', 'api/pro', '--write', '--sql', "UPDATE tickets SET status = 'x' WHERE id = 3", '--reason', 'test']);
     expect(proWrite.json.status).toBe('pending_approval');
     await reject();
     await setLevel('pro', 'approve-all');
 
     // dev frees writes: an alert (no WHERE) and a possible foreign key still wait; a plain INSERT commits by itself
-    const waiting = ask(['query', 'api/dev', '--write', '--sql', "UPDATE agent_items SET status = 'auto'", '--reason', 'level test', '--wait', '--client', 'Claude Code']);
+    const waiting = ask(['query', 'api/dev', '--write', '--sql', "UPDATE tickets SET status = 'auto'", '--reason', 'level test', '--wait']);
     await expect(dialog('Agent asks to write')).toBeVisible();
     await reject();
     expect((await waiting).code).toBe(3);
-    const upd = await ask(['query', 'api/dev', '--write', '--sql', "UPDATE agent_items SET status = 'auto' WHERE id = 3", '--reason', 'level test', '--client', 'Claude Code']);
+    const upd = await ask(['query', 'api/dev', '--write', '--sql', "UPDATE tickets SET status = 'auto' WHERE id = 3", '--reason', 'level test']);
     expect(upd.json.status).toBe('pending_approval');
     await reject();
-    const ins = await ask(['query', 'api/dev', '--write', '--sql', "INSERT INTO agent_items VALUES (4, 'auto', 'test')", '--reason', 'level test', '--client', 'Claude Code']);
+    const ins = await ask(['query', 'api/dev', '--write', '--sql', "INSERT INTO tickets VALUES (4, 'auto', 'test')", '--reason', 'level test']);
     expect(ins.json).toMatchObject({ status: 'committed', auto_commit: true });
 
     await page.getByTestId('trail-entry').click();
@@ -220,9 +256,6 @@ test('trail-light: the Trail screen with agent requests and configuration change
     await shot('trail-light');
     await trail.getByRole('button', { name: 'Close' }).first().click();
   } finally {
-    await db.query('DELETE FROM agent_items WHERE id = 4').catch(() => undefined);
-    await db.query("UPDATE agent_items SET status = 'active'").catch(() => undefined);
-    await db.end().catch(() => undefined);
     rmSync(dir, { recursive: true, force: true });
   }
 });
