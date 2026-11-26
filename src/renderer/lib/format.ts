@@ -8,7 +8,7 @@ export function formatCount(n: number): string {
   return fmt().formatNumber(n);
 }
 
-/** "1 linha", "1.234 linhas" ("1,234 rows" in en). The caller passes the words in the app locale. */
+/** "1 row", "1,234 rows" ("1 linha", "1.234 linhas" in pt-BR). The caller passes the words in the app locale. */
 export function plural(n: number, one: string, many: string): string {
   return `${formatCount(n)} ${n === 1 ? one : many}`;
 }

@@ -1,4 +1,4 @@
-// settings.json and "Estimar ao digitar": an optional preference of the person, outside the agent seal.
+// settings.json and "Estimate while typing": an optional preference of the person, outside the agent seal.
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';

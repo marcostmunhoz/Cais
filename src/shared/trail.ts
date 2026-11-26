@@ -25,7 +25,7 @@ export interface TrailEntry {
   actor: TrailActor;
   /** Agent: the client name it gave (informed by the client). */
   client?: string;
-  /** "projeto/ambiente". */
+  /** "project/environment". */
   environment: string;
   environmentId?: string;
   production: boolean;
@@ -54,7 +54,7 @@ export interface TrailEntry {
   jobId?: string;
   bytesEstimated?: number;
   bytesBilled?: number;
-  /** Person, Transação: the server still holds a transaction after the statement. */
+  /** Person, Transaction: the server still holds a transaction after the statement. */
   inTransaction?: boolean;
   /**
    * Free text for config and mode lines, in the app locale of the moment it was written. Never
@@ -75,7 +75,7 @@ export interface TrailEntry {
 }
 
 export interface TrailQuery {
-  /** Only lines before this time (ms), for "Carregar mais". */
+  /** Only lines before this time (ms), for "Load more". */
   before?: number;
   /** How many days back from now (1 to 90). */
   days: number;

@@ -98,7 +98,7 @@ test('editing shows the marker, Cmd+S clears it and the last run is recorded', a
   await expect(page.getByTestId('dirty-mark')).toBeVisible();
 });
 
-test('closing a tab with unsaved changes asks Salvar / Descartar / Cancelar', async () => {
+test('closing a tab with unsaved changes asks Save / Discard / Cancel', async () => {
   await setSql(page, 'SELECT 99 AS descartar;');
   await page.keyboard.press('ControlOrMeta+W');
   const dialog = page.getByRole('dialog', { name: 'Alterações não salvas' });
@@ -162,7 +162,7 @@ test('Cmd+Shift+S saves as another script; the menu renames, duplicates and dele
   await expect(page.locator('.cm-content')).toContainText('cards');
 });
 
-test('Cmd+O searches "projeto · nome" and opens in the environment of the active tab', async () => {
+test('Cmd+O searches "project · name" and opens in the environment of the active tab', async () => {
   await page.keyboard.press('ControlOrMeta+O');
   const picker = page.getByRole('dialog', { name: 'Abrir script' });
   await picker.getByLabel('Buscar script').fill('api duplic');

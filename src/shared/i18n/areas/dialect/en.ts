@@ -1,7 +1,10 @@
 import type { Shape } from '../../core';
 import type { ptBR } from './pt-BR';
 
-/** Area "dialect", English. */
+/**
+ * Area "dialect", English. The `agentCode` entries (and any text the broker renders for agents) are sent to agents in
+ * AGENT_LOCALE (English, fixed), so their text here is part of the CLI's output: change it only on purpose.
+ */
 export const en: Shape<typeof ptBR> = {
   literal: {
     invalid: (p) => `Invalid value for ${p.type}.`,

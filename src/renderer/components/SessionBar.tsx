@@ -48,7 +48,7 @@ export function SessionBar({ tabId, platform }: { tabId: string; platform: strin
   const t = m().sessionBar;
   const view = connectionView(session, run);
   const chipDetail = view.status === 'connected' && view.detail ? engineVersionLabel(env.engine, view.detail) : view.detail;
-  // "banco" or "dataset": the engine's own word
+  // "database" or "dataset": the engine's own word
   const term = getDialect(env.engine).databaseTerm;
   const dirty = !!script && isScriptDirty(tab.sql, script);
 

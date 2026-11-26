@@ -91,7 +91,7 @@ afterEach(async () => {
 });
 
 describe('BigQuery through the SessionManager', () => {
-  it('opens a tab in Somente leitura, whatever the environment, and runs a SELECT', async () => {
+  it('opens a tab in Read-only, whatever the environment, and runs a SELECT', async () => {
     for (const production of [false, true]) {
       current = env({ production });
       await manager.close('t1');
@@ -112,7 +112,7 @@ describe('BigQuery through the SessionManager', () => {
     expect(r.stats).toMatchObject({ bytesEstimated: 2048, bytesProcessed: 2048, bytesBilled: 10_485_760, cacheHit: false, jobId: 'job_1' });
   });
 
-  it('refuses any mode but Somente leitura', async () => {
+  it('refuses any mode but Read-only', async () => {
     await expect(manager.open('t1', current.id, { mode: 'transaction' })).rejects.toThrow(/Transação não vale/);
     await expect(manager.open('t1', current.id, { mode: 'autocommit' })).rejects.toThrow();
     await manager.open('t1', current.id);
@@ -222,7 +222,7 @@ describe('BigQuery through the SessionManager', () => {
     await session.close();
   });
 
-  it('reads pages up to the cap and says it was cut; "Buscar até 50.000" reads the same job, with no new dry run or job', async () => {
+  it('reads pages up to the cap and says it was cut; "Fetch up to 50,000" reads the same job, with no new dry run or job', async () => {
     const rows = Array.from({ length: 2500 }, (_, i) => [String(i), `s${i}`]);
     fake.resultFor = () => ({ schema: [{ name: 'n', type: 'INTEGER' }, { name: 's', type: 'STRING' }], rows });
     await manager.open('t1', current.id);
@@ -294,7 +294,7 @@ describe('BigQuery through the SessionManager', () => {
     expect(fake.realQueries).toHaveLength(1);
   });
 
-  it('Cancelar stops the job with jobs.cancel, with no gcloud round before it', async () => {
+  it('Cancel stops the job with jobs.cancel, with no gcloud round before it', async () => {
     await manager.open('t1', current.id);
     const running = run('SELECT SLOW');
     for (let i = 0; i < 100 && fake.jobs.size === 0; i++) await new Promise((r) => setTimeout(r, 10));
@@ -471,7 +471,7 @@ describe('BigQuery through the SessionManager', () => {
     expect(line.detail).toContain('100 GiB');
   });
 
-  it('"Buscar até 50.000" neither dry-runs nor asks again, even when the estimate is over the limit', async () => {
+  it('"Fetch up to 50,000" neither dry-runs nor asks again, even when the estimate is over the limit', async () => {
     current = env({ maxBytesBilled: GIB });
     fake.bytesFor = () => 3 * GIB;
     fake.resultFor = () => ({ schema: [{ name: 'n', type: 'INTEGER' }], rows: Array.from({ length: 1500 }, (_, i) => [String(i)]) });
@@ -546,7 +546,7 @@ describe('BigQuery through the SessionManager', () => {
   });
 });
 
-describe('BigQuery "Estimar ao digitar": the dry run of the statement being typed', () => {
+describe('BigQuery "Estimate while typing": the dry run of the statement being typed', () => {
   it('with the switch off nothing leaves, whatever the renderer asks', async () => {
     await manager.open('t1', current.id);
     expect(await manager.estimate('t1', 'SELECT n FROM sales.orders')).toEqual({ state: 'skipped', reason: 'off' });

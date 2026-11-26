@@ -309,7 +309,7 @@ describe('corrupt files are set aside, never block startup', () => {
 describe('main store messages in English', () => {
   afterEach(() => setLocale('pt-BR'));
 
-  it('throws, notices and integrity notes follow the app locale; the ref keeps the agents in pt-BR', async () => {
+  it('throws, notices and integrity notes follow the app locale; the ref is what the agents get (rendered in AGENT_LOCALE, English)', async () => {
     const { store, project, cred } = await seeded();
     setLocale('en');
     await expect(store.saveCredential({ name: 'x', kind: 'password', username: 'u' })).rejects.toThrow('Enter the password.');

@@ -40,7 +40,7 @@ function makeRootRig(): Rig {
   return { clock, broker, sessions, audit, envs, catalogProjects: projects };
 }
 
-/** The person's tabs, logged in as root (dev = Auto-commit, pro = Somente leitura). */
+/** The person's tabs, logged in as root (dev = Auto-commit, pro = Read-only). */
 function makeManager(): SessionManager {
   const base: Environment = { id: 'dev', projectId: 'p', name: 'dev', engine: 'mysql', host: f.host, port: f.port, defaultDatabase: f.database, credentialId: 'c', production: false };
   return new SessionManager({
@@ -336,7 +336,7 @@ describe('agent writes: transactional or nothing', () => {
   });
 });
 
-describe("the person's Transação tab cannot be turned into autocommit; AND CHAIN only in Transação", () => {
+describe("the person's Transaction tab cannot be turned into autocommit; AND CHAIN only in Transaction", () => {
   it('SET `autocommit`=1 (every spelling) is refused and the open transaction is still uncommitted', async () => {
     await manager.open('f-tx', 'dev');
     await manager.setMode('f-tx', 'transaction');
@@ -364,7 +364,7 @@ describe("the person's Transação tab cannot be turned into autocommit; AND CHA
     await manager.close('f-tx');
   });
 
-  it('COMMIT / ROLLBACK AND CHAIN are refused in Auto-commit and Somente leitura', async () => {
+  it('COMMIT / ROLLBACK AND CHAIN are refused in Auto-commit and Read-only', async () => {
     await manager.open('f-ac', 'dev');
     await manager.open('f-ro', 'pro');
     for (const tab of ['f-ac', 'f-ro']) {
@@ -449,7 +449,7 @@ describe('"*/" outside an executable comment: SET PERSIST hidden in a fake strin
   });
 });
 
-describe("the person's Transação tab: a procedure that turns autocommit on", () => {
+describe("the person's Transaction tab: a procedure that turns autocommit on", () => {
   it('the tab puts autocommit back to 0 and says what happened', async () => {
     await root.query('CREATE PROCEDURE au_ac_on() BEGIN SET autocommit = 1; END');
     await manager.open('j-tx', 'dev');

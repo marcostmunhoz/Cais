@@ -5,8 +5,8 @@ const f = createFormat('pt-BR');
 /**
  * Area "agentsUi", pt-BR (the reference catalog: `en.ts` must follow its shape). The agents' panel and modals,
  * and the broker's text that the person reads. Entries under `approval`, `commitStop`, `rejection` and `error`
- * are also sent to agents, always rendered in AGENT_LOCALE (pt-BR), so their pt-BR text is part of the CLI's
- * output: change it only on purpose.
+ * are also sent to agents, always rendered in AGENT_LOCALE (English, fixed), so the `en.ts` text of those entries
+ * is part of the CLI's output: change it only on purpose.
  */
 export const ptBR = {
   /** Text built elsewhere, carried as is in a MessageRef (an already redacted driver message, for instance). */
@@ -185,7 +185,7 @@ export const ptBR = {
     environmentChanged: 'O ambiente mudou.',
   },
 
-  /** Errors the person can see (modal, panel, toasts); the agent gets them in pt-BR. */
+  /** Errors the person can see (modal, panel, toasts); the agent gets them in English (AGENT_LOCALE). */
   error: {
     accessOff: 'O acesso de agentes está desligado.',
     grantReadsOnly: 'A liberação por 15 minutos só vale para leitura.',

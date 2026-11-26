@@ -24,7 +24,7 @@ export class BigqueryNetworkError extends Error {
 }
 
 export interface ErrorContext {
-  /** The person or the cut pressed Cancelar: a stop is a cancellation, not a failure. */
+  /** The person or the cut pressed Cancel: a stop is a cancellation, not a failure. */
   cancelled: boolean;
 }
 

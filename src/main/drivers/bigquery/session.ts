@@ -31,7 +31,7 @@ interface JobRef {
   location?: string;
 }
 
-/** The last finished read, kept so "Buscar até 50.000" can read more pages of the same job instead of running again. */
+/** The last finished read, kept so "Fetch up to 50,000" can read more pages of the same job instead of running again. */
 interface LastJob {
   sql: string;
   dataset: string | null;
@@ -233,7 +233,7 @@ export class BigquerySession implements DbSession {
       const read = await this.run(sql, opts, active, stats);
       return { ...base, durationMs: elapsed(), ...read };
     } catch (error) {
-      // a stop by Cancelar is a cancellation whatever the server or the aborted request said
+      // a stop by Cancel is a cancellation whatever the server or the aborted request said
       if (active.cancelRequested && !this.dead) return { ...base, durationMs: elapsed(), error: cancelledError() };
       if (this.closing) return { ...base, durationMs: elapsed(), error: this.dead ?? lostError() };
       return { ...base, durationMs: elapsed(), error: mapBigqueryError(error, { cancelled: false }) };
@@ -263,7 +263,7 @@ export class BigquerySession implements DbSession {
     let response = await this.client.call(queryResponse, 'POST', `${this.projectPath}/queries`, {
       // Not tied to the client's life: close and destroy abort every call, and an aborted jobs.query would lose the
       // job id of a job the server already created (it would run and bill with nobody to cancel it). It waits for
-      // the answer, bounded, and the check below stops the job when close or Cancelar came meanwhile.
+      // the answer, bounded, and the check below stops the job when close or Cancel came meanwhile.
       detached: true,
       signal: AbortSignal.any([active.controller.signal, AbortSignal.timeout(QUICK_WAIT_MS + QUERY_CALL_SLACK_MS)]),
       body: {
@@ -284,7 +284,7 @@ export class BigquerySession implements DbSession {
     const location = response.jobReference?.location ?? response.location;
     if (response.jobReference?.jobId) {
       active.job = { jobId: response.jobReference.jobId, ...(location ? { location } : {}) };
-      // Cancelar came before the job had an id: stop it now
+      // Cancel came before the job had an id: stop it now
       if (active.cancelRequested) {
         await this.stopJob(active.job);
         return { error: cancelledError() };

@@ -1,4 +1,4 @@
-// "Estimar ao digitar": the dry run of the statement being typed, in the SessionManager. What may leave the app is
+// "Estimate while typing": the dry run of the statement being typed, in the SessionManager. What may leave the app is
 // decided here (switch, one statement, the classifier), and nothing of it is on the trail.
 import { beforeEach, describe, expect, it } from 'vitest';
 import { getDialect } from '@shared/dialects/registry';

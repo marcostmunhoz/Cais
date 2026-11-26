@@ -22,7 +22,7 @@ export interface RunView {
   message?: string;
   /** Pending grid edits, valid only while `result` is still in `results`. */
   edits?: GridEdits;
-  /** What Aplicar found (an UPDATE or DELETE that did not find exactly one row, an error), shown above the grid. */
+  /** What Apply found (an UPDATE or DELETE that did not find exactly one row, an error), shown above the grid. */
   editNotice?: string[];
 }
 
@@ -34,7 +34,7 @@ export interface SchemaView {
   datasets?: Record<string, { status: 'loading' | 'ready' | 'error'; error?: string }>;
 }
 
-/** The dry run of the statement under the cursor ("Estimar ao digitar"), as the status bar shows it. */
+/** The dry run of the statement under the cursor ("Estimate while typing"), as the status bar shows it. */
 export interface EstimateView {
   /** The statement the answer is for. */
   text: string;
@@ -99,9 +99,9 @@ export interface AppState {
   focusOrder: string[];
   scripts: SavedScript[];
   agents: AgentsSnapshot;
-  /** The Agentes panel is open. */
+  /** The Agents panel is open. */
   agentPanel: boolean;
-  /** The Trilha panel is open. */
+  /** The Trail panel is open. */
   trailPanel: boolean;
   /** The About window is open. */
   about: boolean;
@@ -113,7 +113,7 @@ export interface AppState {
   pendingModes: Record<string, SessionMode>;
   runs: Record<string, RunView>;
   schemas: Record<string, SchemaView>;
-  /** "Estimar ao digitar" (BigQuery), kept in main's settings.json: on for every tab of an engine that answers a dry run. */
+  /** "Estimate while typing" (BigQuery), kept in main's settings.json: on for every tab of an engine that answers a dry run. */
   estimateAsYouType: boolean;
   /** Per tab: what the dry run of its statement under the cursor said last. */
   estimates: Record<string, EstimateView>;

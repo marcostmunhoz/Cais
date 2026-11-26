@@ -169,7 +169,7 @@ export function renameProject(projectId: string): void {
   if (project) setState({ projectName: { kind: 'rename', projectId, initialName: project.name } });
 }
 
-/** The name prompt for duplicating a project, with "<projeto> (cópia)" as the default. */
+/** The name prompt for duplicating a project, with "<project> (copy)" as the default. */
 export function duplicateProject(projectId: string): void {
   const { projects } = getState().catalog;
   const project = projects.find((p) => p.id === projectId);
@@ -373,7 +373,7 @@ async function markScriptRun(tabId: string): Promise<void> {
 
 // --- settings ----------------------------------------------------------------
 
-/** "Estimar ao digitar": on or off for every tab, kept by main. Turning it off drops what was estimated. */
+/** "Estimate while typing": on or off for every tab, kept by main. Turning it off drops what was estimated. */
 export async function setEstimateAsYouType(enabled: boolean): Promise<void> {
   try {
     const settings = await api().settings.setEstimateAsYouType(enabled);
@@ -608,7 +608,7 @@ async function openSession(tabId: string): Promise<boolean> {
   }
 }
 
-/** Conectar and Reconectar: the tab keeps its text, mode and database. */
+/** Connect and Reconnect: the tab keeps its text, mode and database. */
 export async function connectTab(tabId: string): Promise<void> {
   await ensureSession(tabId);
 }
@@ -975,7 +975,7 @@ export function discardEdits(tabId: string): void {
   patchRun(tabId, { edits: undefined });
 }
 
-/** Tabs reading the schema again before Gerar SQL or Aplicar: a second click meanwhile does nothing. */
+/** Tabs reading the schema again before Generate SQL or Apply: a second click meanwhile does nothing. */
 const preparingEdits = new Set<string>();
 
 const sameKey = (a: readonly KeyColumn[], b: readonly KeyColumn[]): boolean =>
@@ -1002,7 +1002,7 @@ async function readTarget(
   const environmentId = tab?.environmentId ?? '';
   preparingEdits.add(tabId);
   try {
-    // quietly: the grid keeps its state while the schema is read (no "Carregando o schema")
+    // quietly: the grid keeps its state while the schema is read (no "Loading the schema")
     const tree = await api().schema.get(environmentId, { refresh: true });
     forgetEstimates(environmentId);
     setState((s) => ({ schemas: { ...s.schemas, [environmentId]: { status: 'ready', tree } } }));
@@ -1071,7 +1071,7 @@ export async function generateUpdates(tabId: string): Promise<void> {
 }
 
 /**
- * Gerar UPDATE da célula: `UPDATE … SET <column> = <value shown> WHERE <whole key>;` for each of the rows, at the end
+ * Generate cell UPDATE: `UPDATE … SET <column> = <value shown> WHERE <whole key>;` for each of the rows, at the end
  * of the editor, with every value literal selected for the person to type over. Same gate as editing a cell. Nothing
  * runs and the pending edits stay as they are: the value is the one the grid shows, pending edit included.
  */
@@ -1108,7 +1108,7 @@ export async function generateCellUpdates(tabId: string, result: StatementResult
 }
 
 /**
- * Gerar INSERT: one multi-row `INSERT INTO … VALUES (…), (…);` of the rows at the end of the editor, selected, with the
+ * Generate INSERT: one multi-row `INSERT INTO … VALUES (…), (…);` of the rows at the end of the editor, selected, with the
  * values the grid shows (pending edits applied). `withKey: false` leaves the primary key out. Nothing
  * runs and the pending edits stay as they are. The columns come from the schema the renderer has: an INSERT finds no
  * row by a key, so a stale schema cannot make it touch the wrong one, and the server has the last word when it runs.
@@ -1163,7 +1163,7 @@ export function reachNotes(reach: DeleteReach | null, table: string): string[] {
   return out;
 }
 
-/** Aplicar: the UPDATEs and DELETEs run through the tab's normal path, so the mode decides. */
+/** Apply: the UPDATEs and DELETEs run through the tab's normal path, so the mode decides. */
 export async function applyEdits(tabId: string): Promise<void> {
   const tab = getState().tabs.find((t) => t.id === tabId);
   if (!tab || getState().runs[tabId]?.running) return;

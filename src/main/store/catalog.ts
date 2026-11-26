@@ -125,11 +125,11 @@ export class CatalogStore {
 
   /**
    * An environment changed outside the Cais (catalog.json, secrets.json) cannot be trusted: it becomes
-   * production with "Tudo com aprovação" and is blocked (no connection, by the person or by agents) until the
+   * production with "Everything needs approval" and is blocked (no connection, by the person or by agents) until the
    * person reviews and saves it, because its host may now be someone else's and the Cais would send the
    * credential there. Without a seal (first start, seal.json removed, a key the vault cannot open) nobody knows
    * what changed: every environment is blocked the same way. Without the vault nothing can be signed: every
-   * environment is "Tudo com aprovação" while it lasts (in memory only).
+   * environment is "Everything needs approval" while it lasts (in memory only).
    */
   private async checkIntegrity(): Promise<void> {
     this.integrityNotes = [];
@@ -338,7 +338,7 @@ export class CatalogStore {
 
   /**
    * Production never lets agents write by themselves, whatever was asked: at most free reads;
-   * without the vault, "Tudo com aprovação".
+   * without the vault, "Everything needs approval".
    */
   private clampLevel(production: boolean, level: AgentLevel | undefined): AgentLevel | undefined {
     const vaultless = !!this.seal && !this.seal.available;
@@ -512,7 +512,7 @@ export class CatalogStore {
 /**
  * Whether saving an environment changed what an agent reaches or how it names it, so its 15-minute grant is
  * revoked and its pending requests expire: where it connects (host and port, or project and byte limit), credential, default database, production, and its name
- * or project, because the `projeto/ambiente` slug changes and a pending request showing the old one would
+ * or project, because the `project/environment` slug changes and a pending request showing the old one would
  * mislead whoever approves it.
  */
 export function changedForAgents(before: Environment, after: Environment): boolean {

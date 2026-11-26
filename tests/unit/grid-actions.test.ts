@@ -3,7 +3,7 @@ import type { Environment } from '@shared/model';
 import type { SchemaTree, SessionState, StatementResult } from '@shared/results';
 import { setLocale } from '@shared/i18n';
 
-// The renderer's grid actions against a fake `window.cais`: what Gerar UPDATE, Aplicar and
+// The renderer's grid actions against a fake `window.cais`: what Generate UPDATE, Apply and
 // closing a tab do with pending edits. The paths are not literals so the node typecheck (no DOM types) does
 // not follow them into renderer code; the shapes below are the few this test touches.
 
@@ -116,7 +116,7 @@ beforeEach(() => {
 });
 
 describe('grid edits in the renderer', () => {
-  it('Aplicar reads the schema again: a key that grew by a column the query did not select is refused, nothing runs', async () => {
+  it('Apply reads the schema again: a key that grew by a column the query did not select is refused, nothing runs', async () => {
     api.schema.get.mockResolvedValueOnce(tree(['id', 'tenant_id']));
     await actions.applyEdits('t');
     expect(api.schema.get).toHaveBeenCalledWith('dev', { refresh: true });
@@ -126,7 +126,7 @@ describe('grid edits in the renderer', () => {
     expect(store.getState().runs.t!.edits?.cells).toEqual({ 0: { 1: 'x' } });
   });
 
-  it('Aplicar with the same key runs the UPDATE by the whole key', async () => {
+  it('Apply with the same key runs the UPDATE by the whole key', async () => {
     api.schema.get.mockResolvedValueOnce(tree(['id']));
     api.session.run
       .mockResolvedValueOnce({ session, results: [{ index: 0, sql: 'u', kind: 'write', verb: 'UPDATE', durationMs: 1, affectedRows: 1 }] })
@@ -138,7 +138,7 @@ describe('grid edits in the renderer', () => {
     expect(store.getState().runs.t!.results[0]!.rows).toEqual([[1, 'x'], [2, 'b']]);
   });
 
-  it('after Aplicar, a re-read that lands on another database keeps the old result and its remaining edits', async () => {
+  it('after Apply, a re-read that lands on another database keeps the old result and its remaining edits', async () => {
     store.setState({
       runs: { t: { running: false, connecting: false, results: [result], active: 0, edits: { result, cells: { 0: { 1: 'x' }, 1: { 1: 'y' } }, deleted: [] } } },
     });
@@ -208,7 +208,7 @@ describe('row deletions in the renderer', () => {
     expect(store.getState().runs.t!.edits?.deleted).toEqual([]);
   });
 
-  it('Gerar SQL puts the UPDATEs, then the DELETEs, in the editor; a marked row gets no UPDATE', async () => {
+  it('Generate SQL puts the UPDATEs, then the DELETEs, in the editor; a marked row gets no UPDATE', async () => {
     mark([0], { 0: { 1: 'x' }, 1: { 1: 'y' } });
     await actions.generateUpdates('t');
     expect(insertText).toHaveBeenCalledWith("UPDATE `shop`.`items` SET `name` = 'y' WHERE `id` = 2;\nDELETE FROM `shop`.`items` WHERE `id` = 1;");
@@ -216,7 +216,7 @@ describe('row deletions in the renderer', () => {
     expect(store.getState().runs.t!.edits).toBeUndefined();
   });
 
-  it('Aplicar always asks in Auto-commit when rows are marked, even outside production, and lists the DELETEs', async () => {
+  it('Apply always asks in Auto-commit when rows are marked, even outside production, and lists the DELETEs', async () => {
     mark([1]);
     await actions.applyEdits('t');
     const confirm = store.getState().confirm as unknown as { title: string; body: string; items: string[]; notes?: string[] };
@@ -329,7 +329,7 @@ describe('row deletions in the renderer', () => {
     expect(store.getState().runs.t!.editNotice).toContain('O DELETE 1 não encontrou a linha (esperado: 1).');
   });
 
-  it('Aplicar refuses when the key moved, and the marks stay', async () => {
+  it('Apply refuses when the key moved, and the marks stay', async () => {
     mark([0]);
     api.schema.get.mockResolvedValueOnce(tree(['id', 'tenant_id']));
     await actions.applyEdits('t');
@@ -346,7 +346,7 @@ describe('row deletions in the renderer', () => {
   });
 });
 
-describe('Gerar UPDATE da célula in the renderer', () => {
+describe('Generate cell UPDATE in the renderer', () => {
   const insertText = vi.fn();
   beforeEach(() => {
     insertText.mockClear();
@@ -400,7 +400,7 @@ describe('Gerar UPDATE da célula in the renderer', () => {
   });
 });
 
-describe('Gerar INSERT in the renderer', () => {
+describe('Generate INSERT in the renderer', () => {
   const insertText = vi.fn();
   beforeEach(() => {
     insertText.mockClear();

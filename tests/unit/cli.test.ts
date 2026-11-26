@@ -147,7 +147,7 @@ describe('cais llm guide', () => {
   });
 
   it('tells who decided and that a closed pipe keeps the exit code', () => {
-    for (const word of ['"decided_by": "person"', '"policy"', '"auto_commit": true', 'false (the person clicked Commit)', '| head']) expect(GUIDE).toContain(word);
+    for (const word of ['"decided_by": "person"', '"policy"', '"auto_commit": true', 'false (the user clicked Commit)', '| head']) expect(GUIDE).toContain(word);
   });
 });
 

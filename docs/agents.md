@@ -7,7 +7,7 @@ The security model behind this, with its known limits, is in [security.md](secur
 ## Turn on and install
 
 1. In Cais, open **Agents** (at the bottom of the sidebar) and turn on **Agent access**. Access is off by default and only the user turns it on, in the app; while it is off, the socket does not even exist. The status bar shows "Agents on".
-2. Menu **Cais › Install cais Command in Terminal** (on Linux and Windows, the **File** menu). Cais creates a `cais` link to the app's `cais.mjs` in `/usr/local/bin` if it can write there, otherwise in `~/.local/bin`, and warns when the folder is not in the PATH. In the Linux deb the command does not ship in the package: this menu is the way to install it, and in practice it creates the link in `~/.local/bin` (`/usr/local/bin` is usually root's). It never overwrites a file or link that is not Cais's own. On Windows the item is disabled: use `node <path>/cais.mjs`. The command runs on the system's Node, version 20 or newer.
+2. Menu **Cais › Install cais Command in Terminal** (on Linux, the **File** menu). Cais creates a `cais` link to the app's `cais.mjs` in `/usr/local/bin` if it can write there, otherwise in `~/.local/bin`, and warns when the folder is not in the PATH. In the Linux deb the command does not ship in the package: this menu is the way to install it, and in practice it creates the link in `~/.local/bin` (`/usr/local/bin` is usually root's). It never overwrites a file or link that is not Cais's own. On Windows the item is disabled: use `node <path>/cais.mjs`. The command runs on the system's Node, version 20 or newer.
 3. In development, without installing: `npm run cli -- llm envs` (rebuilds the CLI and runs it; it needs Cais open with `npm run dev` and access on).
 4. Give the agent the skill [skills/cais/SKILL.md](../skills/cais/SKILL.md). In Claude Code, the suggested permission is `Bash(cais llm:*)`.
 
@@ -40,7 +40,7 @@ cais llm script <script_id>
 cais llm script-save --project <project> --name "<name>" (--sql "<sql>" | --file <file> | -) [--database db]
 ```
 
-All of them accept `--client "<name>"` (or the `CAIS_CLIENT` variable; default "agente", shown as "agent" in the English UI), which shows up in the modal as "as stated by the client" and goes to the Trail.
+All of them accept `--client "<name>"` (or the `CAIS_CLIENT` variable; default "agente", shown as "agent" in the English UI; "agente" is the persisted key, which the UI translates), which shows up in the modal as "as stated by the client" and goes to the Trail.
 
 | Command | What it does |
 |---|---|

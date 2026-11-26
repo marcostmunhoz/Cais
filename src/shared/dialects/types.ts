@@ -21,9 +21,9 @@ export interface Classification {
   allowedInReadOnly: boolean;
   implicitCommit: boolean;
   transactionControl: TransactionControl;
-  /** Why the statement is refused in read-only mode (pt-BR), when it is. */
+  /** Why the statement is refused in read-only mode (in the app locale), when it is. */
   reason?: string;
-  /** Refused in every mode (message pt-BR): SET autocommit / transaction characteristics, COMMIT RELEASE. */
+  /** Refused in every mode (message in the app locale): SET autocommit / transaction characteristics, COMMIT RELEASE. */
   alwaysRefuse?: string;
   /** True for USE: the current database may have changed. */
   changesDatabase?: boolean;
@@ -140,7 +140,7 @@ export interface Dialect {
    */
   appendStatements(doc: string, text: string): { changes: { from: number; insert: string }[]; selection: { from: number; to: number } };
   classify(statement: string): Classification;
-  /** Alerts for a person reviewing the statement (pt-BR), such as "UPDATE sem WHERE". */
+  /** Alerts for a person reviewing the statement (in the app locale), such as "UPDATE without WHERE". */
   warnings(statement: string): string[];
   /**
    * Which tables a statement names, under which alias, and what each position of it can see (see `scope.ts`). Reads
@@ -149,7 +149,7 @@ export interface Dialect {
   analyze(statement: string): ScopeAnalysis;
   /** Lower-case identifier names a statement mentions (words and quoted names), for matching against the schema. */
   identifiers(statement: string): string[];
-  /** Why SQL from an agent may read differently to a person than to the server (pt-BR), or null. */
+  /** Why SQL from an agent may read differently to a person than to the server (in AGENT_LOCALE, English), or null. */
   agentCodeProblem?(sql: string): string | null;
   quoteIdent(name: string): string;
   /** What agents may and may not touch. */

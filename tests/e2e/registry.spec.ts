@@ -149,7 +149,7 @@ test('Renomear from the group header in the Cadastro; Esc closes only the prompt
   await expect(page.getByTestId('project-core')).toBeVisible();
 });
 
-test('the Trilha has a line per copied environment and per environment of a renamed project', async () => {
+test('the Trail has a line per copied environment and per environment of a renamed project', async () => {
   await page.getByTestId('trail-entry').click();
   const trail = dialog('Trilha');
   await trail.getByTestId('trail-search').fill('cópia de');

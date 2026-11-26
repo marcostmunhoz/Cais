@@ -72,7 +72,7 @@ describe('BigQuery errors', () => {
     expect(info.code).toBe('duplicate');
   });
 
-  it('stopped after a Cancelar is a cancellation', () => {
+  it('stopped after a Cancel is a cancellation', () => {
     const info = mapBigqueryError(new BigqueryApiError(400, 'stopped', 'Job execution was cancelled'), { cancelled: true });
     expect(info.code).toBe('CANCELLED');
     expect(info.message).toBe('Query cancelada.');

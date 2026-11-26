@@ -475,7 +475,7 @@ describe('grid edits to UPDATEs', () => {
   });
 });
 
-describe('Gerar UPDATE da célula', () => {
+describe('Generate cell UPDATE', () => {
   const e = editability([src('id'), src('name', { name: 'nome' }), src('email')], [
     [1, 'Ana', 'ana@x'],
     [2, 'Bia', null],
@@ -587,7 +587,7 @@ describe('gridEditability: engine capability', () => {
   });
 });
 
-// --- Gerar INSERT --------------------------------------------------------------------------------
+// --- Generate INSERT --------------------------------------------------------------------------------
 
 /** The generated statement must read as exactly one plain INSERT to the Cais itself. */
 function expectOneInsert(sql: string): void {
@@ -734,7 +734,7 @@ describe('insertability', () => {
   });
 });
 
-describe('Gerar INSERT: buildGridInsert', () => {
+describe('Generate INSERT: buildGridInsert', () => {
   const t = insertability(
     read([src('id'), src('name'), src('upper_name'), src('avatar')], []),
     schema,

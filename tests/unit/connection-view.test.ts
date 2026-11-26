@@ -14,7 +14,7 @@ const session = (over: Partial<SessionState> = {}): SessionState => ({
 });
 
 describe('connectionView', () => {
-  it('no session: Desconectado with Conectar', () => {
+  it('no session: Disconnected with Connect', () => {
     expect(connectionView(undefined)).toEqual({ status: 'disconnected', label: 'Desconectado', idle: false, action: 'connect' });
   });
 
@@ -23,21 +23,21 @@ describe('connectionView', () => {
     expect(connectionView(session({ status: 'disconnected' }), { connecting: true }).status).toBe('connecting');
   });
 
-  it('connected shows the server version; Desconectar is blocked with a transaction open', () => {
+  it('connected shows the server version; Disconnect is blocked with a transaction open', () => {
     expect(connectionView(session({ serverVersion: '8.4.3' }))).toEqual({
       status: 'connected', label: 'Conectado', detail: '8.4.3', idle: false, action: 'disconnect',
     });
     expect(connectionView(session({ transaction: { open: true, statements: 1 } })).disconnectBlocked).toBe('Faça commit ou rollback antes');
   });
 
-  it('running blocks Desconectar', () => {
+  it('running blocks Disconnect', () => {
     const view = connectionView(session({ status: 'running' }));
     expect(view).toMatchObject({ status: 'running', label: 'Executando…', action: 'disconnect' });
     expect(view.disconnectBlocked).toBe('Aguarde o comando terminar');
     expect(connectionView(session(), { running: true }).status).toBe('running');
   });
 
-  it('error carries the message and offers Reconectar; a "disconnected with error" state counts as error', () => {
+  it('error carries the message and offers Reconnect; a "disconnected with error" state counts as error', () => {
     const view = connectionView(session({ status: 'error', error: 'ECONNREFUSED' }));
     expect(view).toEqual({ status: 'error', label: 'Erro de conexão', detail: 'ECONNREFUSED', idle: false, action: 'reconnect' });
     expect(connectionTitle(view)).toBe('Erro de conexão · ECONNREFUSED');

@@ -25,8 +25,8 @@ export const AUTO_COMMIT_MAX_ROWS = 1000;
 export const AUTO_COMMIT_WINDOW_ROWS = 5000;
 export const AUTO_COMMIT_WINDOW_MS = 15 * 60_000;
 /**
- * BigQuery: a read an agent asks for with more estimated bytes than this waits for the person, even in "Leitura
- * liberada", under a 15-minute grant and in an environment with no limit. Fixed: not an option.
+ * BigQuery: a read an agent asks for with more estimated bytes than this waits for the person, even in "Reads allowed,
+ * writes need approval", under a 15-minute grant and in an environment with no limit. Fixed: not an option.
  */
 export const AGENT_BYTES_APPROVAL = 10 * 1024 ** 3;
 export const AGENT_DEFAULT_ROWS = 200;
@@ -74,7 +74,7 @@ export interface AgentRequestView {
   createdAt: number;
   client: string;
   environmentId: string;
-  environmentLabel: string; // "loja · pro"
+  environmentLabel: string; // "shop · pro"
   database?: string;
   production: boolean;
   mode: AgentMode;
@@ -123,8 +123,8 @@ export interface AgentsSnapshot {
 }
 
 export interface ApproveOptions {
-  /** "O agente pode ver o resultado". */
+  /** "The agent can see the result". */
   shareResult: boolean;
-  /** "Aprovar leituras em <ambiente> por 15 min": only valid for a read that needed approval. */
+  /** "Approve reads on <environment> for 15 min": only valid for a read that needed approval. */
   grantReads?: boolean;
 }

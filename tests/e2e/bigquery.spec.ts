@@ -117,7 +117,7 @@ test('a Google IAM credential and a BigQuery environment are registered in the f
   await form.getByLabel('Limite de bytes por consulta (GiB)').fill('1');
   await form.getByLabel('Dataset padrão (opcional)').fill('vendas');
 
-  // Testar conexão: token, datasets.list and a dry run, all against the fake server
+  // Test connection: token, datasets.list and a dry run, all against the fake server
   await form.getByRole('button', { name: 'Testar conexão' }).click();
   await expect(form.getByTestId('test-result')).toContainText('Conectado ao BigQuery');
   expect(fake.requests.every((r) => r.authorization === `Bearer ${E2E_TOKEN}`)).toBe(true);
@@ -223,7 +223,7 @@ test('a query shows rows, bytes processed and billed in the footer, and the grid
   // the engine does not edit in the grid: a double click opens no editor
   await grid.getByText('99.90').dblclick();
   await expect(page.getByTestId('cell-editor')).toHaveCount(0);
-  // nor does it offer Gerar INSERT, from a cell or from the row gutter; the Copy entries are there
+  // nor does it offer Generate INSERT, from a cell or from the row gutter; the Copy entries are there
   await grid.getByText('99.90').click({ button: 'right' });
   await expect(page.getByRole('menuitem', { name: 'Copiar como tabela Markdown' })).toBeVisible();
   await expect(page.getByRole('menuitem', { name: /Gerar INSERT/ })).toHaveCount(0);
@@ -249,7 +249,7 @@ test('DML is refused by the app before anything reaches the server', async () =>
   expect(fake.realQueries.some((q) => /DELETE/i.test(String(q.body?.query)))).toBe(false);
 });
 
-test('a read above the byte limit asks first, Cancelar leaves nothing run, and confirming runs with the ceiling raised', async () => {
+test('a read above the byte limit asks first, Cancel leaves nothing run, and confirming runs with the ceiling raised', async () => {
   const realBefore = fake.realQueries.length;
   await setSql(page, 'SELECT * FROM vendas.eventos');
   await runCurrent();
@@ -260,7 +260,7 @@ test('a read above the byte limit asks first, Cancelar leaves nothing run, and c
   await expect(ask.getByTestId('bytes-item')).toContainText('SELECT * FROM vendas.eventos');
   await expect(ask).toContainText('O limite do ambiente é 1 GiB');
   await expect(ask).toContainText('sobe para 3 GiB');
-  // Cancelar has the focus: Enter never confirms by accident
+  // Cancel has the focus: Enter never confirms by accident
   await expect(ask.getByTestId('bytes-cancel')).toBeFocused();
   // behind the question the tab is connected and idle, not "Executando…"
   await expect(chip()).toHaveAttribute('data-status', 'connected');
@@ -295,7 +295,7 @@ test('Rodar todos lists every statement above the limit together', async () => {
   expect(fake.realQueries.length).toBe(realBefore);
 });
 
-test('Estimar ao digitar: off by default; on, the statement under the cursor is dry-run after a pause, never run, and an error is marked in the editor', async () => {
+test('Estimate while typing: off by default; on, the statement under the cursor is dry-run after a pause, never run, and an error is marked in the editor', async () => {
   const sw = page.getByRole('switch', { name: 'Estimar ao digitar' });
   const estimate = page.getByTestId('estimate');
   const settingsFile = join(userData, 'settings.json');
@@ -408,7 +408,7 @@ test('a double click on a table runs its preview through the same confirmation',
   await ask.getByTestId('bytes-cancel').click();
 });
 
-test('Buscar até 50.000 reads more pages of the same job: no new dry run, no new query', async () => {
+test('Fetch up to 50,000 reads more pages of the same job: no new dry run, no new query', async () => {
   await page.getByTestId('tab').first().click();
   await setSql(page, 'SELECT n FROM vendas.muitos');
   await runCurrent();
@@ -428,7 +428,7 @@ test('the trail has the job id and the bytes of the person lines', async () => {
   const trail = dialog('Trilha');
   await expect(trail.getByTestId('trail-row').first()).toBeVisible();
   await trail.getByTestId('trail-search').fill('muitos');
-  // the "Buscar até 50.000" line of the same query points at the job and carries no bytes: it was billed once
+  // the "Fetch up to 50,000" line of the same query points at the job and carries no bytes: it was billed once
   const row = trail.getByTestId('trail-row').filter({ hasText: '10 MiB faturados' }).first();
   await expect(row).toBeVisible();
   await expect(trail.getByTestId('trail-row').first()).not.toContainText('MiB');

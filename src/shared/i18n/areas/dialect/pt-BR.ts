@@ -41,7 +41,7 @@ export const ptBR = {
     alwaysTrue: (p: { verb: string }) => `${p.verb} com WHERE sempre verdadeiro`,
     executableComment: (p: { syntax: string }) => `Comentário executável (${p.syntax}): o servidor pode rodar outra coisa`,
   },
-  /** Why SQL from an agent may read differently to a person than to the server. Agents get it in pt-BR. */
+  /** Why SQL from an agent may read differently to a person than to the server. Agents get it in English (AGENT_LOCALE, fixed): the `en.ts` text is part of the CLI output. */
   agentCode: {
     nestedComment:
       'Comentário com /* dentro: o MySQL termina o comentário no primeiro */ e a revisão pode mostrar outra coisa. Tire o /* de dentro.',

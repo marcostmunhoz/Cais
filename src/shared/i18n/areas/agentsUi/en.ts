@@ -3,7 +3,11 @@ import type { ptBR } from './pt-BR';
 
 const f = createFormat('en');
 
-/** Area "agentsUi", English. */
+/**
+ * Area "agentsUi", English. Entries under `approval`, `commitStop`, `rejection` and `error` are also sent to agents,
+ * always rendered in AGENT_LOCALE (English, fixed), so their text here is part of the CLI's output: change it only
+ * on purpose.
+ */
 export const en: Shape<typeof ptBR> = {
   verbatim: (p) => p.text,
 

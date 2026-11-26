@@ -61,9 +61,9 @@ export interface RunRequest {
    * the accepted one, is asked about again.
    */
   confirmedBytes?: { sql: string; bytes: number }[];
-  /** "Buscar até 50.000": run one read again with more rows. Main refuses anything that is not a plain read. */
+  /** "Fetch up to 50,000": run one read again with more rows. Main refuses anything that is not a plain read. */
   refetch?: boolean;
-  /** "Aplicar" of the grid edits: main accepts it only for UPDATEs and labels them on the trail. */
+  /** "Apply" of the grid edits: main accepts it only for UPDATEs and labels them on the trail. */
   origin?: 'grid';
 }
 
@@ -150,7 +150,7 @@ export interface CaisApi {
     state(tabId: string): Promise<SessionState>;
     /**
      * BigQuery: asks the server what one statement would read, without running it (dry run). Main refuses it while
-     * "Estimar ao digitar" is off, and reclassifies the text: only a plain read leaves the app. Not on the trail.
+     * "Estimate while typing" is off, and reclassifies the text: only a plain read leaves the app. Not on the trail.
      */
     estimate(tabId: string, sql: string): Promise<EstimateResponse>;
   };

@@ -1,6 +1,6 @@
 # Cais
 
-Cais is a desktop SQL client for MySQL and, read-only, for BigQuery, built with Electron, React and TypeScript. It organizes databases by project and environment (dev, staging, production), reuses the same credential across several environments, and signs in to Google Cloud SQL through IAM with the `gcloud` account, with no proxy running on the side. It is safe by default: production opens read-only, a transaction is a tab mode and not a hidden setting, and AI agents reach the databases through a dedicated CLI (`cais llm`), with the person's approval in the app and without ever receiving a password, token or host.
+Cais is a desktop SQL client for MySQL and, read-only, for BigQuery, built with Electron, React and TypeScript. It organizes databases by project and environment (dev, staging, production), reuses the same credential across several environments, and signs in to Google Cloud SQL through IAM with the `gcloud` account, with no proxy running on the side. It is safe by default: production opens read-only, a transaction is a tab mode and not a hidden setting, and AI agents reach the databases through a dedicated CLI (`cais llm`), with the user's approval in the app and without ever receiving a password, token or host.
 
 ![Tab in Transaction mode, with the Commit and Rollback bar](docs/images/transaction-light.png)
 
@@ -17,9 +17,9 @@ Cais is a desktop SQL client for MySQL and, read-only, for BigQuery, built with 
 - **Connection state in every tab** (disconnected, connecting, connected, running, error), with Connect, Reconnect and Disconnect, and disconnection after 30 minutes of inactivity (never with an open transaction).
 - **Scripts saved per project**, listed inside each environment of the project, with a Save button, Cmd+S and a picker on Cmd+O.
 - **Duplicate environment and project, rename project.**
-- **Trail**: everything that runs in Cais, by the person and by agents, in one file per day, kept for 90 days, with each line chained by HMAC. It never stores result data.
+- **Trail**: everything that runs in Cais, by the user and by agents, in one file per day, kept for 90 days, with each line chained by HMAC. It never stores result data.
 - **Registry protection**: what decides where the credential goes and how much an agent does on its own is signed with a key from the system vault; an environment changed outside Cais opens blocked.
-- **Agent access** through the `cais llm` CLI, with three levels per environment, approval in the app, the person's Commit or Rollback for writes, and writes on production always needing approval.
+- **Agent access** through the `cais llm` CLI, with three levels per environment, approval in the app, the user's Commit or Rollback for writes, and writes on production always needing approval.
 - **Interface in Portuguese (pt-BR) and English**, in the system language, and in a light or dark theme, following the system.
 
 | Grid editing | Agent request |
@@ -137,8 +137,8 @@ AI agents with a shell (Claude Code and others) query and, with your approval, f
 ```bash
 cais llm guide
 cais llm envs
-cais llm query loja/dev --sql "SELECT id, status FROM pedidos LIMIT 10"
-cais llm query loja/dev --write --sql "UPDATE pedidos SET status = 'cancelado' WHERE id = 42" --reason "Order duplicated by the customer" --wait
+cais llm query shop/dev --sql "SELECT id, status FROM orders LIMIT 10"
+cais llm query shop/dev --write --sql "UPDATE orders SET status = 'cancelled' WHERE id = 42" --reason "Order duplicated by the customer" --wait
 ```
 
 On a BigQuery environment the agent only reads (`--write` is refused), and a read estimated above 10 GiB always waits for your approval. Each environment defines what an agent runs without asking (Everything needs approval; Reads allowed, writes need approval; Reads and writes allowed). On production, an agent write always needs approval. The full reference (commands, JSON output, exit codes, limits) is in [docs/agents.md](docs/agents.md).

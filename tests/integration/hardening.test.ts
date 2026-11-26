@@ -287,7 +287,7 @@ describe('dropped connections never hang', () => {
 });
 
 describe('cancel / row cap KILL never hits the next statement', () => {
-  it('40 runs of a capped read followed by two statements see no stray "Query cancelada"', async () => {
+  it('40 runs of a capped read followed by two statements see no stray "Query cancelled"', async () => {
     await manager.open('kill', 'dev');
     for (let i = 0; i < 40; i++) {
       const r = await run('kill', 'SELECT * FROM big2 LIMIT 1002; SELECT SLEEP(0.05); SELECT 3');
@@ -300,7 +300,7 @@ describe('cancel / row cap KILL never hits the next statement', () => {
 });
 
 describe('the mode survives a reconnect', () => {
-  it('a Transação tab that lost its connection reconnects in Transação: nothing is autocommitted', async () => {
+  it('a Transaction tab that lost its connection reconnects in Transaction: nothing is autocommitted', async () => {
     await manager.open('mode', 'dev');
     await manager.setMode('mode', 'transaction');
     await run('mode', 'INSERT INTO tx_t (n) VALUES (201)');

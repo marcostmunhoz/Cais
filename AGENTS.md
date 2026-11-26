@@ -75,7 +75,7 @@ All run from the project root, with Node 20.19 or newer and npm.
 - **Test hooks** only apply with `!app.isPackaged`; the packaged app ignores them:
   - `CAIS_E2E=1`: fake vault (no Keychain), the `userData` from `CAIS_USER_DATA`, and accepts the debugging options (Playwright uses them);
   - `CAIS_SOCKET`: agent socket path (the CLI also reads it);
-  - `CAIS_LOCALE` = `pt-BR` | `en`: e2e pins `pt-BR` by default and uses `en` only in the language test;
+  - `CAIS_LOCALE` = `pt-BR` | `en`: e2e pins `pt-BR` by default and uses `en` in the language test (`i18n.spec.ts`) and in the docs screenshots (`docs-images.spec.ts`);
   - `CAIS_IDLE_MS`: integer of 100 ms or more, shortens the inactivity time before disconnecting;
   - `CAIS_BIGQUERY_URL`: replaces the BigQuery API address with the fake server's;
   - `CAIS_RELEASES_URL`: replaces the GitHub releases API address (version check in the About Cais window) with a fake server's; with `CAIS_E2E=1` and without it, the check answers "Could not check." without going out to the network;

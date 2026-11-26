@@ -149,7 +149,7 @@ export function gridEditability(
   // the key must be exactly the schema's key (a key that moved or shrank would make the WHERE match several
   // rows), and the server's type of each key column must be written the same way as the schema's (a key now
   // VARCHAR compared as a number matches '5', '05' and ' 5'). A key that grew by a column the query did not
-  // select does not show here: Gerar SQL and Aplicar read the schema again first.
+  // select does not show here: Generate SQL and Apply read the schema again first.
   const pkNames = new Set(pk.map((k) => k.name.toLowerCase()));
   const stale =
     columns.some((c: ColumnMeta) => c.source && c.primaryKeyPart === true && !pkNames.has(c.source.column.toLowerCase())) ||
@@ -335,7 +335,7 @@ export interface GridStatement {
 }
 
 /**
- * What Aplicar and Gerar SQL write: the UPDATEs of the edited rows first, then one DELETE per row marked for deletion,
+ * What Apply and Generate SQL write: the UPDATEs of the edited rows first, then one DELETE per row marked for deletion,
  * each in row order. A row marked for deletion gets no UPDATE, whatever edits it holds. The whole key is in each WHERE.
  */
 export function buildGridStatements(
@@ -388,11 +388,11 @@ export function deleteReach(schema: SchemaTree | undefined, database: string, ta
   };
 }
 
-/** The most rows one "Gerar UPDATE da célula" writes: one statement and one selected literal each. */
+/** The most rows one "Generate cell UPDATE" writes: one statement and one selected literal each. */
 export const MAX_CELL_UPDATES = 500;
 
 /**
- * "Gerar UPDATE da célula": one `UPDATE … SET <column> = <value> WHERE <whole key>;` per row, one per line. `value` is
+ * "Generate cell UPDATE": one `UPDATE … SET <column> = <value> WHERE <whole key>;` per row, one per line. `value` is
  * what the grid shows (pending edits applied); the key is the row as the server sent it. `ranges` are the value
  * literals, as offsets into `text`, for the person to type over.
  */
@@ -440,7 +440,7 @@ export function planAppend(
   };
 }
 
-/** The most rows one "Gerar INSERT" writes. */
+/** The most rows one "Generate INSERT" writes. */
 export const MAX_INSERT_ROWS = 1000;
 
 /** A result column that goes into a generated INSERT: where it is in the result and how the table names and types it. */
@@ -530,7 +530,7 @@ export function insertability(
 }
 
 /**
- * "Gerar INSERT": one multi-row `INSERT INTO … (columns) VALUES (…), (…)`, without a terminator. `rows` are the
+ * "Generate INSERT": one multi-row `INSERT INTO … (columns) VALUES (…), (…)`, without a terminator. `rows` are the
  * values as the grid shows them (pending edits applied), with their row index in the result. `withKey: false` leaves
  * the primary key columns out, for the server to fill. Gives the reason instead when a value cannot be written:
  * a binary value the driver cut cannot go back.

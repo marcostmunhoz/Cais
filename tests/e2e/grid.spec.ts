@@ -4,7 +4,7 @@ import mysql from 'mysql2/promise';
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
 import { launch, seedUserData, setSql, setTheme, shortTempDir, shots, testDb } from './helpers';
 
-// Editing in the results grid, Gerar UPDATE and Aplicar.
+// Editing in the results grid, Generate UPDATE and Apply.
 // Own userData; the table grid_items is seeded by global-setup and used only here.
 
 let userData: string;
@@ -50,7 +50,7 @@ async function editCell(r: number, col: string, text: string): Promise<void> {
   await expect(editor()).toHaveCount(0);
 }
 
-test('editing cells marks them and shows the edit bar; Gerar UPDATE puts the statements in the editor', async () => {
+test('editing cells marks them and shows the edit bar; Generate UPDATE puts the statements in the editor', async () => {
   await page.getByTestId('env-dev').click();
   await expect(page.getByTestId('conn-chip')).toHaveAttribute('data-status', 'connected', { timeout: 20_000 });
   await run(READ);
@@ -74,7 +74,7 @@ test('editing cells marks them and shows the edit bar; Gerar UPDATE puts the sta
   await editor().press('Enter');
   await expect(cell(2, 'note')).toHaveText('2B');
 
-  // the cell menu: Definir como NULL and Desfazer edição
+  // the cell menu: Set to NULL and Undo edit
   await cell(0, 'note').click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Definir como NULL' }).click();
   await expect(cell(0, 'note')).toHaveText('NULL');
@@ -112,7 +112,7 @@ test('editing cells marks them and shows the edit bar; Gerar UPDATE puts the sta
   expect(await dbValue('SELECT name FROM grid_items WHERE id = 1')).toBe('Caneta');
 });
 
-test('in Transação, Aplicar runs the UPDATE, shows what the server wrote and waits for Commit', async () => {
+test('in Transaction, Apply runs the UPDATE, shows what the server wrote and waits for Commit', async () => {
   await page.getByRole('radio', { name: 'Transação' }).click();
   await run(READ);
   await expect(cell(0, 'name')).toHaveText('Caneta', { timeout: 20_000 });
@@ -146,11 +146,11 @@ test('in Transação, Aplicar runs the UPDATE, shows what the server wrote and w
   await expect(cell(0, 'name')).toHaveText('Caneta azul');
 });
 
-test('an UPDATE that finds no row is reported, and Transação suggests Rollback', async () => {
+test('an UPDATE that finds no row is reported, and Transaction suggests Rollback', async () => {
   await run(READ);
   await expect(cell(1, 'name')).toHaveText('Caderno', { timeout: 20_000 });
   await editCell(1, 'name', 'Caderno grande');
-  // someone else removes the row before Aplicar
+  // someone else removes the row before Apply
   await db.query('DELETE FROM grid_items WHERE id = 2');
   await page.getByTestId('edit-apply').click();
   const notice = page.getByTestId('grid-edit-notice');
@@ -175,8 +175,8 @@ test('pending edits are kept until the person agrees to discard them', async () 
   await expect(cell(1, 'note')).toHaveText('NULL');
 });
 
-test('in Somente leitura, Aplicar is disabled with the reason and Gerar UPDATE still works', async () => {
-  // the reads in Transação keep a transaction open: end it before changing the mode
+test('in Read-only, Apply is disabled with the reason and Generate UPDATE still works', async () => {
+  // the reads in Transaction keep a transaction open: end it before changing the mode
   await page.getByTestId('txbar').getByRole('button', { name: 'Rollback' }).click();
   await expect(page.getByTestId('txbar')).toHaveCount(0);
   await page.getByRole('radio', { name: 'Somente leitura' }).click();
@@ -244,7 +244,7 @@ test('Auto-commit in production asks before applying, listing the statements', a
   await expect(cell(2, 'note')).toHaveText('HB nº 2');
   expect(await dbValue('SELECT note FROM grid_items WHERE id = 3')).toBe('HB nº 2');
 
-  // the Trilha keeps the UPDATE as typed SQL, labelled as a grid edit
+  // the Trail keeps the UPDATE as typed SQL, labelled as a grid edit
   await page.getByTestId('trail-entry').click();
   const trail = page.getByRole('dialog', { name: 'Trilha' });
   const row = trail.getByTestId('trail-row').filter({ hasText: "SET `note` = 'HB nº 2'" }).first();
@@ -406,7 +406,7 @@ test('copy uses pending edits, and the cell editor keeps its own text selection'
   await expect(bar()).toHaveCount(0);
 });
 
-test('Gerar UPDATE da célula: one cell, a column of cells, with the value literals selected', async () => {
+test('Generate cell UPDATE: one cell, a column of cells, with the value literals selected', async () => {
   await run(READ);
   await expect(cell(0, 'name')).toBeVisible({ timeout: 20_000 });
   await expect(bar()).toHaveCount(0);
@@ -476,7 +476,7 @@ test('no keystroke or click adds a cursor to the editor: Mod-Alt-ArrowDown keeps
   await expect(page.locator('.cm-cursor-secondary')).toHaveCount(0);
 });
 
-test('Gerar UPDATE da célula is not offered where the cell cannot be edited', async () => {
+test('Generate cell UPDATE is not offered where the cell cannot be edited', async () => {
   await run('SELECT id, name, 1 + 1 AS two FROM grid_items ORDER BY id;');
   await expect(cell(0, 'two')).toBeVisible({ timeout: 20_000 });
   await cell(0, 'two').click({ button: 'right' });
@@ -488,7 +488,7 @@ test('Gerar UPDATE da célula is not offered where the cell cannot be edited', a
   await page.keyboard.press('Escape');
 });
 
-test('Gerar INSERT: the selected rows, with and without the primary key, from the cell and the row gutter', async () => {
+test('Generate INSERT: the selected rows, with and without the primary key, from the cell and the row gutter', async () => {
   await db.query(
     `CREATE TABLE grid_ins (
        id INT PRIMARY KEY AUTO_INCREMENT, name VARCHAR(30) NOT NULL, note VARCHAR(50) NULL,
@@ -568,7 +568,7 @@ test('Gerar INSERT: the selected rows, with and without the primary key, from th
   await db.query('DROP TABLE grid_ins');
 });
 
-test('Gerar INSERT: a table without a primary key only has the plain variant, and a read that is not one table has none', async () => {
+test('Generate INSERT: a table without a primary key only has the plain variant, and a read that is not one table has none', async () => {
   await db.query('CREATE TABLE grid_nopk (a INT, b VARCHAR(10))');
   await db.query("INSERT INTO grid_nopk VALUES (1, 'x'), (2, NULL)");
   const text = async () => (await editorText()).replace(/ /g, ' ');
@@ -600,7 +600,7 @@ test('Gerar INSERT: a table without a primary key only has the plain variant, an
   await db.query('DROP TABLE grid_nopk');
 });
 
-test('Excluir linha: mark from the cell menu, the row gutter and the Delete key; a marked row keeps its edits and cannot be edited', async () => {
+test('Delete row: mark from the cell menu, the row gutter and the Delete key; a marked row keeps its edits and cannot be edited', async () => {
   await db.query('CREATE TABLE grid_del (id INT PRIMARY KEY, v VARCHAR(20) NOT NULL)');
   await db.query("INSERT INTO grid_del VALUES (1, 'a'), (2, 'b'), (3, 'c'), (4, 'd'), (5, 'e')");
   // a table that cascades from it, there from the start so the environment tree knows the foreign key
@@ -650,7 +650,7 @@ test('Excluir linha: mark from the cell menu, the row gutter and the Delete key;
   await page.screenshot({ path: join(shots, 'grid-delete-dark.png') });
   await setTheme(app, page, 'light');
 
-  // Desfazer exclusão brings the edit back
+  // Undo delete brings the edit back
   await cell(1, 'v').click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Desfazer exclusão' }).click();
   await expect(row(1)).not.toHaveAttribute('data-deleted', 'true');
@@ -670,7 +670,7 @@ test('Excluir linha: mark from the cell menu, the row gutter and the Delete key;
   await expect(page.locator('[data-deleted="true"]')).toHaveCount(0);
 });
 
-test('Excluir linha: Delete over column headers marks nothing; Gerar UPDATE da célula skips the marked rows', async () => {
+test('Delete row: Delete over column headers marks nothing; Generate cell UPDATE skips the marked rows', async () => {
   await run('SELECT id, v FROM grid_del ORDER BY id;');
   await expect(cell(4, 'v')).toBeVisible({ timeout: 20_000 });
   await expect(bar()).toHaveCount(0);
@@ -689,7 +689,7 @@ test('Excluir linha: Delete over column headers marks nothing; Gerar UPDATE da c
   await page.getByTestId('edit-discard').click();
   await expect(bar()).toHaveCount(0);
 
-  // a marked row is left out of Gerar UPDATE da célula
+  // a marked row is left out of Generate cell UPDATE
   await cell(1, 'v').click();
   await page.keyboard.press('Delete');
   await expect(page.locator('[data-deleted="true"]')).toHaveCount(1);
@@ -706,7 +706,7 @@ test('Excluir linha: Delete over column headers marks nothing; Gerar UPDATE da c
   await expect(bar()).toHaveCount(0);
 });
 
-test('Excluir linha: Gerar SQL puts the UPDATEs then the DELETEs in the editor, and runs nothing', async () => {
+test('Delete row: Generate SQL puts the UPDATEs then the DELETEs in the editor, and runs nothing', async () => {
   await run('SELECT id, v FROM grid_del ORDER BY id;');
   await expect(cell(4, 'v')).toHaveText('e', { timeout: 20_000 });
   await cell(0, 'v').click();
@@ -726,7 +726,7 @@ test('Excluir linha: Gerar SQL puts the UPDATEs then the DELETEs in the editor, 
   expect(await dbValue('SELECT COUNT(*) FROM grid_del')).toBe(5);
 });
 
-test('Excluir linha: Auto-commit always asks before deleting, then Aplicar deletes and reads the table again', async () => {
+test('Delete row: Auto-commit always asks before deleting, then Apply deletes and reads the table again', async () => {
   await run('SELECT id, v FROM grid_del ORDER BY id;');
   await expect(cell(4, 'v')).toHaveText('e', { timeout: 20_000 });
   await cell(1, 'v').click();
@@ -750,7 +750,7 @@ test('Excluir linha: Auto-commit always asks before deleting, then Aplicar delet
   expect(await dbValue('SELECT COUNT(*) FROM grid_del')).toBe(3);
   expect(await dbValue('SELECT GROUP_CONCAT(id ORDER BY id) FROM grid_del')).toBe('1,3,5');
 
-  // the Trilha labels the DELETE as a grid edit
+  // the Trail labels the DELETE as a grid edit
   await page.getByTestId('trail-entry').click();
   const trail = page.getByRole('dialog', { name: 'Trilha' });
   await trail.getByTestId('trail-row').filter({ hasText: 'DELETE FROM `cais_test`.`grid_del` WHERE `id` = 2' }).first().click();
@@ -759,7 +759,7 @@ test('Excluir linha: Auto-commit always asks before deleting, then Aplicar delet
   await expect(trail).toHaveCount(0);
 });
 
-test('Excluir linha: in Transação nothing is asked and Commit saves; in Somente leitura Aplicar is disabled; a cascade is warned about', async () => {
+test('Delete row: in Transaction nothing is asked and Commit saves; in Read-only Apply is disabled; a cascade is warned about', async () => {
   await db.query('INSERT INTO grid_del_kids VALUES (1, 3)');
   await page.getByTestId('env-dev').click();
   await page.getByRole('radio', { name: 'Transação' }).click();
@@ -782,7 +782,7 @@ test('Excluir linha: in Transação nothing is asked and Commit saves; in Soment
   // the cascade took the child with it
   expect(await dbValue('SELECT COUNT(*) FROM grid_del_kids')).toBe(0);
 
-  // Somente leitura: Aplicar is disabled, Gerar SQL works
+  // Read-only: Apply is disabled, Generate SQL works
   await page.getByRole('radio', { name: 'Somente leitura' }).click();
   await expect(page.getByRole('radio', { name: 'Somente leitura' })).toHaveAttribute('aria-checked', 'true');
   await run('SELECT id, v FROM grid_del ORDER BY id;');
@@ -795,7 +795,7 @@ test('Excluir linha: in Transação nothing is asked and Commit saves; in Soment
   await expect(bar()).toHaveCount(0);
 });
 
-test('Excluir linha: a table that cascades is warned about in the bar and in the confirmation', async () => {
+test('Delete row: a table that cascades is warned about in the bar and in the confirmation', async () => {
   await db.query('INSERT INTO grid_del_kids VALUES (2, 1)');
   await page.getByRole('radio', { name: 'Auto-commit' }).click();
   await expect(page.getByRole('radio', { name: 'Auto-commit' })).toHaveAttribute('aria-checked', 'true');

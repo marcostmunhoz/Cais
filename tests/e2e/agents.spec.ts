@@ -83,7 +83,7 @@ test('access starts off: no socket, the CLI exits 4 and says what to do', async 
   await expect(page.getByTestId('agents-status')).toHaveCount(0);
 });
 
-test('turning access on in the panel opens the socket and shows "Agentes ligado"', async () => {
+test('turning access on in the panel opens the socket and shows "Agents on"', async () => {
   await page.getByTestId('agents-entry').click();
   const panel = modal('Agentes');
   await expect(panel).toContainText('O que um agente roda sem pedir depende do ambiente');
@@ -275,7 +275,7 @@ test('a write with many commands: each listed apart, blank lines and invisible m
   expect(hidden.json).toMatchObject({ code: 'hidden_text' });
 });
 
-test('Recusar sends the reason back with exit 3', async () => {
+test('Reject sends the reason back with exit 3', async () => {
   const run = cli(['llm', 'query', 'api/dev', '--write', '--sql', "DELETE FROM agent_items", '--reason', 'limpar', '--wait']);
   const dialog = modal('Agente pede para escrever');
   await expect(dialog.getByRole('alert')).toContainText('DELETE sem WHERE');
@@ -287,7 +287,7 @@ test('Recusar sends the reason back with exit 3', async () => {
   expect((await dbRows('SELECT COUNT(*) AS n FROM agent_items'))[0]!.n).toBe(3);
 });
 
-test('Recusar while the output is already closed: still exit 3, silently', async () => {
+test('Reject while the output is already closed: still exit 3, silently', async () => {
   const run = cli(['llm', 'query', 'api/dev', '--write', '--sql', "UPDATE agent_items SET owner = 'y' WHERE id = 3", '--reason', 'teste do pipe', '--wait'], {}, { closeStdout: true });
   const dialog = modal('Agente pede para escrever');
   await expect(dialog).toBeVisible();
@@ -308,7 +308,7 @@ test('Rollback in the second decision exits 3 and changes nothing', async () => 
   expect((await dbRows("SELECT owner FROM agent_items WHERE id = 3"))[0]!.owner).toBe('caio@exemplo.com');
 });
 
-test('"o agente pode ver o resultado" unchecked: only counts come back', async () => {
+test('"The agent can see the result" unchecked: only counts come back', async () => {
   const run = cli(['llm', 'query', 'api/pro', '--sql', 'SELECT owner FROM agent_items', '--reason', 'conferir', '--wait']);
   const dialog = modal('Agente pede para ler');
   await dialog.getByLabel('O agente pode ver o resultado').uncheck();
@@ -320,7 +320,7 @@ test('"o agente pode ver o resultado" unchecked: only counts come back', async (
   expect(out.stdout).not.toContain('exemplo.com');
 });
 
-test('Esc leaves the request pending; Revisar in the panel brings it back; "mais N na fila"', async () => {
+test('Esc leaves the request pending; Review in the panel brings it back; "N more in the queue"', async () => {
   const first = await cli(['llm', 'query', 'api/pro', '--sql', 'SELECT 1', '--reason', 'primeiro']);
   const second = await cli(['llm', 'query', 'api/pro', '--sql', 'SELECT 2', '--reason', 'segundo']);
   expect([first.code, first.json.status, second.json.status]).toEqual([0, 'pending_approval', 'pending_approval']);
@@ -359,7 +359,7 @@ test('wait times out with exit 5 and the request stays valid', async () => {
   await modal('Agente pede para ler').getByRole('button', { name: 'Recusar' }).click();
 });
 
-test('agents create scripts (marked "agente") but cannot edit or delete them', async () => {
+test('agents create scripts (marked "agent") but cannot edit or delete them', async () => {
   const saved = await cli(['llm', 'script-save', '--project', 'api', '--name', 'Duplicados por documento', '--sql', 'SELECT national_id, COUNT(*) FROM companies GROUP BY 1', '--database', testDb().database]);
   expect(saved.code).toBe(0);
   expect(saved.json).toMatchObject({ name: 'Duplicados por documento', created_by: 'agent' });
@@ -373,7 +373,7 @@ test('agents create scripts (marked "agente") but cannot edit or delete them', a
   await expect(page.getByTestId('scripts-count-dev')).toHaveText('1');
 });
 
-test('"Leitura e escrita liberadas" in dev: with an alert the write waits for the person; without, it commits by itself; the Trilha panel shows it', async () => {
+test('"Reads and writes allowed" in dev: with an alert the write waits for the person; without, it commits by itself; the Trail panel shows it', async () => {
   await page.getByTestId('env-dev').click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Editar' }).click();
   const registry = page.getByRole('dialog', { name: 'Cadastro' });
@@ -388,7 +388,7 @@ test('"Leitura e escrita liberadas" in dev: with an alert the write waits for th
   await setTheme(app, page, 'dark');
   await page.screenshot({ path: join(shots, 'registry-agent-level-dark.png') });
   await setTheme(app, page, 'light');
-  // production: starts on "Tudo com aprovação", may free reads, never writes
+  // production: starts on "Everything needs approval", may free reads, never writes
   await registry.getByRole('tab', { name: 'Ambientes' }).click();
   await registry.getByRole('button', { name: 'pro', exact: true }).click();
   const proLevel = registry.getByLabel('Acesso de agentes');
@@ -406,7 +406,7 @@ test('"Leitura e escrita liberadas" in dev: with an alert the write waits for th
   const proWrite = await cli(['llm', 'query', 'api/pro', '--write', '--sql', "UPDATE agent_items SET status = 'x' WHERE id = 3", '--reason', 'teste']);
   expect([proWrite.code, proWrite.json.status]).toEqual([0, 'pending_approval']);
   await modal('Agente pede para escrever').getByRole('button', { name: 'Recusar' }).click();
-  // back to "Tudo com aprovação" for the tests that follow
+  // back to "Everything needs approval" for the tests that follow
   await page.getByTestId('env-pro').click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Editar' }).click();
   await registry.getByLabel('Acesso de agentes').selectOption('approve-all');

@@ -59,7 +59,7 @@ export interface SessionDeps {
   trail?: { append(line: PersonTrailLine): void };
   /** Timers for the idle disconnect. Real timers when absent. */
   scheduler?: Scheduler;
-  /** "Estimar ao digitar" is on (settings.json). Off when absent: nothing is estimated without it. */
+  /** "Estimate while typing" is on (settings.json). Off when absent: nothing is estimated without it. */
   estimateEnabled?(): boolean;
   /** How long a tab may stay without activity before it disconnects. Fixed in the product; only tests change it. */
   idleMs?: number;
@@ -74,7 +74,7 @@ interface Entry {
   session?: DbSession;
   /** The environment was edited while a transaction was open: reconnect once it ends. */
   stale?: boolean;
-  /** Cancelar was pressed during this run: no further statement starts. */
+  /** Cancel was pressed during this run: no further statement starts. */
   cancelRequested?: boolean;
   /** The idle-disconnect timer, re-armed on every activity. */
   idleTimer?: unknown;
@@ -438,7 +438,7 @@ export class SessionManager {
   }
 
   /**
-   * The dry run of one statement while it is typed ("Estimar ao digitar", BigQuery): what the server reads it as and
+   * The dry run of one statement while it is typed ("Estimate while typing", BigQuery): what the server reads it as and
    * how many bytes it would read. It never runs anything, so it is not on the trail (no job exists, nothing changes
    * and nothing is billed; a line per pause would bury the lines that matter). What leaves the app is decided here:
    * only while the switch is on, only one statement, only what the engine's classifier lets a read-only session run.
@@ -526,7 +526,7 @@ export class SessionManager {
       throw new CaisError(m().mainSessions.refetchNotRead, 'refetch-not-read');
     }
     if (req.origin === 'grid' && (req.refetch || plan.some(({ c }) => c.kind !== 'write' || (c.verb !== 'UPDATE' && c.verb !== 'DELETE')))) {
-      // the label "Edição na grade" on the trail is only for the UPDATEs and DELETEs the grid generates
+      // the label "Grid edit" on the trail is only for the UPDATEs and DELETEs the grid generates
       throw new CaisError(m().mainSessions.gridNotEdit, 'grid-not-edit');
     }
 
@@ -657,7 +657,7 @@ export class SessionManager {
       for (let i = 0; i < plan.length; i++) {
         const { text, c } = plan[i]!;
         if (entry.cancelRequested) {
-          // Cancelar between statements: the rest never starts
+          // Cancel between statements: the rest never starts
           const cancelled: StatementResult = { index: i, sql: text, kind: c.kind, verb: c.verb, durationMs: 0, error: { message: m().mainMisc.driver.cancelled, code: 'CANCELLED' } };
           results.push(cancelled);
           this.recordResult(entry, cancelled, entry.state.database);

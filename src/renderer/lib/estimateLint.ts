@@ -37,7 +37,7 @@ export function statementToEstimate(dialect: Dialect, state: EditorState): { tex
 }
 
 /**
- * The lint source of "Estimar ao digitar" (exported for tests). A run that is no longer the newest by the time its
+ * The lint source of "Estimate while typing" (exported for tests). A run that is no longer the newest by the time its
  * answer comes back returns the diagnostics already shown instead of its own: @codemirror/lint applies whatever a run
  * returns while the text is unchanged, so a slow older run would otherwise wipe what a newer one just marked.
  */
@@ -75,7 +75,7 @@ export function estimateSource(tabId: string, dialect: Dialect): (view: EditorVi
 }
 
 /**
- * The editor side of "Estimar ao digitar": after a pause the statement under the cursor is dry-run (the answer also
+ * The editor side of "Estimate while typing": after a pause the statement under the cursor is dry-run (the answer also
  * lands in the status bar) and what the server says about the text is a diagnostic at the statement. With the
  * switch off, a tab that is not connected or an engine with no dry run, nothing is asked and nothing is marked.
  */

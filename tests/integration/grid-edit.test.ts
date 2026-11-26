@@ -175,7 +175,7 @@ describe.each([
   });
 });
 
-describe('Gerar UPDATE da célula', () => {
+describe('Generate cell UPDATE', () => {
   it('rewrites every kind of value as it is, and the selected literal can be typed over with an expression', async () => {
     const id = '4611686018427387905';
     await admin.query('DELETE FROM grid_kinds WHERE id = ?', [id]);
@@ -217,7 +217,7 @@ describe('Gerar UPDATE da célula', () => {
   });
 });
 
-describe('Gerar INSERT', () => {
+describe('Generate INSERT', () => {
   /** The INSERT the grid would generate for a read of one table, and what it leaves out. */
   async function generate(s: DbSession, read: string, rows: number[], withKey: boolean): Promise<{ result: StatementResult; target: InsertTarget; sql: string }> {
     const result = await exec(s, read);
@@ -335,7 +335,7 @@ describe('Gerar INSERT', () => {
   });
 });
 
-describe('Aplicar through the SessionManager', () => {
+describe('Apply through the SessionManager', () => {
   const env: Environment = { id: 'e', projectId: 'p', name: 'dev', engine: 'mysql', host: '', port: 0, credentialId: 'c', production: false };
   const lines: PersonTrailLine[] = [];
   let manager: SessionManager;
@@ -354,7 +354,7 @@ describe('Aplicar through the SessionManager', () => {
   });
   afterAll(() => manager.closeAll());
 
-  it('in Transação: found rows count, the trail label, and Rollback undoes it', async () => {
+  it('in Transaction: found rows count, the trail label, and Rollback undoes it', async () => {
     await manager.open('tx', 'e');
     await manager.setMode('tx', 'transaction');
     const sql = "UPDATE `" + fixture().database + "`.`grid_people` SET `name` = 'Ana' WHERE `id` = 1;\nUPDATE `" + fixture().database + "`.`grid_people` SET `name` = 'X' WHERE `id` = 999;";
@@ -368,7 +368,7 @@ describe('Aplicar through the SessionManager', () => {
   });
 });
 
-describe('Excluir linha (DELETE of the grid)', () => {
+describe('Delete row (DELETE of the grid)', () => {
   const env: Environment = { id: 'e', projectId: 'p', name: 'dev', engine: 'mysql', host: '', port: 0, credentialId: 'c', production: false };
   const lines: PersonTrailLine[] = [];
   let manager: SessionManager;
@@ -463,7 +463,7 @@ describe('Excluir linha (DELETE of the grid)', () => {
     await manager.close('fk');
   });
 
-  it('in Somente leitura the main refuses the DELETE and nothing leaves the app', async () => {
+  it('in Read-only the main refuses the DELETE and nothing leaves the app', async () => {
     await manager.open('ro', 'e', { mode: 'read-only' });
     const s = await open();
     const built = await statements(s, [0]);

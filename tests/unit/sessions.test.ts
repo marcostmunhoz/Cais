@@ -472,7 +472,7 @@ describe('SessionManager: connection state', () => {
     expect(events.at(-1)!.error).toBe('Conexão perdida.');
   });
 
-  it('Desconectar keeps the mode and the database, and reconnecting restores them', async () => {
+  it('Disconnect keeps the mode and the database, and reconnecting restores them', async () => {
     await manager.open('t', 'dev');
     await manager.setMode('t', 'transaction');
     await manager.useDatabase('t', 'other');
@@ -487,7 +487,7 @@ describe('SessionManager: connection state', () => {
     expect(sessions[1]!.modes).toEqual(['transaction']);
   });
 
-  it('Desconectar is refused in main with a transaction open or a statement running', async () => {
+  it('Disconnect is refused in main with a transaction open or a statement running', async () => {
     await manager.open('t', 'dev');
     await manager.setMode('t', 'transaction');
     sessions[0]!.txFlag = true;
@@ -513,7 +513,7 @@ describe('SessionManager: connection state', () => {
     await running;
   });
 
-  it('Desconectar on a connection error clears the error', async () => {
+  it('Disconnect on a connection error clears the error', async () => {
     await manager.open('t', 'dev');
     sessions[0]!.triggerFatal({ message: 'gone', fatal: true });
     const off = await manager.disconnect('t');
@@ -610,7 +610,7 @@ describe('SessionManager: idle disconnect', () => {
 });
 
 describe('SessionManager: grid edits', () => {
-  it('labels the UPDATEs of Aplicar on the trail, and the mode still decides', async () => {
+  it('labels the UPDATEs of Apply on the trail, and the mode still decides', async () => {
     const lines: PersonTrailLine[] = [];
     manager = makeManager({ trail: { append: (l) => lines.push(l) } });
     await manager.open('t1', 'dev');
@@ -628,7 +628,7 @@ describe('SessionManager: grid edits', () => {
     expect(sessions[1]!.executed).toHaveLength(0);
   });
 
-  it('labels DELETEs of Aplicar on the trail too, and the mode still decides', async () => {
+  it('labels DELETEs of Apply on the trail too, and the mode still decides', async () => {
     const lines: PersonTrailLine[] = [];
     manager = makeManager({ trail: { append: (l) => lines.push(l) } });
     await manager.open('t1', 'dev');
@@ -741,7 +741,7 @@ describe('SessionManager: races with a connect or a statement in flight', () => 
     expect((await manager.setMode('t', 'autocommit')).needsConfirmation).toEqual({ reason: 'production-autocommit' });
   });
 
-  it('Desconectar or the idle timer during a USE ends it cleanly, not with a TypeError', async () => {
+  it('Disconnect or the idle timer during a USE ends it cleanly, not with a TypeError', async () => {
     await manager.open('t', 'dev');
     const g = gate();
     const s = sessions[0]!;

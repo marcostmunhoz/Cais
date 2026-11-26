@@ -14,13 +14,13 @@ export interface RunFlags {
 
 export interface ConnectionView {
   status: ConnectionStatus;
-  /** "Conectado", "Desconectado por inatividade"... in the app locale. */
+  /** "Connected", "Disconnected after inactivity"... in the app locale. */
   label: string;
   /** The error message (error), or the server version (connected). */
   detail?: string;
   /** Disconnected by the idle timer. */
   idle: boolean;
-  /** The button next to the state: Conectar, Reconectar, Desconectar, or none while connecting. */
+  /** The button next to the state: Connect, Reconnect, Disconnect, or none while connecting. */
   action: 'connect' | 'reconnect' | 'disconnect' | null;
   /** Why Desconectar is disabled (transaction open or statement running). Main refuses it too. */
   disconnectBlocked?: string;
@@ -63,7 +63,7 @@ export function connectionView(session: SessionState | undefined, run?: RunFlags
   return { status: 'disconnected', label: idle ? t.connection.idle : t.connection.disconnected, idle, action: 'connect' };
 }
 
-/** "Erro de conexão · <message>": the tooltip of the tab's status dot. */
+/** "Connection error · <message>": the tooltip of the tab's status dot. */
 export function connectionTitle(view: ConnectionView): string {
   return view.detail ? `${view.label} · ${view.detail}` : view.label;
 }

@@ -23,7 +23,7 @@ export interface Candidate {
 export interface CandidateWords {
   table: string;
   view: string;
-  /** "banco" or "dataset", what the engine calls a database. */
+  /** "database" or "dataset", what the engine calls a database. */
   database: string;
 }
 

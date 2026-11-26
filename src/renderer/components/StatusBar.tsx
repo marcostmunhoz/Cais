@@ -87,7 +87,7 @@ export function StatusBar({ tabId, platform }: { tabId: string; platform: string
   );
 }
 
-/** "Estimar ao digitar": what the statement under the cursor would read, or what the dry run said about it. */
+/** "Estimate while typing": what the statement under the cursor would read, or what the dry run said about it. */
 function EstimateItem({ estimate, limit }: { estimate: EstimateView; limit: number | undefined }) {
   const t = m().statusBar;
   const response = estimate.response;

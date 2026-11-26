@@ -32,7 +32,7 @@ import { useStore } from '../lib/store';
 import { syntaxCheckFor } from '../lib/syntax';
 import { syntaxLint } from '../lib/syntax/lint';
 
-// no keystroke adds a cursor: only Gerar UPDATE da célula makes several ranges (addCursorAbove/Below are Mod-Alt-ArrowUp/Down)
+// no keystroke adds a cursor: only Generate cell UPDATE makes several ranges (addCursorAbove/Below are Mod-Alt-ArrowUp/Down)
 const editorKeymap = defaultKeymap.filter((b) => b.run !== addCursorAbove && b.run !== addCursorBelow);
 
 export const highlightStyle = HighlightStyle.define([
@@ -130,9 +130,9 @@ export function Editor({ tabId, environmentId, initialSql, engine, schema, datab
           addSpecialChars: /[\u00ad\u061c\u115f\u1160\u180e\u200b-\u200f\u2028-\u202e\u2060-\u206f\u2800\u3164\ufe00-\ufe0f\ufeff\uffa0\r\u000b\u000c\u0085]/,
         }),
         history(),
-        // several ranges: Gerar UPDATE da célula selects one value per row, and typing replaces them all
+        // several ranges: Generate cell UPDATE selects one value per row, and typing replaces them all
         EditorState.allowMultipleSelections.of(true),
-        // only Gerar UPDATE da célula makes several ranges: a click never adds one
+        // only Generate cell UPDATE makes several ranges: a click never adds one
         EditorView.clickAddsSelectionRange.of(() => false),
         drawSelection(),
         bracketMatching(),
@@ -164,7 +164,7 @@ export function Editor({ tabId, environmentId, initialSql, engine, schema, datab
       getSelection: () => {
         const { main, ranges } = view.state.selection;
         if (ranges.length > 1) {
-          // several ranges: only the shape Gerar UPDATE da célula makes runs as a block; anything else runs the main range
+          // several ranges: only the shape Generate cell UPDATE makes runs as a block; anything else runs the main range
           const doc = view.state.doc.toString();
           const block = multiSelectionBlock(getDialect(current.current.engine).splitStatements(doc), ranges, doc);
           if (block) return { cursor: main.head, selection: block };
@@ -207,7 +207,7 @@ export function Editor({ tabId, environmentId, initialSql, engine, schema, datab
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabId]);
 
-  // "Estimar ao digitar" turned on, or the tab connected: estimate now, without waiting for a keystroke (off clears the marks)
+  // "Estimate while typing" turned on, or the tab connected: estimate now, without waiting for a keystroke (off clears the marks)
   const estimateOn = useStore((st) => st.estimateAsYouType);
   // idle and running are both "connected": a run flips the status to running and back, and that is not a new connection
   const connected = useStore((st) => {

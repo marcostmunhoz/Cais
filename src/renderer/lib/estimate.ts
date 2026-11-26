@@ -1,4 +1,4 @@
-// "Estimar ao digitar": the dry run of the statement under the cursor, for engines that answer one (BigQuery).
+// "Estimate while typing": the dry run of the statement under the cursor, for engines that answer one (BigQuery).
 // The renderer decides when to ask (after a pause, see estimateLint.ts) and remembers answers; main decides what may
 // leave the app, so a text it refuses never reaches the server whatever this file asks.
 

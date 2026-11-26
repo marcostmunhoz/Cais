@@ -52,7 +52,7 @@ export class MysqlSession implements DbSession {
   private executing = false;
   /**
    * Agent sessions: utf8mb4, the pinned sql_mode and the mode's autocommit are re-asserted before every
-   * statement in every mode. The person's read-only tabs get the same; their Auto-commit and Transação tabs keep
+   * statement in every mode. The person's read-only tabs get the same; their Auto-commit and Transaction tabs keep
    * their own session (sql_mode, SHOW WARNINGS, ROW_COUNT()).
    */
   private strict = false;
@@ -337,7 +337,7 @@ export class MysqlSession implements DbSession {
         if (status !== undefined) {
           result.inTransaction = (status & SERVER_STATUS_IN_TRANS) !== 0;
           if ((status & SERVER_STATUS_AUTOCOMMIT) !== 0) {
-            // Transação never turns into auto-commit: put it back and say what happened
+            // Transaction never turns into auto-commit: put it back and say what happened
             await this.call('SET SESSION autocommit = 0').catch(() => undefined);
             result.notice = m().mainMisc.driver.autocommitTurnedOn;
           }

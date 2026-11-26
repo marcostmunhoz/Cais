@@ -275,7 +275,7 @@ describe('big reads', () => {
     expect(fake.realQueries[0]!.body.maximumBytesBilled).toBe(MAX);
   });
 
-  it('above 10 GiB it waits, even in Leitura liberada, and the reason has the estimate', async () => {
+  it('above 10 GiB it waits, even in "Reads allowed, writes need approval", and the reason has the estimate', async () => {
     fake.bytesFor = () => 12 * GIB + 1;
     await expect(q({ env: 'api/bq', sql: 'SELECT id FROM orders' })).rejects.toMatchObject({ code: 'reason_required' });
     const res = await q({ env: 'api/bq', sql: 'SELECT id FROM orders', reason: 'preciso do total' });

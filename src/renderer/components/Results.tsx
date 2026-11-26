@@ -491,7 +491,7 @@ export function Results({ tabId }: { tabId: string }) {
     () => (active && columns ? gridEditability(active, schemaTree, getDialect(engine).valueKind, { gridEdit: capabilitiesOf(engine).gridEdit, name: getDialect(engine).displayName }) : null),
     [active, columns, schemaTree, engine],
   );
-  // Gerar INSERT: the same table, but no key is needed
+  // Generate INSERT: the same table, but no key is needed
   const insertTarget = useMemo(
     () =>
       active && columns
@@ -599,7 +599,7 @@ export function Results({ tabId }: { tabId: string }) {
     if (edits?.[cell.r] && Object.hasOwn(edits[cell.r]!, cell.c)) {
       out.push({ label: m().grid.menu.undo, onSelect: () => setCellEdit(tabId, active, cell.r, cell.c, undefined) });
     }
-    // Gerar UPDATE da célula: one UPDATE per selected cell when the selection is one column wide; not offered over a
+    // Generate cell UPDATE: one UPDATE per selected cell when the selection is one column wide; not offered over a
     // wider selection (which cells would it mean?)
     if (!sel || sel.c1 === sel.c2) {
       const inColumn = !!sel && sel.c1 === cell.c && cell.r >= sel.r1 && cell.r <= sel.r2;
@@ -659,7 +659,7 @@ export function Results({ tabId }: { tabId: string }) {
           { label: m().results.copyMarkdown, onSelect: () => write(toMarkdown(columns, shownRows, sel)) },
         ]
       : [];
-  // Gerar INSERT (cell and row gutter menus): the rows of the selection, with or without the primary key
+  // Generate INSERT (cell and row gutter menus): the rows of the selection, with or without the primary key
   const insertEntries = (): MenuEntry[] => {
     if (!active || !insertTarget?.insertable || !sel) return [];
     const picked = Array.from({ length: sel.r2 - sel.r1 + 1 }, (_, i) => sel.r1 + i);
@@ -686,7 +686,7 @@ export function Results({ tabId }: { tabId: string }) {
   // The rows a deletion acts on: those of the selection (the menu selects the clicked row first)
   const selectedRows = (cell?: Cell): number[] =>
     sel ? Array.from({ length: sel.r2 - sel.r1 + 1 }, (_, i) => sel.r1 + i) : cell ? [cell.r] : [];
-  // Excluir linha / Desfazer exclusão: any editable result (the same gate as editing), also on the row gutter
+  // Delete row / Undo delete: any editable result (the same gate as editing), also on the row gutter
   const deleteEntries = (cell?: Cell): MenuEntry[] => {
     if (!active || !target?.editable || !cell || run?.running) return [];
     const picked = selectedRows(cell);

@@ -151,7 +151,7 @@ function Alerts({ warnings }: { warnings: string[] }) {
   );
 }
 
-/** One request at a time: Recusar has the focus, Enter never approves, Esc leaves the request pending. */
+/** One request at a time: Reject has the focus, Enter never approves, Esc leaves the request pending. */
 function ApprovalModal({ request, queued }: { request: AgentRequestView; queued: number }) {
   const write = request.mode === 'write';
   const [share, setShare] = useState(true);

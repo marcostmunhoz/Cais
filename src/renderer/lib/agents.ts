@@ -11,7 +11,7 @@ export function otherDialogOpen(s: AppState): boolean {
 
 /**
  * The modal to show now, one request at a time: an open agent transaction first (it has a clock),
- * then the oldest pending request. A request the person closed with Esc waits for "Revisar".
+ * then the oldest pending request. A request the person closed with Esc waits for "Review".
  */
 export function currentAgentModal(s: AppState): AgentModal | null {
   if (otherDialogOpen(s)) return null;

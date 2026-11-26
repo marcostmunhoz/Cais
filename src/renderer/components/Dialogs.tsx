@@ -430,7 +430,7 @@ export function ProjectNameDialog() {
   );
 }
 
-/** Cmd+O: search by "projeto · nome". */
+/** Cmd+O: search by "project · name". */
 export function ScriptPicker() {
   const open = useStore((s) => s.scriptPicker);
   const scripts = useStore((s) => s.scripts);

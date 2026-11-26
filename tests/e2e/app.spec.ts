@@ -135,7 +135,7 @@ test('dev: query shows rows in the grid; screenshots light and dark', async () =
   await copyShortcut();
   await expect.poll(clipboardText).toBe('Café Aurora Ltda');
 
-  // Copiar valor, from the Copy button and from the cell's context menu
+  // Copy value, from the Copy button and from the cell's context menu
   await page.getByRole('button', { name: /Copiar/ }).click();
   await page.getByRole('menuitem', { name: 'Copiar valor' }).click();
   await expect.poll(clipboardText).toBe('Café Aurora Ltda');
@@ -151,7 +151,7 @@ test('dev: query shows rows in the grid; screenshots light and dark', async () =
   await page.getByRole('menuitem', { name: 'Copiar como tabela Markdown' }).click();
   await expect.poll(clipboardText).toMatch(/^\| id \|\n\| ---: \|\n\| \d+ \|$/);
 
-  // A range keeps the TSV with header on Cmd/Ctrl+C and has no "Copiar valor"
+  // A range keeps the TSV with header on Cmd/Ctrl+C and has no "Copy value"
   await page.locator('[role=gridcell][data-r="0"][data-c="0"]').click();
   await page.locator('[role=gridcell][data-r="1"][data-c="1"]').click({ modifiers: ['Shift'] });
   await copyShortcut();
@@ -236,7 +236,7 @@ test('transaction mode: INSERT then Rollback removes the row; Commit keeps it', 
   await expect(page.locator('[role=gridcell]', { hasText: 'Kim' })).toBeVisible();
 });
 
-test('the Trilha has what the person ran: the refused INSERT in production, the transaction, Rollback and Commit', async () => {
+test('the Trail has what the person ran: the refused INSERT in production, the transaction, Rollback and Commit', async () => {
   await page.getByTestId('trail-entry').click();
   const trail = page.getByRole('dialog', { name: 'Trilha' });
   await expect(trail.getByTestId('trail-row').first()).toBeVisible();

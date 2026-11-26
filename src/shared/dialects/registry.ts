@@ -76,7 +76,7 @@ export function statementAtCursor(
 }
 
 /**
- * The block a multi-range selection runs as, or null when it is not one. Only the selection "Gerar UPDATE da célula"
+ * The block a multi-range selection runs as, or null when it is not one. Only the selection "Generate cell UPDATE"
  * leaves qualifies: every range sits inside a different statement, those statements are contiguous, and each statement of
  * the span holds exactly one range. Anything else runs the main range alone.
  */

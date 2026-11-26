@@ -6,7 +6,7 @@ import type { EstimateResponse } from '@shared/ipc';
 import type { BigqueryEnvironment, MysqlEnvironment } from '@shared/model';
 import type { SessionState } from '@shared/results';
 
-// "Estimar ao digitar" in the renderer: when a question is asked, what is remembered and what a late answer does.
+// "Estimate while typing" in the renderer: when a question is asked, what is remembered and what a late answer does.
 // The renderer modules are loaded by variable paths (they need `window`, and the node typecheck has no DOM types).
 
 interface EstimateView {

@@ -81,7 +81,7 @@ describe('ScriptStore', () => {
     expect(scripts.get(made.id)!.sql).toBe('a');
   });
 
-  it('renames (clearing the agent mark), duplicates with a free "(cópia N)" name and deletes', async () => {
+  it('renames (clearing the agent mark), duplicates with a free "(copy N)" name and deletes', async () => {
     const { scripts, api } = await seeded();
     const a = await scripts.save({ projectId: api.id, name: 'Faturas', sql: 'q' }, 'agent');
     const renamed = await scripts.rename(a.id, 'Faturas abertas');

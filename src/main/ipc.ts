@@ -192,7 +192,7 @@ export function registerIpc(services: Services): void {
 
   handle(CHANNELS.catalogGet, none, () => store.snapshot());
   handle(CHANNELS.catalogSaveProject, t(projectInput), (input) => store.saveProject({ name: (input as z.infer<typeof projectInput>).name }));
-  // a rename changes the agents' "projeto/ambiente" slug of every environment of the project: each one is recorded
+  // a rename changes the agents' "project/environment" slug of every environment of the project: each one is recorded
   // and its grants and pending requests end
   handle(CHANNELS.catalogRenameProject, t(id, name), async (projectId, newName) => {
     const { project, previousName } = await store.renameProject(projectId as string, newName as string);

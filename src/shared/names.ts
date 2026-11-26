@@ -20,7 +20,7 @@ export function sameName(a: string, b: string): boolean {
 }
 
 /**
- * Whether `next` may be stored as a project or environment name: a "/" makes the agents' `projeto/ambiente`
+ * Whether `next` may be stored as a project or environment name: a "/" makes the agents' `project/environment`
  * address ambiguous, so it is refused in a new or changed name; an old name with "/" keeps working while
  * nobody changes it (`current` is the stored name, when there is one).
  */

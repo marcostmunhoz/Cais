@@ -64,7 +64,7 @@ function integer(flag: string, raw: string, min: number, max: number): number {
   return n;
 }
 
-/** `argv` is what comes after the script name: `["llm", "query", "loja/dev", "--sql", "SELECT 1"]`. */
+/** `argv` is what comes after the script name: `["llm", "query", "shop/dev", "--sql", "SELECT 1"]`. */
 export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = {}): Parsed {
   if (argv[0] !== 'llm') throw new UsageError('Usage: cais llm <command>. Run "cais llm guide" to see the flow.');
   const sub = argv[1];
