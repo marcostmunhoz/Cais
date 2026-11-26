@@ -138,9 +138,9 @@ describe('approval of reads in production', () => {
   it('reject records the reason and the agent sees status rejected with it', async () => {
     const { broker, executor } = makeBroker();
     const { request_id } = (await broker.query({ env: 'api/pro', sql: 'SELECT 1', reason: 'r' })) as any;
-    broker.reject(request_id, 'Peça só as colunas necessárias');
+    broker.reject(request_id, 'Ask only for the columns you need');
     const res = (await broker.status({ id: request_id })) as any;
-    expect(res).toMatchObject({ status: 'rejected', rejection_reason: 'Peça só as colunas necessárias', decided_by: 'person' });
+    expect(res).toMatchObject({ status: 'rejected', rejection_reason: 'Ask only for the columns you need', decided_by: 'person' });
     expect(executor.reads).toHaveLength(0);
   });
 
@@ -311,7 +311,7 @@ describe('writes', () => {
   it('a connection failure ends as failed without leaking anything', async () => {
     const h = makeBroker();
     h.executor.runWrite = async () => {
-      throw new AgentError('Não foi possível conectar ao ambiente. Sem resposta de <servidor>.', 'connection_failed');
+      throw new AgentError('Could not connect to the environment. No response from <server>.', 'connection_failed');
     };
     const { broker, id } = await pendingWrite(h);
     broker.approve(id, { shareResult: true });

@@ -45,7 +45,7 @@ export function seedUserData(
     env(ids.pro, 'pro', true),
     ...(extra.environments ?? []).map((e) => env(e.id, e.name, !!e.production, e.port)),
   ];
-  const credential = { id: ids.credential, name: 'usuário de teste', kind: 'password', username: db.user };
+  const credential = { id: ids.credential, name: 'test user', kind: 'password', username: db.user };
   const secret = new FakeVault().encrypt(db.password);
   writeFileSync(
     join(dir, 'catalog.json'),

@@ -101,7 +101,7 @@ test('a Google IAM credential and a BigQuery environment are registered in the f
   // only Google IAM credentials are offered, the password one is not
   const credential = form.getByLabel('Credencial');
   await expect(credential.locator('option', { hasText: 'conta google' })).toHaveCount(1);
-  await expect(credential.locator('option', { hasText: 'usuário de teste' })).toHaveCount(0);
+  await expect(credential.locator('option', { hasText: 'test user' })).toHaveCount(0);
 
   // validation: project id and a whole number of GiB from 1
   await form.getByLabel('Projeto do Google Cloud').fill('Projeto Errado');

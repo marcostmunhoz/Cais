@@ -2,7 +2,7 @@ import { join } from 'node:path';
 
 export const PROTOCOL = 1;
 
-export const UNAVAILABLE_MESSAGE = 'Ask the person to open Cais and turn on agent access.';
+export const UNAVAILABLE_MESSAGE = 'Ask the user to open Cais and turn on agent access.';
 
 export const PROTOCOL_MISMATCH_MESSAGE = 'This version of the cais command does not talk to this Cais. Update the app and reinstall the command.';
 

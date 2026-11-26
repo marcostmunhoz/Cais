@@ -76,7 +76,7 @@ test('access starts off: no socket, the CLI exits 4 and says what to do', async 
   expect(existsSync(join(userData, 'agent-endpoint.json'))).toBe(false);
   const out = await cli(['llm', 'envs']);
   expect(out.code).toBe(4);
-  expect(out.json.error).toBe('Ask the person to open Cais and turn on agent access.');
+  expect(out.json.error).toBe('Ask the user to open Cais and turn on agent access.');
   // the output closed early: still exit 4, and no stack trace
   const closed = await cli(['llm', 'envs'], {}, { closeStdout: true });
   expect([closed.code, closed.stderr]).toEqual([4, '']);
@@ -252,7 +252,7 @@ test('a write with many commands: each listed apart, blank lines and invisible m
     "UPDATE agent_items SET owner = 'z' WHERE id = 2;",
     'DELETE FROM agent_items WHERE id = 3;',
   ].join('\n');
-  const run = cli(['llm', 'query', 'api/dev', '--write', '--sql', sql, '--reason', 'Vários comandos de uma vez', '--wait']);
+  const run = cli(['llm', 'query', 'api/dev', '--write', '--sql', sql, '--reason', 'Several commands at once', '--wait']);
   const dialog = modal('Agente pede para escrever');
   await expect(dialog).toBeVisible();
   await expect(dialog.getByTestId('stmt')).toHaveCount(7);
@@ -421,7 +421,7 @@ test('"Reads and writes allowed" in dev: with an alert the write waits for the p
   await registry.getByRole('button', { name: 'Fechar' }).click();
 
   // an alert (no WHERE): the write waits, saying why
-  const waiting = cli(['llm', 'query', 'api/dev', '--write', '--sql', "UPDATE agent_items SET status = 'auto'", '--reason', 'teste do nível', '--wait', '--client', 'Claude Code']);
+  const waiting = cli(['llm', 'query', 'api/dev', '--write', '--sql', "UPDATE agent_items SET status = 'auto'", '--reason', 'level test', '--wait', '--client', 'Claude Code']);
   const dialog = modal('Agente pede para escrever');
   await expect(dialog).toBeVisible();
   await expect(dialog.getByTestId('agent-approval-reason')).toContainText('libera escrita, mas o pedido tem alerta');
@@ -429,11 +429,11 @@ test('"Reads and writes allowed" in dev: with an alert the write waits for the p
   expect((await waiting).code).toBe(3);
 
   // the test account has no PROCESS: an UPDATE cannot rule out a hidden cascading foreign key and waits
-  const upd = await cli(['llm', 'query', 'api/dev', '--write', '--sql', "UPDATE agent_items SET status = 'auto' WHERE id = 3", '--reason', 'teste do nível', '--client', 'Claude Code']);
+  const upd = await cli(['llm', 'query', 'api/dev', '--write', '--sql', "UPDATE agent_items SET status = 'auto' WHERE id = 3", '--reason', 'level test', '--client', 'Claude Code']);
   expect(upd.json.approval_reason).toContain('cannot see every foreign key');
   await modal('Agente pede para escrever').getByRole('button', { name: 'Recusar' }).click();
   // a plain INSERT never cascades: it commits by itself
-  const out = await cli(['llm', 'query', 'api/dev', '--write', '--sql', "INSERT INTO agent_items VALUES (4, 'auto', 'teste')", '--reason', 'teste do nível', '--client', 'Claude Code']);
+  const out = await cli(['llm', 'query', 'api/dev', '--write', '--sql', "INSERT INTO agent_items VALUES (4, 'auto', 'teste')", '--reason', 'level test', '--client', 'Claude Code']);
   expect(out.json.approval_reason).toBeUndefined();
   expect(out.code).toBe(0);
   expect(out.json).toMatchObject({ status: 'committed', auto_commit: true, decided_by: 'policy' });
@@ -460,7 +460,7 @@ test('"Reads and writes allowed" in dev: with an alert the write waits for the p
   await expect(personRows.nth(1)).toContainText('acesso de agentes: Tudo com aprovação → Leitura liberada, escrita com aprovação');
   await expect(personRows.nth(2)).toContainText('acesso de agentes: Leitura liberada, escrita com aprovação → Leitura e escrita liberadas');
   await trail.getByTestId('trail-actor').selectOption('');
-  await trail.getByTestId('trail-search').fill('teste do nível');
+  await trail.getByTestId('trail-search').fill('level test');
   await expect(trail.getByTestId('trail-row')).toHaveCount(3); // the two refused ones and the automatic one
   await trail.getByRole('button', { name: 'Fechar' }).click();
 });

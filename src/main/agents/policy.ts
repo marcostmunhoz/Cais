@@ -64,12 +64,12 @@ export const MESSAGES = {
   notAllowed: 'This statement is not allowed for agents.',
   reason: 'This request needs approval. Give the reason with --reason.',
   reasonWrite: 'A write always needs a reason, which goes in the Trail. Give it with --reason.',
-  queue: `There are ${MAX_PENDING} requests waiting for approval. Wait for the person to decide.`,
-  executableComment: 'Agents do not use executable comments (/*! … */ or /*M! … */): the server may run something other than what the person sees.',
+  queue: `There are ${MAX_PENDING} requests waiting for approval. Wait for the user to decide.`,
+  executableComment: 'Agents do not use executable comments (/*! … */ or /*M! … */): the server may run something other than what the user sees.',
   functionNotAllowed: (name: string): string =>
     `The function ${name} is not allowed for agents (named lock, wait, server file or server state).`,
   legacyDirective:
-    'Agents do not use the #legacySQL and #standardSQL directives: they change the language the server reads the statement in, and the person reviews something else.',
+    'Agents do not use the #legacySQL and #standardSQL directives: they change the language the server reads the statement in, and the user reviews something else.',
   externalQuery: 'The EXTERNAL_QUERY function is not allowed for agents: it runs a query on another database.',
   serverNotQuery: (kind?: string): string =>
     kind && /^[A-Z_]{1,40}$/.test(kind)

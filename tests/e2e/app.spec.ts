@@ -66,7 +66,7 @@ test('empty state, then register credential, project and environments', async ()
 
   const dialog = page.getByRole('dialog', { name: 'Cadastro' });
   // credential
-  await dialog.getByLabel('Nome', { exact: true }).fill('usuário de teste');
+  await dialog.getByLabel('Nome', { exact: true }).fill('test user');
   await dialog.getByLabel('Usuário', { exact: true }).fill(db.user);
   await dialog.getByLabel('Senha').fill(db.password);
   await dialog.getByRole('button', { name: 'Salvar' }).click();

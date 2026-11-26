@@ -45,6 +45,29 @@ describe('installSkill', () => {
     expect(readdirSync(join(skillsDir, 'cais'))).toEqual(['SKILL.md']);
   });
 
+  it.each(['EPERM', 'ENOTSUP', 'ENOSYS'])('installs by an exclusive create when the filesystem has no hard links (%s)', (code) => {
+    const link = () => {
+      throw Object.assign(new Error('no links'), { code });
+    };
+    const out = installSkill({ source, skillsDir, link });
+    expect(out).toMatchObject({ ok: true, status: 'installed', path: target() });
+    expect(readFileSync(target(), 'utf8')).toBe(skill('v2'));
+    expect(statSync(target()).mode & 0o777).toBe(0o644);
+    expect(readdirSync(join(skillsDir, 'cais'))).toEqual(['SKILL.md']);
+  });
+
+  it('without hard links, a SKILL.md that appears in the meantime is not overwritten', () => {
+    const link = () => {
+      writeFileSync(target(), 'someone else');
+      throw Object.assign(new Error('no links'), { code: 'EPERM' });
+    };
+    mkdirSync(join(skillsDir, 'cais'), { recursive: true });
+    const out = installSkill({ source, skillsDir, link });
+    expect(out).toMatchObject({ ok: false, status: 'refused' });
+    expect(readFileSync(target(), 'utf8')).toBe('someone else');
+    expect(readdirSync(join(skillsDir, 'cais'))).toEqual(['SKILL.md']);
+  });
+
   it('updates an older skill of ours', () => {
     mkdirSync(join(skillsDir, 'cais'), { recursive: true });
     writeFileSync(target(), skill('v1'));

@@ -55,7 +55,8 @@ function lstatOrNull(path: string): ReturnType<typeof lstatSync> | null {
  * and never touches anything else in the folder. All paths are parameters so tests use a temp directory
  * (never the real `~/.claude`).
  */
-export function installSkill(opts: { source: string; skillsDir: string }): SkillInstallResult {
+export function installSkill(opts: { source: string; skillsDir: string; /** Test hook: replaces `fs.linkSync`. */ link?: (existing: string, created: string) => void }): SkillInstallResult {
+  const link = opts.link ?? linkSync;
   const t = m().mainMisc.skillInstall;
   const caisDir = join(opts.skillsDir, 'cais');
   const file = join(caisDir, 'SKILL.md');
@@ -100,14 +101,35 @@ export function installSkill(opts: { source: string; skillsDir: string }): Skill
     if (status === 'installed') {
       // a fresh install must never replace a SKILL.md that appeared after the check: link() fails instead of clobbering
       try {
-        linkSync(tmp, file);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+        link(tmp, file);
         unlinkSync(tmp);
-        tmp = undefined;
-        return refuse(t.notOurFile({ path: file }));
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === 'EPERM' || code === 'ENOTSUP' || code === 'ENOSYS' || code === 'EOPNOTSUPP') {
+          // no hard links here (exFAT/FAT, some SMB/9p shares): create SKILL.md itself, still exclusively
+          try {
+            const out = openSync(file, 'wx', 0o644);
+            try {
+              writeFileSync(out, content);
+              fsyncSync(out);
+            } finally {
+              closeSync(out);
+            }
+          } catch (inner) {
+            if ((inner as NodeJS.ErrnoException).code !== 'EEXIST') throw inner;
+            unlinkSync(tmp);
+            tmp = undefined;
+            return refuse(t.notOurFile({ path: file }));
+          }
+          unlinkSync(tmp);
+        } else if (code === 'EEXIST') {
+          unlinkSync(tmp);
+          tmp = undefined;
+          return refuse(t.notOurFile({ path: file }));
+        } else {
+          throw error;
+        }
       }
-      unlinkSync(tmp);
     } else {
       renameSync(tmp, file);
     }
