@@ -11,8 +11,11 @@ import { errorCode, errorMessage } from './errors';
 import { MAX_CATALOG_NAME, sameName } from '@shared/names';
 import { getState, setState, type GridEdits, type ProjectNameRequest, type RunView, type ScriptNameRequest } from './store';
 import {
+  buildCellUpdates,
   buildGridUpdates,
+  cellLock,
   gridEditability,
+  MAX_CELL_UPDATES,
   pendingCount,
   remapCells,
   sameCell,
@@ -31,8 +34,11 @@ const api = (): Window['cais'] => window.cais;
 export interface EditorHandle {
   getSelection(): { cursor: number; selection?: { from: number; to: number } };
   focus(): void;
-  /** Appends statements at the end of the document (ending an unterminated last statement first) and selects them. */
-  insertText(text: string): void;
+  /**
+   * Appends statements at the end of the document (ending an unterminated last statement first) and selects them,
+   * or, with `ranges` (offsets into `text`), selects only those ranges, all at once.
+   */
+  insertText(text: string, ranges?: readonly { from: number; to: number }[]): void;
 }
 let activeEditor: EditorHandle | null = null;
 export function registerEditor(handle: EditorHandle | null): void {
@@ -917,16 +923,18 @@ const sameKey = (a: readonly KeyColumn[], b: readonly KeyColumn[]): boolean =>
   a.length === b.length && a.every((k, i) => k.index === b[i]!.index && k.column === b[i]!.column && k.type === b[i]!.type);
 
 /**
- * The UPDATEs of the pending edits. The key comes from the environment's schema, read when it was first needed:
- * it is read again here, because a key that grew by a column the query did not select (a migration while the
- * Cais was open) is invisible in the result and would make the WHERE match several rows.
+ * The edit target of a result with the environment's schema read again: a key that grew by a column the query did not
+ * select (a migration while the Cais was open) is invisible in the result and would make the WHERE match several
+ * rows. Null (after saying why) when the result cannot be edited, the key moved or `stillCurrent` turned false while
+ * the schema was read.
  */
-async function editStatements(
+async function readTarget(
   tabId: string,
-): Promise<{ edits: GridEdits; target: Editability & { editable: true }; updates: { row: number; sql: string }[] } | null> {
-  const edits = pendingEdits(tabId);
-  if (!edits || preparingEdits.has(tabId)) return null;
-  const before = editabilityOf(tabId, edits.result);
+  result: StatementResult,
+  stillCurrent: () => boolean,
+): Promise<(Editability & { editable: true }) | null> {
+  if (!stillCurrent() || preparingEdits.has(tabId)) return null;
+  const before = editabilityOf(tabId, result);
   if (!before.editable) {
     showToast(render(before.reason));
     return null;
@@ -945,8 +953,8 @@ async function editStatements(
     preparingEdits.delete(tabId);
   }
   // the person may have changed the edits (or run again) meanwhile
-  if (pendingEdits(tabId) !== edits) return null;
-  const target = editabilityOf(tabId, edits.result);
+  if (!stillCurrent()) return null;
+  const target = editabilityOf(tabId, result);
   if (!target.editable) {
     showToast(render(target.reason));
     return null;
@@ -955,6 +963,21 @@ async function editStatements(
     showToast(m().grid.reason.staleSchema);
     return null;
   }
+  return target;
+}
+
+/**
+ * The UPDATEs of the pending edits. The key comes from the environment's schema, read when it was first needed:
+ * it is read again here, because a key that grew by a column the query did not select (a migration while the
+ * Cais was open) is invisible in the result and would make the WHERE match several rows.
+ */
+async function editStatements(
+  tabId: string,
+): Promise<{ edits: GridEdits; target: Editability & { editable: true }; updates: { row: number; sql: string }[] } | null> {
+  const edits = pendingEdits(tabId);
+  if (!edits) return null;
+  const target = await readTarget(tabId, edits.result, () => pendingEdits(tabId) === edits);
+  if (!target) return null;
   // a column that changed on the server since the edit (e.g. text to number) is locked now: say which, in the catalog's words
   for (const cols of Object.values(edits.cells)) {
     for (const c of Object.keys(cols).map(Number)) {
@@ -965,6 +988,7 @@ async function editStatements(
       }
     }
   }
+  const environmentId = getState().tabs.find((t) => t.id === tabId)?.environmentId ?? '';
   const dialect = getDialect(findEnvironment(environmentId)?.engine ?? 'mysql');
   try {
     const updates = buildGridUpdates(dialect, target, edits.result.rows ?? [], edits.cells);
@@ -982,6 +1006,43 @@ export async function generateUpdates(tabId: string): Promise<void> {
   if (!plan || getState().activeTabId !== tabId || !activeEditor) return;
   activeEditor.insertText(plan.updates.map((u) => `${u.sql};`).join('\n'));
   patchRun(tabId, { edits: undefined, editNotice: undefined });
+}
+
+/**
+ * Gerar UPDATE da célula: `UPDATE … SET <column> = <value shown> WHERE <whole key>;` for each of the rows, at the end
+ * of the editor, with every value literal selected for the person to type over. Same gate as editing a cell. Nothing
+ * runs and the pending edits stay as they are: the value is the one the grid shows, pending edit included.
+ */
+export async function generateCellUpdates(tabId: string, result: StatementResult, column: number, rows: readonly number[]): Promise<void> {
+  if (getState().activeTabId !== tabId || !activeEditor || rows.length === 0) return;
+  if (rows.length > MAX_CELL_UPDATES) {
+    showToast(m().grid.menu.generateTooMany({ max: MAX_CELL_UPDATES }));
+    return;
+  }
+  const stillCurrent = () => getState().runs[tabId]?.results.includes(result) === true && getState().activeTabId === tabId;
+  const target = await readTarget(tabId, result, stillCurrent);
+  if (!target || !stillCurrent() || !activeEditor) return;
+  const original = result.rows ?? [];
+  const pending = pendingEdits(tabId);
+  const cells: { row: number; value: CellValue }[] = [];
+  for (const r of [...rows].sort((a, b) => a - b)) {
+    const row = original[r];
+    if (!row) return;
+    const lock = cellLock(target, column, row[column] ?? null);
+    if (lock) {
+      showToast(render(lock));
+      return;
+    }
+    const edited = pending?.result === result ? pending.cells[r] : undefined;
+    cells.push({ row: r, value: edited && Object.hasOwn(edited, column) ? (edited[column] ?? null) : (row[column] ?? null) });
+  }
+  const environmentId = getState().tabs.find((t) => t.id === tabId)?.environmentId ?? '';
+  try {
+    const { text, ranges } = buildCellUpdates(getDialect(findEnvironment(environmentId)?.engine ?? 'mysql'), target, original, column, cells);
+    activeEditor.insertText(text, ranges);
+  } catch (e) {
+    showToast(errorMessage(e));
+  }
 }
 
 /** Aplicar: the UPDATEs run through the tab's normal path, so the mode decides. */

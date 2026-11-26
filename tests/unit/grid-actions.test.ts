@@ -27,6 +27,8 @@ interface State {
 }
 interface Actions {
   applyEdits(tabId: string): Promise<void>;
+  generateCellUpdates(tabId: string, result: StatementResult, column: number, rows: readonly number[]): Promise<void>;
+  registerEditor(handle: unknown): void;
   requestCloseTab(tabId: string): Promise<void>;
 }
 interface Store {
@@ -168,5 +170,59 @@ describe('grid edits in the renderer', () => {
     confirm!.onConfirm();
     await vi.waitFor(() => expect(store.getState().tabs).toHaveLength(0));
     expect(api.session.close).toHaveBeenCalledWith('t', undefined);
+  });
+});
+
+describe('Gerar UPDATE da célula in the renderer', () => {
+  const insertText = vi.fn();
+  beforeEach(() => {
+    insertText.mockClear();
+    actions.registerEditor({ getSelection: () => ({ cursor: 0 }), focus: vi.fn(), insertText });
+    api.schema.get.mockResolvedValue(tree(['id']));
+  });
+  afterAll(() => actions.registerEditor(null));
+
+  it('writes the value as shown (the pending edit applied), selects the literal and leaves the edits alone', async () => {
+    await actions.generateCellUpdates('t', result, 1, [0, 1]);
+    expect(api.schema.get).toHaveBeenCalledWith('dev', { refresh: true });
+    const [text, ranges] = insertText.mock.calls[0]! as [string, { from: number; to: number }[]];
+    expect(text).toBe("UPDATE `shop`.`items` SET `name` = 'x' WHERE `id` = 1;\nUPDATE `shop`.`items` SET `name` = 'b' WHERE `id` = 2;");
+    expect(ranges.map((r) => text.slice(r.from, r.to))).toEqual(["'x'", "'b'"]);
+    // nothing ran, and the pending edit is still pending
+    expect(api.session.run).not.toHaveBeenCalled();
+    expect(store.getState().runs.t!.edits?.cells).toEqual({ 0: { 1: 'x' } });
+  });
+
+  it('keys on the row the server sent, even when its key cell has a pending edit', async () => {
+    store.setState({ runs: { t: { running: false, connecting: false, results: [result], active: 0, edits: { result, cells: { 0: { 0: 99 } } } } } });
+    await actions.generateCellUpdates('t', result, 0, [0]);
+    expect(insertText.mock.calls[0]![0]).toBe('UPDATE `shop`.`items` SET `id` = 99 WHERE `id` = 1;');
+  });
+
+  it('reads the schema again: a key that grew by a column the result does not have is refused, nothing is inserted', async () => {
+    api.schema.get.mockResolvedValueOnce(tree(['id', 'tenant_id']));
+    await actions.generateCellUpdates('t', result, 1, [0]);
+    expect(insertText).not.toHaveBeenCalled();
+    expect(store.getState().toast?.message).toBe('Edição na grade só para resultado de uma tabela com a chave primária inteira (falta: tenant_id).');
+  });
+
+  it('refuses a cut binary value and more rows than the limit', async () => {
+    const cut = read('shop', [[1, { kind: 'binary', hex: 'ab', length: 400 }]]);
+    store.setState({ runs: { t: { running: false, connecting: false, results: [cut], active: 0 } } });
+    await actions.generateCellUpdates('t', cut, 1, [0]);
+    expect(insertText).not.toHaveBeenCalled();
+    expect(store.getState().toast?.message).toBe('O valor binário está cortado na grade: não dá para editá-lo.');
+
+    store.setState({ toast: null });
+    await actions.generateCellUpdates('t', result, 1, Array.from({ length: 501 }, (_, i) => i));
+    expect(insertText).not.toHaveBeenCalled();
+    expect(api.schema.get).toHaveBeenCalledTimes(1);
+    expect(store.getState().toast?.message).toContain('até 500 células');
+  });
+
+  it('does nothing for a result that is no longer the tab\'s', async () => {
+    store.setState({ runs: { t: { running: false, connecting: false, results: [read()], active: 0 } } });
+    await actions.generateCellUpdates('t', result, 1, [0]);
+    expect(insertText).not.toHaveBeenCalled();
   });
 });

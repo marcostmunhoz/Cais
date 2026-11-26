@@ -144,4 +144,6 @@ export interface Dialect {
   quoteLiteral(value: CellValue, type: string): string;
   /** `UPDATE db.table SET … WHERE <every key column> = …`, without a terminator and without LIMIT. Throws like `quoteLiteral`. */
   buildUpdate(spec: UpdateSpec): string;
+  /** `buildUpdate`, plus where each SET value literal sits in the statement (offsets into `sql`, in order of `spec.set`). */
+  buildUpdateLocated(spec: UpdateSpec): { sql: string; setValues: { from: number; to: number }[] };
 }

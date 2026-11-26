@@ -49,6 +49,9 @@ export const ptBR = {
     edit: 'Editar célula',
     setNull: 'Definir como NULL',
     undo: 'Desfazer edição',
+    generateCell: 'Gerar UPDATE da célula',
+    generateCells: (p: { count: number }) => `Gerar UPDATE de ${p.count} células`,
+    generateTooMany: (p: { max: number }) => `Gerar UPDATE da célula aceita até ${p.max} células por vez. Selecione menos linhas.`,
   },
   cell: {
     editorLabel: (p: { column: string }) => `Novo valor de ${p.column}`,

@@ -405,3 +405,68 @@ test('copy uses pending edits, and the cell editor keeps its own text selection'
   await page.getByTestId('edit-discard').click();
   await expect(bar()).toHaveCount(0);
 });
+
+test('Gerar UPDATE da célula: one cell, a column of cells, with the value literals selected', async () => {
+  await run(READ);
+  await expect(cell(0, 'name')).toBeVisible({ timeout: 20_000 });
+  await expect(bar()).toHaveCount(0);
+  // earlier tests changed rows: read what the grid holds (plain ASCII text, so the literal is 'text')
+  const note3 = await cell(2, 'note').innerText();
+  const name1 = await cell(0, 'name').innerText();
+  const name2 = await cell(1, 'name').innerText();
+  const selected = () => page.evaluate<string>('String(window.getSelection())');
+
+  // one cell: the statement goes at the end of the editor with the literal selected, and nothing runs
+  await cell(2, 'note').click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Gerar UPDATE da célula' }).click();
+  await expect(page.locator('.cm-content')).toContainText(`UPDATE \`cais_test\`.\`grid_items\` SET \`note\` = '${note3}' WHERE \`id\` = 3;`);
+  await expect(page.locator('.cm-selectionBackground').first()).toBeVisible();
+  await expect.poll(selected).toBe(`'${note3}'`);
+  // typing replaces the literal
+  await page.keyboard.type('NULL');
+  await expect(page.locator('.cm-content')).toContainText('SET `note` = NULL WHERE `id` = 3;');
+  expect(await dbValue('SELECT note FROM grid_items WHERE id = 3')).toBe(note3);
+  await expect(bar()).toHaveCount(0);
+
+  // a pending edit is the value written, and stays pending
+  await editCell(0, 'name', 'Caneta nova');
+  await cell(0, 'name').click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Gerar UPDATE da célula' }).click();
+  await expect(page.locator('.cm-content')).toContainText("SET `name` = 'Caneta nova' WHERE `id` = 1;");
+  await expect(bar()).toContainText('1 alteração em 1 linha');
+  await expect(cell(0, 'name')).toHaveAttribute('data-edited', 'true');
+  await page.getByTestId('edit-discard').click();
+
+  // two cells of a column: one UPDATE per row, both literals selected at once, so typing replaces both
+  await cell(0, 'name').click();
+  await cell(1, 'name').click({ modifiers: ['Shift'] });
+  await cell(1, 'name').click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Gerar UPDATE de 2 células' }).click();
+  await expect.poll(editorText).toContain(
+    `UPDATE \`cais_test\`.\`grid_items\` SET \`name\` = '${name1}' WHERE \`id\` = 1;\nUPDATE \`cais_test\`.\`grid_items\` SET \`name\` = '${name2}' WHERE \`id\` = 2;`,
+  );
+  await page.keyboard.type('Z');
+  await expect.poll(editorText).toContain('SET `name` = Z WHERE `id` = 1;');
+  await expect.poll(editorText).toContain('SET `name` = Z WHERE `id` = 2;');
+  expect(await dbValue('SELECT name FROM grid_items WHERE id = 2')).toBe(name2);
+
+  // not offered over a selection of several columns
+  await cell(0, 'name').click();
+  await cell(1, 'note').click({ modifiers: ['Shift'] });
+  await cell(1, 'note').click({ button: 'right' });
+  await expect(page.getByRole('menuitem', { name: 'Copiar como tabela Markdown' })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: /Gerar UPDATE/ })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+});
+
+test('Gerar UPDATE da célula is not offered where the cell cannot be edited', async () => {
+  await run('SELECT id, name, 1 + 1 AS two FROM grid_items ORDER BY id;');
+  await expect(cell(0, 'two')).toBeVisible({ timeout: 20_000 });
+  await cell(0, 'two').click({ button: 'right' });
+  await expect(page.getByRole('menuitem', { name: 'Copiar valor' })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: /Gerar UPDATE/ })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await cell(0, 'name').click({ button: 'right' });
+  await expect(page.getByRole('menuitem', { name: 'Gerar UPDATE da célula' })).toBeVisible();
+  await page.keyboard.press('Escape');
+});

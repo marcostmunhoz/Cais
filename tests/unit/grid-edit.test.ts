@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { mysqlDialect } from '@shared/dialects/mysql';
-import { buildUpdate, quoteLiteral, valueKind } from '@shared/dialects/mysql/literals';
+import { buildUpdate, buildUpdateLocated, quoteLiteral, valueKind } from '@shared/dialects/mysql/literals';
 import {
+  buildCellUpdates,
   buildGridUpdates,
   cellLock,
   gridEditability,
   parseCellInput,
   pendingCount,
+  planAppend,
   remapCells,
   sameCell,
   type EditTarget,
@@ -460,6 +462,102 @@ describe('grid edits to UPDATEs', () => {
       [1, 'Ana', 'ana@x'],
     ];
     expect(remapCells(e.key, rows, fresh, { 0: { 1: 'x' }, 1: { 1: 'y' }, 2: { 2: 'z' } })).toEqual({ 1: { 1: 'x' }, 0: { 2: 'z' } });
+  });
+});
+
+describe('Gerar UPDATE da célula', () => {
+  const e = editability([src('id'), src('name', { name: 'nome' }), src('email')], [
+    [1, 'Ana', 'ana@x'],
+    [2, 'Bia', null],
+    [3, "d'Ávila\\", 'c@x'],
+  ]) as EditTarget;
+  const rows: CellValue[][] = [
+    [1, 'Ana', 'ana@x'],
+    [2, 'Bia', null],
+    [3, "d'Ávila\\", 'c@x'],
+  ];
+
+  it('buildUpdateLocated says where each SET literal is, and buildUpdate is the same text', () => {
+    const spec = {
+      database: 'app',
+      table: 'people',
+      set: [
+        { column: 'name', type: 'varchar(20)', value: "d'A" as CellValue },
+        { column: 'email', type: 'varchar(20)', value: null as CellValue },
+        { column: 'bio', type: 'varchar(20)', value: 'caf\\é' as CellValue },
+      ],
+      where: [{ column: 'id', type: 'int', value: 7 as CellValue }],
+    };
+    const { sql, setValues } = buildUpdateLocated(spec);
+    expect(sql).toBe(buildUpdate(spec));
+    expect(setValues.map((r) => sql.slice(r.from, r.to))).toEqual([
+      "'d''A'",
+      'NULL',
+      quoteLiteral('caf\\é', 'varchar(20)'),
+    ]);
+    expect(() => buildUpdateLocated({ ...spec, where: [] })).toThrow();
+  });
+
+  it('one UPDATE per row, one per line, with the value literal as the range', () => {
+    const { text, ranges } = buildCellUpdates(mysqlDialect, e, rows, 1, [
+      { row: 0, value: 'Ana' },
+      { row: 2, value: rows[2]![1]! },
+    ]);
+    const lines = text.split('\n');
+    // a backslash goes as hex, so the splitter and the server read it the same way
+    const hexLiteral = quoteLiteral(rows[2]![1]!, 'varchar(200)');
+    expect(hexLiteral).toMatch(/^_utf8mb4 X'[0-9a-f]+'$/);
+    expect(lines).toEqual([
+      "UPDATE `app`.`people` SET `name` = 'Ana' WHERE `id` = 1;",
+      `UPDATE \`app\`.\`people\` SET \`name\` = ${hexLiteral} WHERE \`id\` = 3;`,
+    ]);
+    expect(ranges.map((r) => text.slice(r.from, r.to))).toEqual(["'Ana'", hexLiteral]);
+    // the text splits into exactly the statements, each a plain UPDATE
+    const parts = mysqlDialect.splitStatements(text);
+    expect(parts.map((p) => p.text + ';')).toEqual(lines);
+    for (const p of parts) expect(mysqlDialect.classify(p.text)).toMatchObject({ kind: 'write', verb: 'UPDATE' });
+  });
+
+  it('writes the value as shown (a pending edit, NULL, a number) and keys on the row as the server sent it', () => {
+    // the cell was edited to 'Zed' and the key cell of that row too: the WHERE keeps the key the server has
+    const { text, ranges } = buildCellUpdates(mysqlDialect, e, rows, 1, [
+      { row: 1, value: 'Zed' },
+      { row: 0, value: null },
+    ]);
+    expect(text).toBe(
+      "UPDATE `app`.`people` SET `name` = 'Zed' WHERE `id` = 2;\nUPDATE `app`.`people` SET `name` = NULL WHERE `id` = 1;",
+    );
+    expect(ranges.map((r) => text.slice(r.from, r.to))).toEqual(["'Zed'", 'NULL']);
+    const key = buildCellUpdates(mysqlDialect, e, rows, 0, [{ row: 1, value: 20 }]);
+    expect(key.text).toBe('UPDATE `app`.`people` SET `id` = 20 WHERE `id` = 2;');
+    expect(key.text.slice(key.ranges[0]!.from, key.ranges[0]!.to)).toBe('20');
+  });
+
+  it('refuses a locked column or a row that is not there', () => {
+    expect(() => buildCellUpdates(mysqlDialect, e, rows, 5, [{ row: 0, value: 1 }])).toThrow();
+    expect(() => buildCellUpdates(mysqlDialect, e, rows, 1, [{ row: 9, value: 'x' }])).toThrow();
+  });
+
+  it('planAppend moves the ranges to where the text lands, after what the script leaves open', () => {
+    const text = "UPDATE `a`.`t` SET `c` = 'x' WHERE `id` = 1;\nUPDATE `a`.`t` SET `c` = 'y' WHERE `id` = 2;";
+    const ranges = [
+      { from: text.indexOf("'x'"), to: text.indexOf("'x'") + 3 },
+      { from: text.indexOf("'y'"), to: text.indexOf("'y'") + 3 },
+    ];
+    for (const doc of ['', 'SELECT 1;\n', 'SELECT 1', 'SELECT 1;\n\n', 'DELIMITER $$\nCREATE PROCEDURE p() BEGIN SELECT 1; END$$\n', 'DELIMITER $$\nSELECT 1']) {
+      const { changes, selections } = planAppend(mysqlDialect, doc, text, ranges);
+      let out = '';
+      let at = 0;
+      for (const c of [...changes].sort((a, b) => a.from - b.from)) {
+        out += doc.slice(at, c.from) + c.insert;
+        at = c.from;
+      }
+      out += doc.slice(at);
+      expect(selections.map((r) => out.slice(r.from, r.to))).toEqual(["'x'", "'y'"]);
+    }
+    // no ranges: the whole appended text, as before
+    const whole = planAppend(mysqlDialect, 'SELECT 1;', text);
+    expect(whole.selections).toEqual([mysqlDialect.appendStatements('SELECT 1;', text).selection]);
   });
 });
 

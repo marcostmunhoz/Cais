@@ -114,14 +114,27 @@ export function quoteLiteral(value: CellValue, type: string): string {
 
 export const quoteIdent = (name: string): string => '`' + name.replace(/`/g, '``') + '`';
 
-export function buildUpdate(spec: UpdateSpec): string {
+/**
+ * `UPDATE db.table SET … WHERE <every key column> = …` and where each SET value literal sits in the text, so a caller
+ * can select the literal for the person to type over.
+ */
+export function buildUpdateLocated(spec: UpdateSpec): { sql: string; setValues: { from: number; to: number }[] } {
   if (spec.set.length === 0 || spec.where.length === 0) throw new Error(m().dialect.literal.noKey);
-  const assign = spec.set.map((c) => `${quoteIdent(c.column)} = ${quoteLiteral(c.value, c.type)}`);
+  const assign = spec.set.map((c) => ({ name: quoteIdent(c.column), literal: quoteLiteral(c.value, c.type) }));
   const match = spec.where.map((c) => {
     // "= NULL" never matches: a key value is never NULL
     if (c.value === null) throw new Error(m().dialect.literal.noKey);
     return `${quoteIdent(c.column)} = ${quoteLiteral(c.value, c.type)}`;
   });
   // one row by its whole key, and no LIMIT (unsafe with statement-based replication, and it would hide a stale key)
-  return `UPDATE ${quoteIdent(spec.database)}.${quoteIdent(spec.table)} SET ${assign.join(', ')} WHERE ${match.join(' AND ')}`;
+  let sql = `UPDATE ${quoteIdent(spec.database)}.${quoteIdent(spec.table)} SET `;
+  const setValues: { from: number; to: number }[] = [];
+  assign.forEach((a, i) => {
+    sql += `${i > 0 ? ', ' : ''}${a.name} = `;
+    setValues.push({ from: sql.length, to: sql.length + a.literal.length });
+    sql += a.literal;
+  });
+  return { sql: `${sql} WHERE ${match.join(' AND ')}`, setValues };
 }
+
+export const buildUpdate = (spec: UpdateSpec): string => buildUpdateLocated(spec).sql;

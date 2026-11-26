@@ -1,7 +1,7 @@
 import type mysql from 'mysql2/promise';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { getDialect } from '@shared/dialects/registry';
-import { buildGridUpdates, gridEditability, type EditTarget, type PendingCells } from '@shared/grid';
+import { buildCellUpdates, buildGridUpdates, gridEditability, type EditTarget, type PendingCells } from '@shared/grid';
 import { render } from '@shared/i18n';
 import type { MysqlEnvironment as Environment } from '@shared/model';
 import type { CellValue, SchemaTree, StatementResult } from '@shared/results';
@@ -172,6 +172,48 @@ describe.each([
     }
     expect(JSON.parse(got('j') as string)).toEqual(JSON.parse(VALUES.j as string));
     expect(got('id')).toBe(id);
+  });
+});
+
+describe('Gerar UPDATE da célula', () => {
+  it('rewrites every kind of value as it is, and the selected literal can be typed over with an expression', async () => {
+    const id = '4611686018427387905';
+    await admin.query('DELETE FROM grid_kinds WHERE id = ?', [id]);
+    await admin.query('INSERT INTO grid_kinds (id, s) VALUES (?, ?)', [id, 'old']);
+    const s = await open();
+    const read = `SELECT * FROM grid_kinds WHERE id = ${id}`;
+    const seed = await exec(s, read);
+    const target = gridEditability(seed, await schema(), dialect.valueKind) as EditTarget;
+    expect(target.editable).toBe(true);
+    const names = seed.columns!.map((c) => c.name);
+    const cells: PendingCells = { 0: {} };
+    for (const [name, value] of Object.entries(VALUES)) cells[0]![names.indexOf(name)] = value;
+    const [update] = buildGridUpdates(dialect, target, seed.rows!, cells);
+    expect((await s.execute(update!.sql, { maxRows: 1 })).error).toBeUndefined();
+
+    // the row as the server holds it now: NULLs and every typed value of VALUES
+    const before = await exec(s, read);
+    for (const name of names.filter((n) => n !== 'id')) {
+      const column = names.indexOf(name);
+      const value = before.rows![0]![column] ?? null;
+      const { text } = buildCellUpdates(dialect, target, before.rows!, column, [{ row: 0, value }]);
+      const done = await s.execute(text.slice(0, -1), { maxRows: 1 });
+      expect(done.error, name).toBeUndefined();
+      expect(done.affectedRows, name).toBe(1);
+    }
+    const after = await exec(s, read);
+    expect(after.rows![0]!.map((v) => (typeof v === 'object' && v !== null ? v : v === null ? null : String(v)))).toEqual(
+      before.rows![0]!.map((v) => (typeof v === 'object' && v !== null ? v : v === null ? null : String(v))),
+    );
+
+    // typing over the selected literal: the statement is still one UPDATE by the key and the server evaluates it
+    const sCol = names.indexOf('s');
+    const { text, ranges } = buildCellUpdates(dialect, target, before.rows!, sCol, [{ row: 0, value: before.rows![0]![sCol] ?? null }]);
+    const typed = text.slice(0, ranges[0]!.from) + "CONCAT('a', UPPER('b'))" + text.slice(ranges[0]!.to, -1);
+    expect(dialect.splitStatements(typed + ';')).toHaveLength(1);
+    expect((await s.execute(typed, { maxRows: 1 })).affectedRows).toBe(1);
+    const last = await exec(s, `SELECT s FROM grid_kinds WHERE id = ${id}`);
+    expect(last.rows![0]![0]).toBe('aB');
   });
 });
 

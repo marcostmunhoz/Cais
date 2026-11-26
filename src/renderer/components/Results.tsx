@@ -10,6 +10,7 @@ import {
   discardEdits,
   dismissEditNotice,
   effectiveMode,
+  generateCellUpdates,
   generateUpdates,
   loadSchema,
   selectResult,
@@ -544,6 +545,19 @@ export function Results({ tabId }: { tabId: string }) {
     if (column.nullable) out.push({ label: m().grid.menu.setNull, onSelect: () => setCellEdit(tabId, active, cell.r, cell.c, null) });
     if (edits?.[cell.r] && Object.hasOwn(edits[cell.r]!, cell.c)) {
       out.push({ label: m().grid.menu.undo, onSelect: () => setCellEdit(tabId, active, cell.r, cell.c, undefined) });
+    }
+    // Gerar UPDATE da célula: one UPDATE per selected cell when the selection is one column wide; not offered over a
+    // wider selection (which cells would it mean?)
+    if (!sel || sel.c1 === sel.c2) {
+      const inColumn = !!sel && sel.c1 === cell.c && cell.r >= sel.r1 && cell.r <= sel.r2;
+      const picked = inColumn ? Array.from({ length: sel.r2 - sel.r1 + 1 }, (_, i) => sel.r1 + i) : [cell.r];
+      out.push({
+        label: picked.length === 1 ? m().grid.menu.generateCell : m().grid.menu.generateCells({ count: picked.length }),
+        onSelect: () => {
+          setHint(null);
+          void generateCellUpdates(tabId, active, cell.c, picked);
+        },
+      });
     }
     return out;
   };

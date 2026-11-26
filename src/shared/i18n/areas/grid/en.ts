@@ -48,6 +48,9 @@ export const en: Shape<typeof ptBR> = {
     edit: 'Edit cell',
     setNull: 'Set to NULL',
     undo: 'Undo edit',
+    generateCell: 'Generate cell UPDATE',
+    generateCells: (p) => `Generate UPDATE for ${p.count} cells`,
+    generateTooMany: (p) => `Generate cell UPDATE takes up to ${p.max} cells at a time. Select fewer rows.`,
   },
   cell: {
     editorLabel: (p) => `New value of ${p.column}`,

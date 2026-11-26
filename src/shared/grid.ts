@@ -275,6 +275,58 @@ export function buildGridUpdates(
   return out;
 }
 
+/** The most rows one "Gerar UPDATE da célula" writes: one statement and one selected literal each. */
+export const MAX_CELL_UPDATES = 500;
+
+/**
+ * "Gerar UPDATE da célula": one `UPDATE … SET <column> = <value> WHERE <whole key>;` per row, one per line. `value` is
+ * what the grid shows (pending edits applied); the key is the row as the server sent it. `ranges` are the value
+ * literals, as offsets into `text`, for the person to type over.
+ */
+export function buildCellUpdates(
+  dialect: Pick<Dialect, 'buildUpdateLocated'>,
+  target: EditTarget,
+  rows: readonly (readonly CellValue[])[],
+  column: number,
+  cells: readonly { row: number; value: CellValue }[],
+): { text: string; ranges: { from: number; to: number }[] } {
+  const col = target.columns[column];
+  if (!col?.editable) throw new Error(`column ${column} is not editable`);
+  let text = '';
+  const ranges: { from: number; to: number }[] = [];
+  for (const { row: r, value } of cells) {
+    const row = rows[r];
+    if (!row) throw new Error(`row ${r} does not exist`);
+    const { sql, setValues } = dialect.buildUpdateLocated({
+      database: target.database,
+      table: target.table,
+      set: [{ column: col.column, type: col.type, value }],
+      where: target.key.map((k) => ({ column: k.column, type: k.type, value: row[k.index] ?? null })),
+    });
+    if (text) text += '\n';
+    ranges.push({ from: text.length + setValues[0]!.from, to: text.length + setValues[0]!.to });
+    text += `${sql};`;
+  }
+  return { text, ranges };
+}
+
+/**
+ * Appends statements to a script (see `Dialect.appendStatements`) and works out where `ranges` (offsets into `text`)
+ * land in the new document: the editor selects them.
+ */
+export function planAppend(
+  dialect: Pick<Dialect, 'appendStatements'>,
+  doc: string,
+  text: string,
+  ranges?: readonly { from: number; to: number }[],
+): { changes: { from: number; insert: string }[]; selections: { from: number; to: number }[] } {
+  const { changes, selection } = dialect.appendStatements(doc, text);
+  return {
+    changes,
+    selections: ranges && ranges.length > 0 ? ranges.map((r) => ({ from: selection.from + r.from, to: selection.from + r.to })) : [selection],
+  };
+}
+
 /**
  * Pending edits of some rows, moved onto a refreshed result of the same query: rows are found by their key,
  * and edits of rows that are gone are dropped.
