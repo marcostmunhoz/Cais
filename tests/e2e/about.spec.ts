@@ -94,6 +94,16 @@ test('the menu has Sobre in the right place', async () => {
   expect(holder!.label).toBe(process.platform === 'darwin' ? 'Cais' : 'Ajuda');
 });
 
+test('the menu has Instalar skill para agentes… right after the command install (never clicked: it opens native dialogs)', async () => {
+  const menu = await app.evaluate(({ Menu }) =>
+    (Menu.getApplicationMenu()?.items ?? []).map((item) => (item.submenu?.items ?? []).map((i) => i.label)),
+  );
+  const holder = menu.find((items) => items.includes('Instalar comando cais no terminal'));
+  expect(holder).toBeTruthy();
+  const at = holder!.indexOf('Instalar comando cais no terminal');
+  expect(holder![at + 1]).toBe('Instalar skill para agentes…');
+});
+
 test('the window shows the version, the runtime, the license and the logo; nothing goes to the network by itself', async () => {
   await openFromMenu();
   await expect(about()).toBeVisible();

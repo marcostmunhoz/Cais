@@ -109,13 +109,19 @@ test('envs lists projects and environments with no host, user or password', asyn
 });
 
 test('a reader that closes the output early (| head) is not an error: same exit code, nothing on stderr', async () => {
-  for (const args of [['llm', 'guide'], ['llm', 'envs'], ['llm', 'schema', 'api/pro'], ['llm', 'requests']]) {
+  for (const args of [['llm', 'guide'], ['llm', 'skill'], ['llm', 'envs'], ['llm', 'schema', 'api/pro'], ['llm', 'requests']]) {
     const out = await cli(args, {}, { closeStdout: true });
     expect([args.join(' '), out.code, out.stderr]).toEqual([args.join(' '), 0, '']);
   }
   // a usage error keeps its own code too
   const usage = await cli(['llm', 'query', 'api/dev'], {}, { closeStdout: true });
   expect([usage.code, usage.stderr]).toEqual([2, '']);
+});
+
+test('cais llm skill prints the shipped skill with the app unreachable: exit 0, nothing on stderr, no socket used', async () => {
+  const out = await cli(['llm', 'skill'], { CAIS_SOCKET: join(shortTempDir('cais-noskt-'), 'missing.sock') });
+  expect([out.code, out.stderr]).toEqual([0, '']);
+  expect(out.stdout).toBe(readFileSync(join(root, 'skills', 'cais', 'SKILL.md'), 'utf8'));
 });
 
 test('a read outside production runs at once, with no modal', async () => {

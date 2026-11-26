@@ -1,5 +1,5 @@
 import net from 'node:net';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { send } from '../../src/cli/client';
@@ -7,6 +7,7 @@ import { parseArgs, UsageError } from '../../src/cli/args';
 import { discoverEndpoint, userDataDir } from '../../src/cli/endpoint';
 import { EXIT, exitForError, exitForResult } from '../../src/cli/exit';
 import { GUIDE } from '../../src/cli/guide';
+import { SKILL } from '../../src/cli/skill';
 import { finalExitCode, guardPipe, writeTo } from '../../src/cli/output';
 import { EventEmitter } from 'node:events';
 
@@ -148,6 +149,27 @@ describe('cais llm guide', () => {
 
   it('tells who decided and that a closed pipe keeps the exit code', () => {
     for (const word of ['"decided_by": "person"', '"policy"', '"auto_commit": true', 'false (the user clicked Commit)', '| head']) expect(GUIDE).toContain(word);
+  });
+});
+
+describe('cais llm skill', () => {
+  it('parses with no arguments (and only --client)', () => {
+    expect(parse('skill').command).toEqual({ name: 'skill' });
+    expect(parse('skill', '--client', 'Codex').command).toEqual({ name: 'skill' });
+    expect(() => parse('skill', 'extra')).toThrow('takes no arguments');
+    expect(() => parse('skill', '--sql', 'x')).toThrow('Unknown option for skill');
+    expect(parseArgs(['llm', 'skill'], {}).client).toBe('agente');
+  });
+
+  it('embeds skills/cais/SKILL.md byte for byte (the one source file) and keeps its frontmatter', () => {
+    const file = readFileSync(join(__dirname, '../../skills/cais/SKILL.md'), 'utf8');
+    expect(SKILL).toBe(file);
+    expect(SKILL.startsWith('---\nname: cais\n')).toBe(true);
+    expect(SKILL).toContain('cais llm');
+  });
+
+  it('is listed in the guide in one line', () => {
+    expect(GUIDE.split('\n').filter((l) => l.includes('cais llm skill'))).toHaveLength(1);
   });
 });
 

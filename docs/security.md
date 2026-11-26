@@ -126,6 +126,15 @@ BigQuery has no `READ ONLY` session on the server, so the two layers of Read-onl
 - **The agent does not approve, does not turn access on, does not change levels and does not edit or delete scripts.** The app never opens itself or turns access on at the CLI's request.
 - **Without the Trail, no agent request runs on its own:** each request writes a line before it runs, and if it cannot be written the request waits for the user (and even an approval does not run until the Trail is back).
 
+## Files written outside the data folder
+
+Cais writes outside its data folder only when the user clicks a menu item, and only these files:
+
+- **The `cais` link** ("Install cais Command in Terminal"): a symlink in `/usr/local/bin` or `~/.local/bin`. It never replaces a file or a link that is not its own.
+- **`<skills folder>/cais/SKILL.md`** ("Install Agent Skill…"): the skill text, in `~/.claude/skills` (the Claude Code button) or in the folder the user picks. Cais overwrites only a `SKILL.md` with `name: cais` in the frontmatter; it refuses a `cais` that is a link or not a folder, a `SKILL.md` that is a link or not a regular file, and a `SKILL.md` that is not its own. The write goes to a temporary file in the same folder and a rename (mode 0644), so the file is never half written, and a link at `cais` or `SKILL.md` is refused, not followed (the chosen skills folder itself may be a link, as in dotfiles setups). It touches nothing else in the folder.
+
+Both run in the main process from the application menu: there is no IPC channel for them and the agent socket does not know them, so neither a compromised renderer nor an agent can start them. The skill is plain instruction text for an agent and holds no secret. The first dialog says what will be written and where (`~/.claude/skills` or a folder the user picks), and the result dialog shows the full path.
+
 ## Signed registry and chained Trail
 
 - **Registry protection:** each environment (with the project name, the credential and the encrypted password it uses) and the agent access switch are signed with HMAC-SHA256, with a key kept in `seal.json` and encrypted by the system vault. An environment that does not check out when the app opens is blocked (nothing connects to it), marked as production and set to "Everything needs approval", until the user reviews and saves it. Without `seal.json`, all of them end up that way: deleting the file does not make anything trusted. "Test connection" with the credential of a blocked environment is refused, because the host of the draft may be the edited one. Agent access that is on without a signature opens off. Details in [behavior.md](behavior.md#registry-protection).

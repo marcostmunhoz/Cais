@@ -72,4 +72,15 @@ export const en: Shape<typeof ptBR> = {
     installed: (p) => `cais command installed at ${p.path}.`,
     notOnPath: (p) => `The folder ${p.dir} is not on the terminal PATH: add it to use the command.`,
   },
+  skillInstall: {
+    sourceMissing: 'The skill file that ships with Cais was not found or is not the Cais skill. Reinstall Cais, or read it with "cais llm skill".',
+    notDirectory: (p) => `${p.path} already exists and is not a folder (or is a link), so Cais did not touch it.`,
+    notFile: (p) => `${p.path} already exists and is not a regular file (or is a link), so Cais did not touch it.`,
+    notOurFile: (p) => `${p.path} already exists and is not the Cais skill (not our file), so Cais did not touch it.`,
+    failed: (p) => `Could not install the skill at ${p.path}: ${p.reason}.`,
+    noPermission: 'no permission',
+    installed: (p) => `Skill installed at ${p.path}.`,
+    updated: (p) => `Skill updated at ${p.path}.`,
+    alreadyUpToDate: (p) => `The skill at ${p.path} is already up to date.`,
+  },
 };

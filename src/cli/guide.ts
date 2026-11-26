@@ -33,6 +33,7 @@ Flow
      commit) or false (the user clicked Commit). Tell the user whether the write went through them.
 
 Commands
+  cais llm skill                        prints the Cais skill (SKILL.md): the rules for agents, readable without installing it
   cais llm query <env> (--sql "<sql>" | --file <file> | -) [--write] [--reason "<reason>"]
                        [--database db] [--max-rows N] [--wait] [--timeout 600] [--client "Claude Code"]
   cais llm status <request_id> [--wait] [--timeout 600]

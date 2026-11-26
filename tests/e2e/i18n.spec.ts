@@ -62,8 +62,8 @@ test('the application menu is in English', async () => {
   // About lives under Help, except on macOS (the app menu)
   if (process.platform !== 'darwin') expect(labels).toContain('Help');
   const all = menu.flatMap((i) => i.items);
-  expect(all).toEqual(expect.arrayContaining(['About Cais', 'Install cais Command in Terminal', 'Undo', 'Redo', 'Cut', 'Copy', 'Paste', 'Select All', 'Minimize']));
-  for (const pt of ['Editar', 'Desfazer', 'Colar', 'Janela', 'Exibir', 'Selecionar tudo', 'Ajuda', 'Sobre o Cais']) expect(all.concat(labels)).not.toContain(pt);
+  expect(all).toEqual(expect.arrayContaining(['About Cais', 'Install cais Command in Terminal', 'Install Agent Skill…', 'Undo', 'Redo', 'Cut', 'Copy', 'Paste', 'Select All', 'Minimize']));
+  for (const pt of ['Instalar skill para agentes…', 'Editar', 'Desfazer', 'Colar', 'Janela', 'Exibir', 'Selecionar tudo', 'Ajuda', 'Sobre o Cais']) expect(all.concat(labels)).not.toContain(pt);
   await expect(page.locator('html')).toHaveAttribute('lang', 'en');
 });
 

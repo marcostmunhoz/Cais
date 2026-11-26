@@ -14,6 +14,7 @@ export const MAX_SQL_BYTES = 100 * 1024;
 
 export type Command =
   | { name: 'guide' }
+  | { name: 'skill' }
   | { name: 'envs' }
   | { name: 'schema'; env: string; database?: string; table?: string }
   | {
@@ -47,6 +48,7 @@ const BOOL_FLAGS = new Set(['--write', '--wait']);
 
 const ALLOWED: Record<string, { flags: string[]; positionals: number }> = {
   guide: { flags: ['--client'], positionals: 0 },
+  skill: { flags: ['--client'], positionals: 0 },
   envs: { flags: ['--client'], positionals: 0 },
   schema: { flags: ['--database', '--table', '--client'], positionals: 1 },
   query: { flags: ['--sql', '--file', '--write', '--reason', '--database', '--max-rows', '--wait', '--timeout', '--client'], positionals: 1 },
@@ -135,6 +137,9 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = {}): Parsed {
   switch (sub) {
     case 'guide':
       command = { name: 'guide' };
+      break;
+    case 'skill':
+      command = { name: 'skill' };
       break;
     case 'envs':
       command = { name: 'envs' };

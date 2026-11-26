@@ -3,6 +3,7 @@ export const ptBR = {
   app: 'Cais',
   about: 'Sobre o Cais',
   installCli: 'Instalar comando cais no terminal',
+  installSkill: 'Instalar skill para agentes…',
   hide: 'Ocultar Cais',
   hideOthers: 'Ocultar outros',
   unhide: 'Mostrar tudo',

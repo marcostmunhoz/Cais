@@ -9,7 +9,7 @@ The security model behind this, with its known limits, is in [security.md](secur
 1. In Cais, open **Agents** (at the bottom of the sidebar) and turn on **Agent access**. Access is off by default and only the user turns it on, in the app; while it is off, the socket does not even exist. The status bar shows "Agents on".
 2. Menu **Cais › Install cais Command in Terminal** (on Linux, the **File** menu). Cais creates a `cais` link to the app's `cais.mjs` in `/usr/local/bin` if it can write there, otherwise in `~/.local/bin`, and warns when the folder is not in the PATH. In the Linux deb the command does not ship in the package: this menu is the way to install it, and in practice it creates the link in `~/.local/bin` (`/usr/local/bin` is usually root's). It never overwrites a file or link that is not Cais's own. On Windows the item is disabled: use `node <path>/cais.mjs`. The command runs on the system's Node, version 20 or newer.
 3. In development, without installing: `npm run cli -- llm envs` (rebuilds the CLI and runs it; it needs Cais open with `npm run dev` and access on).
-4. Give the agent the skill [skills/cais/SKILL.md](../skills/cais/SKILL.md). In Claude Code, the suggested permission is `Bash(cais llm:*)`.
+4. Give the agent the skill, in one of three ways. **Menu Cais › Install Agent Skill…** (on Linux and Windows, the **File** menu) asks where to put it: **Claude Code** copies it to `~/.claude/skills/cais/SKILL.md`, and **Choose Folder…** copies it to `cais/SKILL.md` inside the folder where another agent keeps its skills. The result shows in a dialog: installed, updated, already up to date, or refused with the reason. Cais overwrites only a `SKILL.md` of its own (`name: cais` in the frontmatter, any version) and refuses a link, a file or folder where the skill should go, or a `SKILL.md` that is not its own. **`cais llm skill`** prints the skill text on standard output (it works with Cais closed and does not need the socket), so an agent allowed only `Bash(cais llm:*)` can read the rules without any install. The file in the repository, [skills/cais/SKILL.md](../skills/cais/SKILL.md), stays an alternative. In Claude Code, the suggested permission is `Bash(cais llm:*)`.
 
 **Turning access off** closes the socket immediately: pending requests expire, open agent transactions are rolled back, reads in progress are interrupted, no new connection opens and the 15-minute grants go away. Quitting the app does the same.
 
@@ -29,6 +29,7 @@ The CLI talks to the running Cais over a local socket, one JSON line per message
 
 ```
 cais llm guide
+cais llm skill
 cais llm envs
 cais llm schema <env> [--database db] [--table t]
 cais llm query <env> (--sql "<sql>" | --file <file> | -) [--write] [--reason "<reason>"] [--database db]
@@ -45,6 +46,7 @@ All of them accept `--client "<name>"` (or the `CAIS_CLIENT` variable; default "
 | Command | What it does |
 |---|---|
 | `guide` | The flow, the rules and the exit codes, as text. Does not need Cais open. |
+| `skill` | The text of the Cais skill (`SKILL.md`), the same file the menu installs, embedded in the CLI at build time. Does not need Cais open. |
 | `envs` | Lists the environments: `id`, `slug` (`project/environment`), `project`, `name`, `production`, `engine`, `agent_access` and `default_database`. No host, user or credential. |
 | `schema` | Databases and tables of the environment (metadata only). Without `--database`, only the table names; with `--database` or `--table`, the columns (`name`, `type`, `nullable`, `key`). Runs directly in any environment, production included, and goes to the Trail. 60 s cache per environment. |
 | `query` | Runs SQL. Without `--write` it is a read; with `--write`, a write in a transaction. |
@@ -68,7 +70,7 @@ All of them accept `--client "<name>"` (or the `CAIS_CLIENT` variable; default "
 
 ## Output
 
-All output, except the `guide` (text), is JSON on standard output, one line, errors included: `{ "error": "...", "code": "..." }`. Cutting the output with `head` is not an error: the command exits silently and the exit code is the request's. The texts are always in English; the codes are the contract.
+All output, except the `guide` and the `skill` (text), is JSON on standard output, one line, errors included: `{ "error": "...", "code": "..." }`. Cutting the output with `head` is not an error: the command exits silently and the exit code is the request's. The texts are always in English; the codes are the contract.
 
 `query` and `status` response:
 

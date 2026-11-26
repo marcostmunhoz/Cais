@@ -5,6 +5,7 @@ import { send, type Reply } from './client';
 import { discoverEndpoint, PROTOCOL_MISMATCH_MESSAGE, UNAVAILABLE_MESSAGE } from './endpoint';
 import { EXIT, exitForError, exitForResult } from './exit';
 import { GUIDE } from './guide';
+import { SKILL } from './skill';
 import { finalExitCode, guardPipe, writeTo } from './output';
 
 // a reader that closes the pipe early (`| head`) is not an error: no stack trace, the computed exit code stands
@@ -52,6 +53,7 @@ async function loadSql(source: SqlSource): Promise<string> {
 async function toRequest(command: Command, client: string): Promise<{ method: string; params: Record<string, unknown> } | null> {
   switch (command.name) {
     case 'guide':
+    case 'skill':
       return null;
     case 'envs':
       return { method: 'envs', params: {} };
@@ -123,6 +125,10 @@ async function main(argv: string[]): Promise<number> {
   }
   if (parsed.command.name === 'guide') {
     writeTo(process.stdout, GUIDE);
+    return EXIT.ok;
+  }
+  if (parsed.command.name === 'skill') {
+    writeTo(process.stdout, SKILL);
     return EXIT.ok;
   }
 

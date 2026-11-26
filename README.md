@@ -132,7 +132,7 @@ AI agents with a shell (Claude Code and others) query and, with your approval, f
 
 1. In Cais, open **Agents** (bottom of the sidebar) and turn on **Agent access**. It starts off, and while off the socket does not even exist.
 2. Menu **Cais › Install cais Command in Terminal** (on Linux, the **File** menu): creates the `cais` link in `/usr/local/bin` or in `~/.local/bin`. The command runs on the system Node (20 or newer). On Windows, run `node <path>/cais.mjs`.
-3. Give the agent the skill [skills/cais/SKILL.md](skills/cais/SKILL.md) and, in Claude Code, the permission `Bash(cais llm:*)`.
+3. Give the agent the skill: menu **Cais › Install Agent Skill…** (on Linux, the **File** menu), which installs it for Claude Code (`~/.claude/skills`) or in a folder of your choice, where another agent keeps its skills. Or let the agent read it with `cais llm skill`, without installing anything. The file in the repository, [skills/cais/SKILL.md](skills/cais/SKILL.md), stays an alternative. In Claude Code, also allow `Bash(cais llm:*)`.
 
 ```bash
 cais llm guide

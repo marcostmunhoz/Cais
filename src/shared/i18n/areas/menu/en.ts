@@ -6,6 +6,7 @@ export const en: Shape<typeof ptBR> = {
   app: 'Cais',
   about: 'About Cais',
   installCli: 'Install cais Command in Terminal',
+  installSkill: 'Install Agent Skill…',
   hide: 'Hide Cais',
   hideOthers: 'Hide Others',
   unhide: 'Show All',
