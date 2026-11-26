@@ -309,6 +309,7 @@ async function bootstrap(): Promise<void> {
     resolveConnectParams: (environment) => resolveParams(environment, 'person'),
     getDriver,
     getDialect,
+    estimateEnabled: () => settings.estimateAsYouType,
     emit: (state) => {
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(CHANNELS.eventSessionState, state);
     },
@@ -418,6 +419,7 @@ async function bootstrap(): Promise<void> {
     store,
     tabs,
     scripts,
+    settings,
     agents: { access, broker },
     gcloud,
     // the e2e never runs gcloud: the registry offers a fixed account

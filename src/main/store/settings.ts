@@ -7,9 +7,14 @@ import { Seal } from './seal';
 export interface Settings {
   version: 1;
   agentAccess: boolean;
+  /** BigQuery "Estimar ao digitar" (off when absent). Not signed by the seal: it grants agents nothing. */
+  estimateAsYouType?: boolean;
 }
 
-/** settings.json: the one switch the person owns. Agent access starts off. */
+/**
+ * settings.json: what the person owns. Agent access starts off and is sealed; "Estimar ao digitar" is a plain
+ * preference of the person's own session (off by default) and outside the seal.
+ */
 export class SettingsStore {
   private value: Settings = { version: 1, agentAccess: false };
   private readonly path: string;
@@ -52,6 +57,15 @@ export class SettingsStore {
 
   get agentAccess(): boolean {
     return this.value.agentAccess;
+  }
+
+  get estimateAsYouType(): boolean {
+    return this.value.estimateAsYouType === true;
+  }
+
+  async setEstimateAsYouType(enabled: boolean): Promise<void> {
+    this.value = { ...this.value, estimateAsYouType: enabled };
+    await writeFileAtomic(this.path, JSON.stringify(this.value, null, 2));
   }
 
   async setAgentAccess(enabled: boolean): Promise<void> {

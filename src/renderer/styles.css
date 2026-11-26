@@ -440,6 +440,68 @@ html:not(.platform-darwin) .sidebar {
   font-weight: 500;
 }
 
+.mode-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 6px;
+  border: 0.5px solid var(--border);
+  background: var(--surface-1);
+  color: var(--text-secondary);
+  cursor: default;
+  user-select: none;
+}
+
+.estimate-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.estimate-switch:hover {
+  color: var(--text-primary);
+}
+
+.estimate-switch .track {
+  position: relative;
+  flex: none;
+  width: 24px;
+  height: 14px;
+  border-radius: 7px;
+  border: 0.5px solid var(--border-strong);
+  background: var(--fill-ghost-selected);
+}
+
+.estimate-switch .track::after {
+  content: '';
+  position: absolute;
+  top: 1.5px;
+  left: 1.5px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  transition: transform 0.12s;
+}
+
+.estimate-switch[aria-checked='true'] .track {
+  background: var(--accent);
+  border-color: transparent;
+}
+
+.estimate-switch[aria-checked='true'] .track::after {
+  transform: translateX(10px);
+}
+
 .select {
   appearance: none;
   height: 24px;
@@ -703,6 +765,24 @@ kbd {
   text-decoration: none;
   font-weight: 600;
   color: var(--accent-text);
+}
+
+.cm-tooltip.cm-tooltip-lint {
+  background: var(--surface-3);
+  border: 0.5px solid var(--border-strong);
+  border-radius: 6px;
+  box-shadow: var(--shadow);
+  color: var(--text-primary);
+  font-size: 12px;
+  max-width: 560px;
+}
+
+.cm-tooltip-lint .cm-diagnostic {
+  white-space: pre-wrap;
+}
+
+.cm-tooltip-lint .cm-diagnostic-error {
+  border-left-color: var(--danger);
 }
 
 .splitter {

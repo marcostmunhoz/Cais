@@ -23,6 +23,7 @@ import {
 } from '@shared/grid';
 import type { CellValue, SchemaTree, StatementResult } from '@shared/results';
 import { m, render } from './i18n';
+import { forgetEstimates, resetEstimates } from './estimate';
 
 const api = (): Window['cais'] => window.cais;
 
@@ -81,6 +82,9 @@ function patchRun(tabId: string, patch: Partial<RunView>): void {
 }
 
 function setSession(state: SessionState): void {
+  // a connection that comes back: what the server said through the old one is asked again
+  const before = getState().sessions[state.tabId]?.status;
+  if (state.status === 'idle' && before !== 'idle' && before !== 'running') forgetEstimates(state.environmentId);
   setState((s) => {
     if (!s.tabs.some((t) => t.id === state.tabId)) return {};
     return { sessions: { ...s.sessions, [state.tabId]: state } };
@@ -106,11 +110,12 @@ export function flushTabs(): void {
 // --- init --------------------------------------------------------------------
 
 export async function init(): Promise<void> {
-  const [catalog, tabsFile, scripts, agents] = await Promise.all([
+  const [catalog, tabsFile, scripts, agents, settings] = await Promise.all([
     api().catalog.get(),
     api().tabs.load(),
     api().scripts.list(),
     api().agents.get(),
+    api().settings.get(),
   ]);
   const tabs = (tabsFile.tabs ?? [])
     .filter((t) => t && typeof t.id === 'string' && catalog.environments.some((e) => e.id === t.environmentId))
@@ -118,7 +123,7 @@ export async function init(): Promise<void> {
     .map((t) => (t.scriptId && !scripts.some((sc) => sc.id === t.scriptId) ? { ...t, scriptId: undefined } : t));
   const activeTabId = tabs.some((t) => t.id === tabsFile.activeTabId) ? tabsFile.activeTabId : (tabs[0]?.id ?? null);
   const notices = [...(catalog.notices ?? []), ...(tabsFile.notice ? [tabsFile.notice] : [])];
-  setState({ catalog, tabs, scripts, agents, activeTabId, notices, loaded: true });
+  setState({ catalog, tabs, scripts, agents, activeTabId, notices, estimateAsYouType: settings.estimateAsYouType, loaded: true });
 
   api().events.onSessionState(setSession);
   api().events.onScriptsChanged(() => void refreshScripts());
@@ -349,12 +354,27 @@ async function markScriptRun(tabId: string): Promise<void> {
   }
 }
 
+// --- settings ----------------------------------------------------------------
+
+/** "Estimar ao digitar": on or off for every tab, kept by main. Turning it off drops what was estimated. */
+export async function setEstimateAsYouType(enabled: boolean): Promise<void> {
+  try {
+    const settings = await api().settings.setEstimateAsYouType(enabled);
+    // off then on asks again: nothing is kept from before
+    resetEstimates();
+    setState({ estimateAsYouType: settings.estimateAsYouType, ...(settings.estimateAsYouType ? {} : { estimates: {} }) });
+  } catch (e) {
+    showToast(errorMessage(e));
+  }
+}
+
 // --- schema ------------------------------------------------------------------
 
 export async function loadSchema(environmentId: string, refresh = false): Promise<void> {
   const current = getState().schemas[environmentId];
   if (!refresh && (current?.status === 'ready' || current?.status === 'loading')) return;
   // a refresh forgets the columns read so far: the datasets that were open are read again below
+  if (refresh) forgetEstimates(environmentId);
   const reopen = refresh ? Object.entries(current?.datasets ?? {}).filter(([, d]) => d.status === 'ready').map(([name]) => name) : [];
   setState((s) => ({ schemas: { ...s.schemas, [environmentId]: { status: 'loading', tree: s.schemas[environmentId]?.tree } } }));
   try {
@@ -451,11 +471,12 @@ function removeTab(tabId: string): void {
     const { [tabId]: _session, ...sessions } = s.sessions;
     const { [tabId]: _run, ...runs } = s.runs;
     const { [tabId]: _mode, ...pendingModes } = s.pendingModes;
+    const { [tabId]: _estimate, ...estimates } = s.estimates;
     const activeTabId =
       s.activeTabId === tabId ? (tabs[Math.min(index, tabs.length - 1)]?.id ?? null) : s.activeTabId;
     const remaining = s.focusOrder.filter((id) => id !== tabId);
     const focusOrder = activeTabId ? focusTab(remaining, activeTabId) : remaining;
-    return { tabs, sessions, runs, pendingModes, activeTabId, focusOrder };
+    return { tabs, sessions, runs, pendingModes, estimates, activeTabId, focusOrder };
   });
   scheduleSaveTabs();
 }
@@ -937,6 +958,7 @@ async function editStatements(
   try {
     // quietly: the grid keeps its state while the schema is read (no "Carregando o schema")
     const tree = await api().schema.get(environmentId, { refresh: true });
+    forgetEstimates(environmentId);
     setState((s) => ({ schemas: { ...s.schemas, [environmentId]: { status: 'ready', tree } } }));
   } catch (e) {
     showToast(m().grid.reason.schemaFailed({ message: errorMessage(e) }));

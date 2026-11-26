@@ -57,6 +57,30 @@ export interface SetModeResponse {
   needsConfirmation?: { reason: 'production-autocommit' };
 }
 
+/** What the person chose in the app that is kept across runs (`settings.json`, apart from the agent access switch). */
+export interface UserSettings {
+  /** BigQuery: dry-run the statement under the cursor after a pause in typing (its text goes to Google). Off by default. */
+  estimateAsYouType: boolean;
+}
+
+/** Why `estimate` did nothing (and sent nothing). */
+export type EstimateSkip = 'off' | 'not-connected' | 'busy' | 'unsupported' | 'no-statement' | 'cancelled';
+
+/**
+ * The answer to a dry run of the statement being typed. Never a result set, never a job: nothing ran.
+ * `error` is what the server (or the driver) said about the text, with the server's own words in `detail`.
+ */
+export type EstimateResponse =
+  | { state: 'ok'; bytes?: number }
+  | {
+      state: 'error';
+      /** `inStatement`: the server faulted the text (syntax, unknown name), so it belongs in the editor; otherwise it is about reaching the server. */
+      error: { message: string; detail?: string; hint?: string; code?: string; inStatement: boolean };
+    }
+  /** The app's own rules refuse the statement (not a read, ...): refused here, nothing was sent. */
+  | { state: 'refused'; message: string }
+  | { state: 'skipped'; reason: EstimateSkip };
+
 export interface PendingTransaction {
   tabId: string;
   statements: number;
@@ -100,6 +124,15 @@ export interface CaisApi {
     /** Desconectar: keeps the tab, its mode and database. Refused by main with a transaction open (`transaction-open`). */
     disconnect(tabId: string): Promise<SessionState>;
     state(tabId: string): Promise<SessionState>;
+    /**
+     * BigQuery: asks the server what one statement would read, without running it (dry run). Main refuses it while
+     * "Estimar ao digitar" is off, and reclassifies the text: only a plain read leaves the app. Not on the trail.
+     */
+    estimate(tabId: string, sql: string): Promise<EstimateResponse>;
+  };
+  settings: {
+    get(): Promise<UserSettings>;
+    setEstimateAsYouType(enabled: boolean): Promise<UserSettings>;
   };
   schema: {
     /**
@@ -173,6 +206,9 @@ export const CHANNELS = {
   sessionClose: 'session:close',
   sessionDisconnect: 'session:disconnect',
   sessionState: 'session:state',
+  sessionEstimate: 'session:estimate',
+  settingsGet: 'settings:get',
+  settingsSetEstimateAsYouType: 'settings:setEstimateAsYouType',
   schemaGet: 'schema:get',
   scriptsList: 'scripts:list',
   scriptsSave: 'scripts:save',

@@ -17,12 +17,15 @@ import {
 } from '@codemirror/view';
 import { tags } from '@lezer/highlight';
 import { getDialect, statementAtCursor } from '@shared/dialects/registry';
+import { capabilitiesOf } from '@shared/engines';
 import type { Engine } from '@shared/model';
 import type { Dialect } from '@shared/dialects/types';
 import type { SchemaTree } from '@shared/results';
 import { registerEditor, updateTabSql } from '../lib/actions';
 import { CODEMIRROR_DIALECTS } from '../lib/codemirrorDialects';
+import { estimateLinter, estimateNow } from '../lib/estimateLint';
 import { m } from '../lib/i18n';
+import { useStore } from '../lib/store';
 
 export const highlightStyle = HighlightStyle.define([
   { tag: [tags.keyword, tags.operatorKeyword, tags.modifier], color: 'var(--accent-text)', fontWeight: '500' },
@@ -142,6 +145,8 @@ export function Editor({ tabId, initialSql, engine, schema, database }: Props) {
         compartment.current.of(sqlExtension(dialect, current.current.schema, current.current.database)),
         syntaxHighlighting(highlightStyle),
         activeStatementPlugin(dialect),
+        // an engine that answers a dry run (BigQuery): the statement under the cursor is estimated after a pause, while the switch is on
+        ...(capabilitiesOf(current.current.engine).dryRun ? [estimateLinter(id, dialect)] : []),
         EditorView.contentAttributes.of({ 'aria-label': t.ariaLabel, spellcheck: 'false' }),
         EditorView.updateListener.of((update) => {
           if (update.docChanged && current.current.tabId === id) updateTabSql(id, update.state.doc.toString());
@@ -190,6 +195,15 @@ export function Editor({ tabId, initialSql, engine, schema, database }: Props) {
     view.focus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabId]);
+
+  // "Estimar ao digitar" turned on, or the tab connected: estimate now, without waiting for a keystroke (off clears the marks)
+  const estimateOn = useStore((st) => st.estimateAsYouType);
+  const connected = useStore((st) => st.sessions[tabId]?.status === 'idle');
+  // (a new default dataset is another question for the same text, so it estimates again too)
+  const tabDatabase = useStore((st) => st.sessions[tabId]?.database);
+  useEffect(() => {
+    if (viewRef.current && capabilitiesOf(engine).dryRun) estimateNow(viewRef.current);
+  }, [estimateOn, connected, tabId, engine, tabDatabase]);
 
   // schema or current database changed: refresh the completion source
   useEffect(() => {
