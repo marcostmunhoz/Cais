@@ -66,12 +66,23 @@ export function seedUserData(
   if (extra.scripts) writeFileSync(join(dir, 'scripts.json'), JSON.stringify({ version: 1, scripts: extra.scripts }));
 }
 
-export async function launch(userData: string, env: Record<string, string> = {}): Promise<{ app: ElectronApplication; page: Page }> {
-  const app = await electron.launch({
-    args: [root],
+/**
+ * Options for `electron.launch`. On Linux Electron picks Wayland when WAYLAND_DISPLAY is set, which would open the
+ * windows on the real desktop even under xvfb-run (it only sets DISPLAY); so force X11 and drop WAYLAND_DISPLAY.
+ */
+export function electronOptions(userData: string, env: Record<string, string> = {}): Parameters<typeof electron.launch>[0] {
+  const linux = process.platform === 'linux';
+  const base: NodeJS.ProcessEnv = { ...process.env };
+  if (linux) delete base.WAYLAND_DISPLAY;
+  return {
+    args: linux ? ['--ozone-platform=x11', root] : [root],
     cwd: root,
-    env: { ...process.env, CAIS_E2E: '1', CAIS_LOCALE: 'pt-BR', CAIS_USER_DATA: userData, ...env },
-  });
+    env: { ...base, CAIS_E2E: '1', CAIS_LOCALE: 'pt-BR', CAIS_USER_DATA: userData, ...env } as Record<string, string>,
+  };
+}
+
+export async function launch(userData: string, env: Record<string, string> = {}): Promise<{ app: ElectronApplication; page: Page }> {
+  const app = await electron.launch(electronOptions(userData, env));
   const page = await app.firstWindow();
   await page.waitForLoadState('domcontentloaded');
   return { app, page };

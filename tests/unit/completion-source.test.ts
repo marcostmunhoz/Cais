@@ -30,7 +30,7 @@ function stateOf(marked: string, engine: Engine = 'mysql'): { state: EditorState
   const source = schemaCompletion({ dialect, tree, database: 'shop', words });
   const pos = marked.indexOf('|');
   const state = EditorState.create({
-    doc: marked.replace('|', ''),
+    doc: pos === -1 ? marked : marked.slice(0, pos) + marked.slice(pos + 1),
     extensions: [sql({ dialect: withKeywords, upperCaseKeywords: true }), withKeywords.language.data.of({ autocomplete: source })],
   });
   return { state, pos };

@@ -26,7 +26,7 @@ const words = { table: 'tabela', view: 'view', database: 'banco' };
 
 function offer(marked: string, options: { engine?: Engine; tree?: SchemaTree | undefined; database?: string | null } = {}): Candidate[] {
   const offset = marked.indexOf('|');
-  const sql = marked.replace('|', '');
+  const sql = offset === -1 ? marked : marked.slice(0, offset) + marked.slice(offset + 1);
   const dialect = getDialect(options.engine ?? 'mysql');
   return completionCandidates({
     tree: 'tree' in options ? options.tree : tree,
