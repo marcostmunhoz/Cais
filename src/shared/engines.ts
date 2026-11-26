@@ -3,7 +3,10 @@
 import type { BigqueryEnvironment, Engine, MysqlEnvironment, SessionMode } from './model';
 
 export interface EngineCapabilities {
-  /** The session modes the engine accepts, in the order the mode picker lists them. */
+  /**
+   * The session modes the engine accepts, in the order the mode picker lists them. The picker lists only these; with a
+   * single one there is nothing to pick and the session bar shows it as a fixed badge (`fixedModeOf`).
+   */
   modes: readonly SessionMode[];
   /** The result grid may edit rows (UPDATE by primary key). */
   gridEdit: boolean;
@@ -21,6 +24,11 @@ const CAPABILITIES: Record<Engine, EngineCapabilities> = {
 
 export function capabilitiesOf(engine: Engine): EngineCapabilities {
   return CAPABILITIES[engine];
+}
+
+/** The only mode the engine accepts, when there is exactly one (nothing to choose: the session bar shows a badge); otherwise null. */
+export function fixedModeOf(caps: EngineCapabilities): SessionMode | null {
+  return caps.modes.length === 1 ? caps.modes[0]! : null;
 }
 
 /**
