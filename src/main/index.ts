@@ -28,6 +28,7 @@ import { installCli } from './cli-install';
 import { installSkill, resolveSkillsDir } from './skill-install';
 import { GcloudTokenProvider, type SpawnFn } from './auth/gcloud';
 import { initMainLocale, mainLocale } from './i18n';
+import { FileLog, logProcessErrors, logWebContents } from './log';
 import iconPath from '../../resources/icon.png?asset';
 import { configureDrivers, getDriver } from './drivers/registry';
 import { registerIpc } from './ipc';
@@ -66,7 +67,21 @@ if (debugRequested && !e2e) {
 }
 if (e2e && process.env.CAIS_USER_DATA) {
   app.setPath('userData', process.env.CAIS_USER_DATA);
+  // tests never write to the real logs folder
+  app.setPath('logs', join(process.env.CAIS_USER_DATA, 'logs'));
 }
+
+// The local log (`main.log`): typed events only, never leaves the machine (docs/security.md#the-local-log).
+// The same line goes to the console for warnings and errors, so running from a terminal shows it.
+const fileLog = new FileLog({ dir: () => app.getPath('logs'), echo: (line) => console.warn(line) });
+const log = fileLog.sink;
+// A console write to a dead pipe (`cais-app 2>&1 | head`, a closed terminal) raises an async error on the stream; with no
+// listener it would be an uncaught exception, which the log echoes to the console, which fails again: an endless loop.
+for (const stream of [process.stdout, process.stderr]) stream.on('error', () => {});
+// the log's listener replaces Node's warning for a rejection, so the console still gets the reason while developing
+logProcessErrors(process, log, app.getAppPath(), (reason) => {
+  if (!app.isPackaged) console.error(reason);
+});
 
 // One Cais per user (and per user data folder): a second launch focuses the first window and quits.
 const gotLock = app.requestSingleInstanceLock();
@@ -264,6 +279,7 @@ function createWindow(): BrowserWindow {
     },
   });
   win.once('ready-to-show', () => (e2e ? win.showInactive() : win.show()));
+  logWebContents(win.webContents, log);
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', (event) => event.preventDefault());
   win.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
@@ -344,6 +360,7 @@ async function bootstrap(): Promise<void> {
     homedir: homedir(),
     exists: isExecutable,
     now: () => Date.now(),
+    log,
   });
 
   // Test hook (unpackaged app only): the BigQuery token is a fixed fake, and the REST address may be a local fake server.
@@ -487,6 +504,7 @@ async function bootstrap(): Promise<void> {
         ? () => Promise.reject(new Error('offline under test'))
         : (url, init) => net.fetch(url, init),
     ...(releasesUrl ? { url: releasesUrl } : {}),
+    log,
   });
 
   registerIpc({
@@ -568,6 +586,7 @@ void app.whenReady().then(async () => {
   if (!gotLock) return;
   // the locale comes first: the menu, dialogs and the window's argument depend on it
   initMainLocale();
+  log({ kind: 'app-start', version: app.getVersion(), platform: process.platform, arch: process.arch, electron: process.versions.electron });
   nativeTheme.themeSource = 'system';
   // development only: the packaged app takes its Dock icon from the bundle
   if (isMac && !app.isPackaged) app.dock?.setIcon(iconPath);

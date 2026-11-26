@@ -1,12 +1,13 @@
 import { delimiter, join } from 'node:path';
 import { ref, render, type MessageRef } from '@shared/i18n';
 import { CaisError } from '../errors';
+import { type GcloudCommandId, type LogSink } from '../log';
 
 /** Minimal process surface the provider needs, so tests can inject a fake `spawn`. */
 export interface ChildLike {
   stdout: { on(event: 'data', cb: (chunk: Buffer | string) => void): unknown } | null;
   stderr: { on(event: 'data', cb: (chunk: Buffer | string) => void): unknown } | null;
-  on(event: 'close', cb: (code: number | null) => void): unknown;
+  on(event: 'close', cb: (code: number | null, signal?: string | null) => void): unknown;
   on(event: 'error', cb: (error: Error) => void): unknown;
   kill(): unknown;
 }
@@ -16,6 +17,8 @@ export interface RunResult {
   code: number | null;
   stdout: string;
   stderr: string;
+  /** The signal that ended the process, when one did (never on a normal exit). */
+  signal?: string;
 }
 
 export function runProcess(
@@ -50,11 +53,11 @@ export function runProcess(
       clearTimeout(timer);
       reject(error);
     });
-    child.on('close', (code) => {
+    child.on('close', (code, signal) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      resolve({ code, stdout, stderr });
+      resolve({ code, stdout, stderr, ...(signal ? { signal } : {}) });
     });
   });
 }
@@ -72,6 +75,8 @@ export interface GcloudDeps {
   /** Is there an executable file at this path? */
   exists(path: string): boolean;
   now(): number;
+  /** Where a failed command is recorded: which command and how it ended, never what it printed. */
+  log?: LogSink;
 }
 
 const TOKEN_TTL_MS = 50 * 60 * 1000;
@@ -148,23 +153,40 @@ export class GcloudTokenProvider {
     return candidates.find((c) => exists(c)) ?? null;
   }
 
-  private async run(args: string[], timeoutMs: number): Promise<RunResult> {
+  private async run(command: GcloudCommandId, args: string[], timeoutMs: number): Promise<RunResult> {
     const binary = await this.locate();
-    if (!binary) throw notFound();
+    if (!binary) {
+      this.logFailure(command, 'not-found', null, null);
+      throw notFound();
+    }
     const env = { ...this.deps.env, CLOUDSDK_CORE_DISABLE_PROMPTS: '1' };
+    let result: RunResult;
     try {
-      return await runProcess(this.deps.spawn, binary, args, env, timeoutMs);
+      result = await runProcess(this.deps.spawn, binary, args, env, timeoutMs);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
         this.binary = undefined;
+        this.logFailure(command, 'not-found', null, null);
         throw notFound();
       }
+      this.logFailure(command, (error as CaisError).code === 'gcloud-timeout' ? 'timeout' : 'spawn-error', null, null);
       throw error;
+    }
+    if (result.code !== 0) this.logFailure(command, result.code === null ? 'signal' : 'exit', result.code, result.signal ?? null);
+    return result;
+  }
+
+  /** Command id, how it ended, exit code and signal: nothing from stdout or stderr, nothing from the arguments (account, service account). */
+  private logFailure(command: GcloudCommandId, outcome: 'exit' | 'signal' | 'timeout' | 'spawn-error' | 'not-found', exit: number | null, signal: string | null): void {
+    try {
+      this.deps.log?.({ kind: 'gcloud-failed', command, outcome, exit, signal });
+    } catch {
+      // logging never changes what the caller sees
     }
   }
 
   async listAccounts(): Promise<GcloudAccount[]> {
-    const res = await this.run(['auth', 'list', '--format=json'], 20000);
+    const res = await this.run('auth-list', ['auth', 'list', '--format=json'], 20000);
     if (res.code !== 0) {
       throw trimmed(ref('mainMisc.gcloud.listFailed', { detail: firstLine(res.stderr) }), 'gcloud-failed');
     }
@@ -225,7 +247,7 @@ export class GcloudTokenProvider {
   private async fetchAccessToken(account: string, sa?: string): Promise<string> {
     const args = ['auth', 'print-access-token', `--account=${account}`];
     if (sa) args.push(`--impersonate-service-account=${sa}`);
-    const res = await this.run(args, 30000);
+    const res = await this.run('print-access-token', args, 30000);
     if (res.code !== 0) {
       if (REAUTH_MARKERS.some((re) => re.test(res.stderr))) {
         throw CaisError.of(ref('mainMisc.gcloud.reauth', { account }), 'gcloud-reauth');
@@ -240,7 +262,7 @@ export class GcloudTokenProvider {
   private async fetchToken(account: string, sa?: string): Promise<string> {
     const args = ['sql', 'generate-login-token', `--account=${account}`];
     if (sa) args.push(`--impersonate-service-account=${sa}`);
-    const res = await this.run(args, 30000);
+    const res = await this.run('sql-login-token', args, 30000);
     if (res.code !== 0) {
       if (REAUTH_MARKERS.some((re) => re.test(res.stderr))) {
         throw CaisError.of(ref('mainMisc.gcloud.reauth', { account }), 'gcloud-reauth');

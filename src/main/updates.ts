@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { AboutLink, LatestCheck } from '@shared/ipc';
+import { noLog, type LogSink, type UpdateFailureReason } from './log';
 
 /** The repository, fixed. The only place a page the app opens in the browser gets its address from. */
 export const REPOSITORY_URL = 'https://github.com/marcostmunhoz/Cais';
@@ -58,6 +59,8 @@ export interface ReleaseCheckerOptions {
   url?: string;
   now?: () => number;
   timeoutMs?: number;
+  /** Where a failed check is recorded (reason and duration only). */
+  log?: LogSink;
 }
 
 /**
@@ -69,6 +72,7 @@ export class ReleaseChecker {
   private readonly url: string;
   private readonly now: () => number;
   private readonly timeoutMs: number;
+  private readonly log: LogSink;
   private cached: { at: number; ttl: number; result: LatestCheck } | undefined;
   private inFlight: Promise<LatestCheck> | undefined;
   /** The newest tag the last successful check saw (validated), for `linkUrl('release')`. */
@@ -78,6 +82,7 @@ export class ReleaseChecker {
     this.url = options.url ?? LATEST_RELEASE_API_URL;
     this.now = options.now ?? Date.now;
     this.timeoutMs = options.timeoutMs ?? CHECK_TIMEOUT_MS;
+    this.log = options.log ?? noLog;
   }
 
   async check(): Promise<LatestCheck> {
@@ -104,23 +109,48 @@ export class ReleaseChecker {
   }
 
   private async request(): Promise<LatestCheck> {
-    const unavailable: LatestCheck = { status: 'unavailable' };
+    const started = this.now();
+    // every failure is the same `unavailable` to the person; the log keeps why, as a closed reason and the time spent
+    const fail = (reason: UpdateFailureReason): LatestCheck => {
+      try {
+        this.log({ kind: 'update-check-failed', reason, ms: Math.max(0, this.now() - started) });
+      } catch {
+        // logging never changes the answer
+      }
+      return { status: 'unavailable' };
+    };
     const current = parseVersion(this.options.version);
-    if (!current) return unavailable;
+    if (!current) return fail('invalid-current-version');
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
-      const response = await this.options.fetch(this.url, {
-        method: 'GET',
-        headers: { Accept: 'application/vnd.github+json', 'User-Agent': `Cais/${this.options.version}` },
-        signal: controller.signal,
-        credentials: 'omit',
-      });
-      if (!response.ok) return unavailable;
-      const text = await response.text();
-      if (text.length > MAX_BODY_CHARS) return unavailable;
-      const parsed = latestRelease.safeParse(JSON.parse(text));
-      if (!parsed.success) return unavailable;
+      let response: Response;
+      try {
+        response = await this.options.fetch(this.url, {
+          method: 'GET',
+          headers: { Accept: 'application/vnd.github+json', 'User-Agent': `Cais/${this.options.version}` },
+          signal: controller.signal,
+          credentials: 'omit',
+        });
+      } catch {
+        return fail(controller.signal.aborted ? 'timeout' : 'network');
+      }
+      if (!response.ok) return fail(`http-${response.status}`);
+      let text: string;
+      try {
+        text = await response.text();
+      } catch {
+        return fail(controller.signal.aborted ? 'timeout' : 'network');
+      }
+      if (text.length > MAX_BODY_CHARS) return fail('body-too-large');
+      let body: unknown;
+      try {
+        body = JSON.parse(text);
+      } catch {
+        return fail('invalid-json');
+      }
+      const parsed = latestRelease.safeParse(body);
+      if (!parsed.success) return fail('invalid-shape');
       const tag = parsed.data.tag_name;
       const latest = parseTag(tag)!;
       const label = tag.slice(1);
@@ -129,9 +159,6 @@ export class ReleaseChecker {
         return { status: 'newer', latest: label };
       }
       return { status: 'current', latest: label };
-    } catch {
-      // network, timeout, invalid JSON: all the same to the person
-      return unavailable;
     } finally {
       clearTimeout(timer);
     }

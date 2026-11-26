@@ -8,7 +8,7 @@ Before changing behavior, read [docs/behavior.md](docs/behavior.md) (what the pr
 
 | Folder | What it holds |
 |---|---|
-| `src/main` | Main process: lifecycle, IPC (`ipc.ts`), the user's sessions (`sessions.ts`), drivers (`drivers/mysql`, `drivers/bigquery`), credentials and `gcloud` (`auth/`), files and vault (`store/`), Trail (`trail.ts`), agent access (`agents/`) |
+| `src/main` | Main process: lifecycle, IPC (`ipc.ts`), the user's sessions (`sessions.ts`), drivers (`drivers/mysql`, `drivers/bigquery`), credentials and `gcloud` (`auth/`), files and vault (`store/`), Trail (`trail.ts`), local log (`log.ts`), agent access (`agents/`) |
 | `src/preload` | The `window.cais` bridge (`CaisApi` contract) |
 | `src/renderer` | React interface (`components/`, `lib/`) |
 | `src/shared` | Pure TypeScript used by both sides: model, results, IPC contract, dialects (`dialects/mysql`, `dialects/bigquery`), per-engine capabilities (`engines.ts`), i18n (`i18n/`), text rules, grid editing |
@@ -20,7 +20,7 @@ Before changing behavior, read [docs/behavior.md](docs/behavior.md) (what the pr
 
 ## Invariants
 
-- **Secrets never leave the main process** in plain text and never go to a log. The password enters through IPC only when saving and never returns to the renderer. Agents never receive a password, token, host or credential id, nor the Google Cloud project or account emails (BigQuery).
+- **Secrets never leave the main process** in plain text and never go to a log. The only log is `main.log` (`src/main/log.ts`), allowlist-only: it takes a typed `LogEvent` from a closed union, never a message string, and never holds SQL, results, database or `gcloud` text, hosts, names, ids, emails, tokens, user file paths or agent content. A new event is a new union member with closed fields, a line in `docs/security.md#the-local-log` and a unit test; there is no option to turn it off (reason in `docs/behavior.md`). The password enters through IPC only when saving and never returns to the renderer. Agents never receive a password, token, host or credential id, nor the Google Cloud project or account emails (BigQuery).
 - **The main process never trusts the renderer:** every IPC channel validates its input with zod, only accepts the main window, and the SQL is reclassified by the dialect before it runs.
 - **The interface does not know the engine:** dialect, statement classification, statement scope for autocomplete (`Dialect.analyze`) and introspection come from `src/shared/dialects` and `src/main/drivers`; what an engine does or does not do (columns per dataset, local syntax check) comes from `src/shared/engines.ts`.
 - **The app never changes `gcloud`:** only three commands, all read-only: `gcloud auth list`, `gcloud sql generate-login-token` and `gcloud auth print-access-token` (BigQuery token, with its own 50-minute cache).
@@ -31,7 +31,7 @@ Before changing behavior, read [docs/behavior.md](docs/behavior.md) (what the pr
 - **Linux:** the vault is only accepted with a real keyring (Secret Service; `basic_text` and `unknown` are refused in `SafeStorageVault`). The shortcut texts shown in the interface come from `src/shared/shortcuts.ts` (symbols on macOS, Ctrl+… elsewhere), never hardcoded in the component; key handling lives in `App.tsx` (`useGlobalShortcuts`) and must match those texts (the exception is the grid's Delete key, which marks rows for deletion: handling lives in `Results.tsx`, through `isDeleteRowsKey` from the same `shortcuts.ts`). The agent socket falls back to `$XDG_RUNTIME_DIR` when the default path exceeds 100 bytes. The deb installs the `cais-app` executable in `/opt/Cais`.
 - **Few options:** no configuration option without its reason recorded in `docs/behavior.md`.
 - **Language:** the repository is in English: docs, README, `AGENTS.md`, `skills/cais/SKILL.md`, and release notes are in English, and everything sent to agents (CLI output, `guide`, broker answers and refusals) is in English regardless of the system language. Only the in-app UI follows the system language, pt-BR or English. Every text the user sees comes from the catalogs in `src/shared/i18n/areas` (both languages, same key), never written directly in the component. No exclamation marks; trade terms as developers say them (commit, rollback, schema, query); the pt-BR catalog keeps the same style rule.
-- **Network:** only the main process leaves the machine (databases, `bigquery.googleapis.com`, the `gcloud` subprocess and, only when the user clicks Check in the About Cais window, `api.github.com`; full list in `docs/security.md`). What opens in the browser is fixed and built in main (`app:openLink` receives a name, never an address). No check runs on its own.
+- **Network:** only the main process leaves the machine (databases, `bigquery.googleapis.com`, the `gcloud` subprocess and, only when the user clicks Check in the About Cais window, `api.github.com`; full list in `docs/security.md`). The local log is a file write and involves no network. What opens in the browser is fixed and built in main (`app:openLink` receives a name, never an address). No check runs on its own.
 - **Cais runs one instance per user** (`requestSingleInstanceLock`) and refuses to start with remote debugging options (`--inspect*`, `--remote-debugging-*`), except under the e2e hook. DevTools only exists outside the packaged app.
 
 ## Conventions
@@ -73,7 +73,7 @@ All run from the project root, with Node 20.19 or newer and npm.
 ## Tests
 
 - **Test hooks** only apply with `!app.isPackaged`; the packaged app ignores them:
-  - `CAIS_E2E=1`: fake vault (no Keychain), the `userData` from `CAIS_USER_DATA`, and accepts the debugging options (Playwright uses them);
+  - `CAIS_E2E=1`: fake vault (no Keychain), the `userData` from `CAIS_USER_DATA` (and the logs folder, `CAIS_USER_DATA/logs`), and accepts the debugging options (Playwright uses them);
   - `CAIS_SOCKET`: agent socket path (the CLI also reads it);
   - `CAIS_LOCALE` = `pt-BR` | `en`: e2e pins `pt-BR` by default and uses `en` in the language test (`i18n.spec.ts`) and in the docs screenshots (`docs-images.spec.ts`);
   - `CAIS_IDLE_MS`: integer of 100 ms or more, shortens the inactivity time before disconnecting;
