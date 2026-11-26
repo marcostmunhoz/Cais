@@ -31,11 +31,11 @@ jobs:
         run: |
           version="$(node -p "require('./package.json').version")"
           if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "::error::A versão do package.json ($version) não é x.y.z."
+            echo "::error::The package.json version ($version) is not x.y.z."
             exit 1
           fi
           if [ "$TAG" != "v$version" ]; then
-            echo "::error::A tag $TAG não bate com a versão do package.json (v$version). Use npm version x.y.z e envie a tag que ele cria."
+            echo "::error::The tag $TAG does not match the package.json version (v$version). Run npm version x.y.z and push the tag it creates."
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
@@ -102,7 +102,7 @@ jobs:
         run: |
           arch="$(uname -m)"
           echo "arch: $arch"
-          [ "$arch" = "arm64" ] || { echo "::error::O runner não é arm64 ($arch)."; exit 1; }
+          [ "$arch" = "arm64" ] || { echo "::error::The runner is not arm64 ($arch)."; exit 1; }
 
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -149,7 +149,7 @@ jobs:
       - name: Fail if the release already exists
         run: |
           if gh release view "$TAG" > /dev/null 2>&1; then
-            echo "::error::Já existe uma release para $TAG. Nada foi sobrescrito."
+            echo "::error::A release for $TAG already exists. Nothing was overwritten."
             exit 1
           fi
 
@@ -171,23 +171,23 @@ jobs:
           sha256sum "cais_${VERSION}_amd64.deb" "Cais-${VERSION}-arm64.dmg" > SHA256SUMS.txt
           cat SHA256SUMS.txt
           cat > ../notes.md <<'NOTES'
-          ## Instalar
+          ## Install
 
-          **Linux (Ubuntu e derivados, x64):**
+          **Linux (Ubuntu and derivatives, x64):**
 
           ```bash
           sudo apt install ./cais___VERSION___amd64.deb
           ```
 
-          **macOS (Apple Silicon):** abra o `.dmg` e arraste o `Cais.app` para `Aplicativos`. O app tem só uma assinatura ad-hoc, sem Apple Developer ID e sem notarização, então o Gatekeeper bloqueia a primeira abertura. Para liberar, use **Ajustes do Sistema › Privacidade e Segurança › Abrir Mesmo Assim**, ou pelo terminal:
+          **macOS (Apple Silicon):** open the `.dmg` and drag `Cais.app` to `Applications`. The app has only an ad-hoc signature, with no Apple Developer ID and no notarization, so Gatekeeper blocks the first launch. To allow it, use **System Settings › Privacy & Security › Open Anyway**, or run this in the terminal:
 
           ```bash
           xattr -dr com.apple.quarantine /Applications/Cais.app
           ```
 
-          Confira os arquivos com `sha256sum -c --ignore-missing SHA256SUMS.txt` (no macOS, `shasum -a 256 -c --ignore-missing SHA256SUMS.txt`).
+          Verify the files with `sha256sum -c --ignore-missing SHA256SUMS.txt` (on macOS, `shasum -a 256 -c --ignore-missing SHA256SUMS.txt`).
 
-          ## Mudanças
+          ## Changes
 
           NOTES
           sed -i "s/__VERSION__/${VERSION}/g" ../notes.md

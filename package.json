@@ -3,7 +3,7 @@
   "productName": "Cais",
   "desktopName": "cais-app.desktop",
   "version": "0.1.1",
-  "description": "Cliente SQL de desktop organizado por projeto e ambiente",
+  "description": "Desktop SQL client organized by project and environment",
   "main": "out/main/index.js",
   "author": "Cais",
   "license": "MIT",
@@ -105,8 +105,8 @@
       "executableName": "cais-app",
       "icon": "build/icons",
       "category": "Development;Database",
-      "synopsis": "Cliente SQL de desktop",
-      "description": "Cliente SQL de desktop organizado por projeto e ambiente, com acesso de agentes de IA pelo CLI cais llm.",
+      "synopsis": "Desktop SQL client",
+      "description": "Desktop SQL client organized by project and environment, with AI agent access through the cais llm CLI.",
       "maintainer": "Cais <cais@localhost>"
     },
     "dmg": {

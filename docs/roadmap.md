@@ -1,70 +1,70 @@
 # Roadmap
 
-O que está fora da versão atual, com o que cada item exige, e o que ainda falta conferir. Nada aqui tem data. Um item só entra quando houver uso, como diz o princípio "Poucas opções" em [comportamento.md](comportamento.md#princípios).
+What is outside the current version, what each item requires, and what is still left to verify. Nothing here has a date. An item only enters when there is a use for it, as the "Few options" principle says in [behavior.md](behavior.md#principles).
 
-## BigQuery depois da versão só leitura
+## BigQuery after the read-only version
 
-| Item | O que exige |
+| Item | What it requires |
 |---|---|
-| **Auto-commit para a pessoa** (DML e DDL) | Confirmação em produção como no MySQL, e o custo da DML no mesmo limite de bytes. DDL com objeto temporário (`CREATE TEMP TABLE`, `CREATE TEMP FUNCTION`) depende de uma sessão do BigQuery por aba. |
-| **Modo Transação** | Uma sessão do BigQuery por aba (`createSession` e `session_id`). O `BEGIN TRANSACTION` roda numa consulta e o `COMMIT` em outra. `UPDATE` e `DELETE` seguram lock da tabela inteira até o fim da transação, e uma transação concorrente na mesma tabela é cancelada, não espera. Um comando que falha deixa a transação aberta até o `ROLLBACK`. O estado vem do `transactionInfo` do job (o equivalente do `DO 0` é um `SELECT 1` na sessão). A sessão expira com 24 horas sem uso ou 7 dias depois de criada. DDL permanente não roda dentro de transação. Com o segundo modo, o selo "Somente leitura" da barra da aba BigQuery dá lugar ao seletor de modo, que segue as capacidades do motor. |
-| **Escrita de agente** | O modo Transação, mais a aprovação e o Commit como no MySQL, com `MERGE` entre os verbos de escrita e os mesmos tetos de linhas (`numDmlAffectedRows`). Não há trigger nem chave estrangeira em cascata, então o commit automático fica mais simples. Linhas que ainda estão no streaming buffer não aceitam `UPDATE` nem `DELETE`. |
-| **Scripts e procedures** (`DECLARE`, `SET`, `BEGIN … END`, `IF`, `LOOP`, `CALL`) | Sessão por aba e uma classificação de script inteiro, já que o tipo do servidor é `SCRIPT` e os filhos só aparecem depois de rodar. |
-| **Parâmetros de consulta** (`@nome`) | Um jeito de informar os valores sem montar SQL com texto. |
-| **Edição na grade** (UPDATE e exclusão de linha) | O BigQuery não garante chave primária: só daria para tabela com `PRIMARY KEY … NOT ENFORCED` declarada, com o aviso de que o servidor não confere unicidade, e com Auto-commit ou Transação. |
-| **Vários projetos na árvore** | Dados num projeto e jobs cobrados em outro é comum. Exige uma lista de projetos de dados por ambiente, cada um lido à parte. |
-| **Prévia de tabela sem custo** | O duplo clique poderia usar `tabledata.list`, que não cobra, em vez do `SELECT … LIMIT 100`. Fica fora do caminho do SQL, então precisa de linha própria na Trilha. |
-| **Partição e cluster** | Mostrar na árvore e avisar no editor quando a consulta não filtra pela partição. |
-| **Campo de localização** | Só se aparecer um caso em que a região inferida pela consulta e pelo dataset padrão não baste. Uma consulta que mistura regiões é recusada pelo servidor. |
-| **`EXTERNAL_QUERY`** | Liberar no Somente leitura só se o banco externo rodar em transação só de leitura (veja "A conferir"). |
-| **Strings de três aspas para agentes** | Realce do editor e do modal que leia `'''…'''` e `"""…"""` como o servidor. |
-| **Resultados grandes em Arrow** | `queryResultsFormat: ARROW`, para buscar mais que 50.000 linhas sem pesar. |
-| **Janela de bytes entre pedidos de agente** | O limiar de 10 GiB vale por pedido: vários pedidos de até 10 GiB, sem aprovação, somam além disso. Falta uma janela por ambiente (bytes de agente nos últimos 15 minutos), no molde de `AUTO_COMMIT_WINDOW_ROWS`. Muda o contrato do `approval_reason` e pede decisão de produto. |
-| **Vários motivos de aprovação** | `approval_reason` é um motivo só: quando função e bytes pedem aprovação juntos, vem o da função (os bytes aparecem por comando no modal). Mostrar todos pede uma lista no modelo, na Trilha e no modal. |
-| **Progresso com contagem ao ler colunas** | A linha do dataset já mostra "Lendo…". A contagem pediria um canal novo do processo principal para o renderer, por alguns segundos de espera. |
+| **Auto-commit for the user** (DML and DDL) | Confirmation on production as in MySQL, and the DML cost under the same byte limit. DDL with a temporary object (`CREATE TEMP TABLE`, `CREATE TEMP FUNCTION`) depends on one BigQuery session per tab. |
+| **Transaction mode** | One BigQuery session per tab (`createSession` and `session_id`). `BEGIN TRANSACTION` runs in one query and `COMMIT` in another. `UPDATE` and `DELETE` hold a lock on the whole table until the transaction ends, and a concurrent transaction on the same table is cancelled, not queued. A statement that fails leaves the transaction open until `ROLLBACK`. The state comes from the job's `transactionInfo` (the equivalent of `DO 0` is a `SELECT 1` in the session). The session expires after 24 hours without use or 7 days after it was created. Permanent DDL does not run inside a transaction. With the second mode, the "Read-only" badge in the BigQuery tab's bar gives way to the mode selector, which follows the engine's capabilities. |
+| **Agent writes** | Transaction mode, plus approval and Commit as in MySQL, with `MERGE` among the write verbs and the same row ceilings (`numDmlAffectedRows`). There are no triggers or cascading foreign keys, so auto-commit is simpler. Rows still in the streaming buffer do not accept `UPDATE` or `DELETE`. |
+| **Scripts and procedures** (`DECLARE`, `SET`, `BEGIN … END`, `IF`, `LOOP`, `CALL`) | One session per tab and classification of the whole script, since the server's type is `SCRIPT` and the children only appear after it runs. |
+| **Query parameters** (`@name`) | A way to supply the values without splicing them into the SQL text. |
+| **Grid editing** (UPDATE and row delete) | BigQuery does not guarantee a primary key: it would only work for a table with a declared `PRIMARY KEY … NOT ENFORCED`, with a warning that the server does not check uniqueness, and with Auto-commit or Transaction. |
+| **Several projects in the tree** | Keeping data in one project and billing jobs to another is common. It requires a list of data projects per environment, each read separately. |
+| **Free table preview** | Double-clicking a table could use `tabledata.list`, which is not billed, instead of `SELECT … LIMIT 100`. It stays outside the SQL path, so it needs its own entry in the Trail. |
+| **Partition and cluster** | Show them in the tree and warn in the editor when the query does not filter by the partition. |
+| **Location field** | Only if a case appears where the region inferred from the query and the default dataset is not enough. A query that mixes regions is refused by the server. |
+| **`EXTERNAL_QUERY`** | Allow it in Read-only only if the external database runs in a read-only transaction (see "To verify"). |
+| **Triple-quoted strings for agents** | Editor and modal highlighting that reads `'''…'''` and `"""…"""` as the server does. |
+| **Large results in Arrow** | `queryResultsFormat: ARROW`, to fetch more than 50,000 rows without the overhead. |
+| **Byte window across agent requests** | The 10 GiB threshold applies per request: several requests of up to 10 GiB, without approval, add up to more than that. What is missing is a per-environment window (agent bytes in the last 15 minutes), modeled on `AUTO_COMMIT_WINDOW_ROWS`. It changes the `approval_reason` contract and needs a product decision. |
+| **Several approval reasons** | `approval_reason` is a single reason: when a function and bytes both need approval, the function's reason comes through (the bytes show per statement in the modal). Showing all of them needs a list in the model, in the Trail and in the modal. |
+| **Progress with a count while reading columns** | The dataset row already shows "Reading…". A count would need a new channel from the main process to the renderer, for a few seconds of waiting. |
 
 ## Editor
 
-| Item | O que exige |
+| Item | What it requires |
 |---|---|
-| **Colunas de tabela derivada e de CTE no autocomplete** | O escopo já separa a subquery, a tabela derivada e o corpo da CTE, mas só tabelas do schema têm colunas. Para `WITH w AS (SELECT a, b FROM t) SELECT | FROM w` oferecer `a` e `b`, o escopo teria de ler a lista do `SELECT` (nomes e apelidos, `*` expandido pelo schema). |
-| **Palavra-chave que a gramática espera** | O `dt-sql-parser` sabe quais palavras-chave cabem na posição (`getSuggestionAtCaretPosition`), mas pede um parse por tecla e, no comando incompleto, tropeça. Hoje a ordem de palavra-chave, tabela e coluna vem da palavra antes do cursor. |
-| **Verificação de sintaxe de DDL, `SET`, `SHOW` e rotinas** | A gramática de terceiros lê errado parte do que o MySQL 8.4 aceita. Cada verbo entra na lista de verificados quando o corpus válido dele (`tests/support/mysql-corpus.ts`, conferido no servidor pelo `PREPARE`) passar sem marcação. |
-| **Erro de sintaxe do BigQuery** | Não há gramática do GoogleSQL embutida; o erro de sintaxe vem do servidor. |
+| **Columns of derived tables and CTEs in autocomplete** | The scope already separates the subquery, the derived table and the CTE body, but only schema tables have columns. For `WITH w AS (SELECT a, b FROM t) SELECT | FROM w` to offer `a` and `b`, the scope would have to read the `SELECT` list (names and aliases, `*` expanded from the schema). |
+| **Keyword the grammar expects** | `dt-sql-parser` knows which keywords fit the position (`getSuggestionAtCaretPosition`), but it needs one parse per keystroke and stumbles on an incomplete statement. Today the order of keyword, table and column comes from the word before the cursor. |
+| **Syntax check for DDL, `SET`, `SHOW` and routines** | The third-party grammar misreads part of what MySQL 8.4 accepts. Each verb enters the verified list when its valid corpus (`tests/support/mysql-corpus.ts`, checked on the server with `PREPARE`) passes without any error marks. |
+| **BigQuery syntax error** | There is no built-in GoogleSQL grammar; the syntax error comes from the server. |
 
-## Técnico
+## Technical
 
-| Item | Por quê |
+| Item | Why |
 |---|---|
-| **`safeStorage` assíncrono** | A API síncrona (`isEncryptionAvailable`, `encryptString`, `decryptString`) sai no Electron 46: o `Vault` precisa virar assíncrono antes de atualizar o Electron. Quando `decryptStringAsync` pedir para cifrar de novo (`shouldReEncrypt`), a senha cifrada muda, e a assinatura dos ambientes que usam a credencial cobre esse texto: cifrar de novo e assinar de novo têm de ir na mesma gravação, ou os ambientes abrem bloqueados. No Linux, conferir como a API assíncrona aponta o provedor sem chaveiro, que a documentação não descreve. |
-| **npm 12** | O npm 12 deixa de rodar scripts de instalação que não estão no `allowScripts`. Cada dependência nova com script precisa ser revisada (`npm install-scripts ls`). |
+| **Async `safeStorage`** | The synchronous API (`isEncryptionAvailable`, `encryptString`, `decryptString`) is removed in Electron 46: the `Vault` must become async before Electron is updated. When `decryptStringAsync` asks for re-encryption (`shouldReEncrypt`), the encrypted password changes, and the signature of the environments that use the credential covers that text: re-encrypting and re-signing must go in the same write, or the environments open blocked. On Linux, check how the async API reports the provider without a keyring, which the documentation does not describe. |
+| **npm 12** | npm 12 stops running install scripts that are not in `allowScripts`. Each new dependency with a script has to be reviewed (`npm install-scripts ls`). |
 
-## Distribuição no macOS
+## macOS distribution
 
-| Item | O que exige |
+| Item | What it requires |
 |---|---|
-| **Developer ID e notarização** | Uma conta Apple Developer, o certificado Developer ID e uma senha específica de app guardados como segredos do repositório, e um passo do `notarytool` no `release.yml`. Até lá, o dmg leva só a assinatura ad-hoc e a primeira abertura exige liberar o app à mão (README). |
-| **macOS x64 (Intel)** | Os builds de macOS são só arm64. Entra se alguém usar um Mac Intel, e dobra o custo dos minutos de macOS na release. |
+| **Developer ID and notarization** | An Apple Developer account, the Developer ID certificate and an app-specific password stored as repository secrets, and a `notarytool` step in `release.yml`. Until then, the dmg carries only the ad-hoc signature and the first launch requires allowing the app by hand (README). |
+| **macOS x64 (Intel)** | The macOS builds are arm64 only. It comes in if someone uses an Intel Mac, and it doubles the cost of macOS minutes in the release. |
 
-## Linux fora da escolha atual
+## Linux outside the current choice
 
-| Item | Por que está fora |
+| Item | Why it is out |
 |---|---|
-| **AppImage** | O caminho do app muda a cada abertura, então o comando `cais` teria de ser copiado para um lugar fixo a cada versão, em vez de linkado. Não há instalação para pôr o perfil do AppArmor de que o sandbox do Chromium precisa no Ubuntu 24.04. |
-| **rpm** | Fedora e openSUSE. Entra se alguém usar. |
-| **arm64** | Dobra o build e o que testar. Entra com uma máquina Linux arm64 em uso. |
+| **AppImage** | The app's path changes on every launch, so the `cais` command would have to be copied to a fixed place on every version, instead of linked. There is no install step to put the AppArmor profile that Chromium's sandbox needs on Ubuntu 24.04 in place. |
+| **rpm** | Fedora and openSUSE. It comes in if someone uses it. |
+| **arm64** | Doubles the builds and what has to be tested. It comes in with a Linux arm64 machine in use. |
 
-## A conferir
+## To verify
 
-Verificações abertas que pedem um recurso que os testes não têm. Nenhuma está coberta pelo `npm run check`.
+Open checks that need a resource the tests do not have. None of them is covered by `npm run check`.
 
-| O quê | O que se confere, e o que muda |
+| What | What is checked, and what changes |
 |---|---|
-| **Rotina por dentro de uma view** | Se o dry run lista em `referencedRoutines` uma função chamada só na definição de uma view. A suíte ao vivo confere um nível, com `CAIS_BQ_LIVE_ROUTINE` e `CAIS_BQ_LIVE_VIEW` (AGENTS.md); uma view sobre essa view se confere à mão: criar a view e rodar o dry run por `jobs.insert`. Se não listar, uma função remota atrás de uma view chega a um agente sem aprovação: veja [seguranca.md](seguranca.md#bigquery-só-leitura). |
-| **`maximumBytesBilled` com reserva de slots** | Num projeto com reserva, se o servidor aceita, ignora ou recusa o campo. Se recusar, o limite vazio no ambiente o desliga; se ignorar, o teto só vale no on-demand e o texto deve dizer isso. |
-| **`EXTERNAL_QUERY` em transação só de leitura** | Com uma conexão descartável para um Cloud SQL, se uma escrita dentro da consulta externa é barrada. Enquanto não for conferido, segue recusado para todos. |
-| **`print-access-token` com `--impersonate-service-account`** | Com uma conta de serviço e o papel `roles/iam.serviceAccountTokenCreator`, se o token personificado serve ao BigQuery (`SELECT SESSION_USER()` dá a conta de serviço) e se o stdout traz só o token. |
-| **`net.fetch` atrás do proxy do sistema** | No app, com um proxy configurado no sistema (GNOME: Configurações › Rede › Proxy), **Testar conexão** de um ambiente BigQuery passa; com o proxy derrubado, aparece "Sem resposta de bigquery.googleapis.com". Um proxy com certificado próprio precisa dele no repositório do sistema. |
-| **Instalação do deb no Linux** | `sudo apt install ./dist/cais_<versão>_amd64.deb` e conferir: o ícone certo e agrupado na barra do GNOME; o nome Cais na notificação; o item do Cais no chaveiro e as contas do `gcloud` no cadastro; **Arquivo › Instalar comando cais** (cria `~/.local/bin/cais` apontando para `/opt/Cais/resources/cli/cais.mjs`); `cais llm guide` no Node do sistema e `cais llm envs` com o acesso ligado; instalar uma versão nova por cima (mantém o link) e desinstalar (deixa o link quebrado, que a próxima instalação troca). Também apertar `Ctrl+.` (Cancelar) uma vez com o editor em foco: no GNOME o IBus usa `Super+.` para emoji, então deve estar livre. |
-| **Ubuntu 24.04 e o perfil do AppArmor** | No 24.04, o sandbox do Chromium depende do perfil do AppArmor que o deb instala (`/etc/apparmor.d/cais-app`); só foi conferido num Ubuntu 26.04, onde funciona com a restrição de user namespaces ligada. |
-| **`npm run check` e `npm run dist` no Mac** | `npm run check` verde no macOS, e `npm run dist` gerando o dmg e o `Cais.app` com assinatura ad-hoc, que abre direto da pasta `dist/`. |
+| **Routine inside a view** | Whether the dry run lists in `referencedRoutines` a function called only in a view's definition. The live suite checks one level, with `CAIS_BQ_LIVE_ROUTINE` and `CAIS_BQ_LIVE_VIEW` (AGENTS.md); a view over that view is checked by hand: create the view and run the dry run through `jobs.insert`. If it is not listed, a remote function behind a view reaches an agent without approval: see [security.md](security.md#bigquery-read-only). |
+| **`maximumBytesBilled` with a slot reservation** | In a project with a reservation, whether the server accepts, ignores or refuses the field. If it refuses, an empty limit on the environment turns it off; if it ignores it, the ceiling only applies under on-demand pricing and the text should say so. |
+| **`EXTERNAL_QUERY` in a read-only transaction** | With a disposable connection to a Cloud SQL instance, whether a write inside the external query is blocked. Until this is checked, it stays refused for everyone. |
+| **`print-access-token` with `--impersonate-service-account`** | With a service account and the `roles/iam.serviceAccountTokenCreator` role, whether the impersonated token works for BigQuery (`SELECT SESSION_USER()` returns the service account) and whether stdout carries only the token. |
+| **`net.fetch` behind the system proxy** | In the app, with a proxy configured in the system (GNOME: Settings › Network › Proxy), **Test connection** on a BigQuery environment passes; with the proxy down, "No response from bigquery.googleapis.com" appears. A proxy with its own certificate needs that certificate in the system certificate store. |
+| **Deb install on Linux** | `sudo apt install ./dist/cais_<version>_amd64.deb` and check: the right icon, grouped in the GNOME dock; the Cais name in the notification; the Cais entry in the keyring and the `gcloud` accounts in the registry; **File › Install cais Command in Terminal** (creates `~/.local/bin/cais` pointing to `/opt/Cais/resources/cli/cais.mjs`); `cais llm guide` on the system Node and `cais llm envs` with agent access on; installing a newer version over it (keeps the link) and uninstalling (leaves the link broken, which the next install replaces). Also press `Ctrl+.` (Cancel) once with the editor focused: on GNOME, IBus uses `Super+.` for emoji, so it should be free. |
+| **Ubuntu 24.04 and the AppArmor profile** | On 24.04, Chromium's sandbox depends on the AppArmor profile that the deb installs (`/etc/apparmor.d/cais-app`); it was only checked on Ubuntu 26.04, where it works with the user-namespace restriction on. |
+| **`npm run check` and `npm run dist` on the Mac** | `npm run check` green on macOS, and `npm run dist` producing the dmg and `Cais.app` with an ad-hoc signature, which opens straight from the `dist/` folder. |

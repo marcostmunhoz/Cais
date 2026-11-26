@@ -19,7 +19,7 @@
 //                          CREATE FUNCTION my_dataset.f(x INT64) AS (x + 1). Turns on the routines test.
 //   CAIS_BQ_LIVE_VIEW      "dataset.view": a view whose definition calls that routine, for example created with
 //                          CREATE VIEW my_dataset.v AS SELECT my_dataset.f(1) AS a. Turns on the test that checks the
-//                          server lists a routine reached only through a view (docs/seguranca.md says why it matters).
+//                          server lists a routine reached only through a view (docs/security.md says why it matters).
 import { describe, expect, it } from 'vitest';
 import { classify } from '@shared/dialects/bigquery';
 import { createBigqueryDriver } from '@main/drivers/bigquery';

@@ -1,80 +1,80 @@
 ---
 name: cais
-description: Consulta e corrige dados de bancos MySQL e consulta o BigQuery (só leitura) pelo Cais (cliente SQL de desktop) com o CLI `cais llm`, com aprovação da pessoa no app e sem receber senha, token nem host do Cais. Use sempre que precisar ler um banco de dev, hml ou produção, conferir dado de um incidente, rodar um UPDATE/INSERT/DELETE em transação, ver tabelas e colunas, ou guardar uma consulta como script, mesmo que o pedido não cite o Cais. Prefira esta skill a abrir o cliente `mysql`, montar conexão com credencial ou ler arquivos do Cais. Não use para rodar DDL (CREATE, ALTER, DROP), que agentes não fazem, nem para desenvolver o próprio projeto Cais, que tem seu AGENTS.md.
+description: Queries and fixes data in MySQL databases and queries BigQuery (read-only) through Cais (a desktop SQL client) using the `cais llm` CLI, with the user's approval in the app and without ever receiving a password, token or host from Cais. Use it whenever you need to read a dev, staging or production database, check data for an incident, run an UPDATE/INSERT/DELETE in a transaction, look at tables and columns, or save a query as a script, even if the request does not mention Cais. Prefer this skill over opening the `mysql` client, building a connection with credentials or reading Cais files. Do not use it to run DDL (CREATE, ALTER, DROP), which agents do not do, nor to develop the Cais project itself, which has its own AGENTS.md.
 ---
 
-# Cais: acesso a bancos pelo CLI `cais llm`
+# Cais: database access through the `cais llm` CLI
 
-**Você não executa, você pede.** O Cais guarda as credenciais e a pessoa decide no app. Você fala só com o comando `cais llm`, que devolve JSON.
+**You do not execute, you request.** Cais holds the credentials and the user decides in the app. You talk only to the `cais llm` command, which returns JSON.
 
-Permissão sugerida no Claude Code: `Bash(cais llm:*)`.
+Suggested permission in Claude Code: `Bash(cais llm:*)`.
 
-## O que não fazer
+## What not to do
 
-- Não leia a pasta de dados do Cais (`~/Library/Application Support/Cais`, `~/.config/Cais`, `%APPDATA%\Cais`), nem `agent-endpoint.json`, nem o socket.
-- Não fale com o socket direto (`nc`, `curl --unix-socket`, scripts). O CLI é o único caminho.
-- Não tente aprovar, recusar, dar commit ou rollback pela interface do Cais, nem simular cliques.
-- Não ligue o acesso de agentes nem mude o que um ambiente libera. Quem decide é a pessoa, no Cais. Saída 4 significa pedir para ela.
-- Não edite `catalog.json`, `settings.json`, `seal.json` nem a trilha: o Cais percebe e fecha o acesso daquele ambiente.
-- Não contorne com o cliente `mysql`, `mycli`, drivers nem credenciais achadas em outro lugar.
-- Não tente DDL (CREATE, ALTER, DROP, TRUNCATE...) nem controle de transação (BEGIN, COMMIT, ROLLBACK, SET autocommit). São recusados.
-- Não use comentários executáveis (`/*! ... */`, `/*M! ... */`), hints `SET_VAR`, `GET_LOCK`, `SLEEP`, `BENCHMARK`, `LOAD_FILE` nem `SET NAMES` diferente de utf8mb4. São recusados.
-- Escreva o SQL só com texto visível e `\n` para quebrar linha. Caracteres invisíveis, de direção de texto, CR sozinho e outros controles são recusados (`hidden_text`). Fora de strings, de nomes entre crases e de comentários, use só ASCII; comentário com outro `/*` dentro, `--` sem espaço depois e variável entre aspas também são recusados (`ambiguous_text`).
-- Não escreva nos esquemas `mysql`, `performance_schema`, `sys` e `information_schema` nem leia o esquema `mysql`.
+- Do not read the Cais data folder (`~/Library/Application Support/Cais`, `~/.config/Cais`, `%APPDATA%\Cais`), nor `agent-endpoint.json`, nor the socket.
+- Do not talk to the socket directly (`nc`, `curl --unix-socket`, scripts). The CLI is the only path.
+- Do not try to approve, reject, commit or roll back through the Cais interface, and do not simulate clicks.
+- Do not turn agent access on and do not change what an environment allows. The user decides, in Cais. Exit 4 means asking the user.
+- Do not edit `catalog.json`, `settings.json`, `seal.json` or the trail: Cais notices and closes access to that environment.
+- Do not work around Cais with the `mysql` client, `mycli`, drivers or credentials found elsewhere.
+- Do not attempt DDL (CREATE, ALTER, DROP, TRUNCATE...) or transaction control (BEGIN, COMMIT, ROLLBACK, SET autocommit). They are refused.
+- Do not use executable comments (`/*! ... */`, `/*M! ... */`), `SET_VAR` hints, `GET_LOCK`, `SLEEP`, `BENCHMARK`, `LOAD_FILE` or `SET NAMES` with anything other than utf8mb4. They are refused.
+- Write the SQL with visible text only and `\n` for line breaks. Invisible characters, text direction characters, a lone CR and other control characters are refused (`hidden_text`). Outside strings, backtick-quoted names and comments, use ASCII only; a comment with another `/*` inside, `--` without a space after it and a quoted variable are also refused (`ambiguous_text`).
+- Do not write to the `mysql`, `performance_schema`, `sys` and `information_schema` schemas, and do not read the `mysql` schema.
 
-## Fluxo
+## Flow
 
-1. `cais llm guide` explica tudo em texto. `cais llm envs` lista os ambientes (use o slug `projeto/ambiente` ou o id). O campo `agent_access` diz o que roda sem a pessoa em cada um:
-   - `approve-all`: leitura e escrita esperam a aprovação;
-   - `free-reads`: leitura roda na hora, escrita espera a aprovação;
-   - `free-reads-writes`: leitura e escrita rodam na hora; a escrita faz commit sozinha dentro dos limites (passo 5). Nunca em produção: lá a escrita sempre espera a aprovação.
-2. `cais llm schema <env> --database db --table t` mostra tabelas e colunas. Roda direto, até em produção.
-3. Leitura onde o ambiente libera roda na hora:
+1. `cais llm guide` explains everything in text. `cais llm envs` lists the environments (use the `project/environment` slug or the id). The `agent_access` field says what runs without the user in each one:
+   - `approve-all`: reads and writes wait for approval;
+   - `free-reads`: reads run immediately, writes wait for approval;
+   - `free-reads-writes`: reads and writes run immediately; the write commits by itself within the limits (step 5). Never in production: there, writes always wait for approval.
+2. `cais llm schema <env> --database db --table t` shows tables and columns. It runs right away, without approval, even in production.
+3. A read runs immediately where the environment allows it:
    `cais llm query loja/dev --sql "SELECT id, status FROM pedidos WHERE status = 'cancelado'"`
-4. O que o ambiente não libera espera a aprovação da pessoa. `--reason` é obrigatório nesses pedidos e em toda escrita, e deve dizer o porquê em uma frase (vai para a trilha):
-   `cais llm query loja/pro --sql "SELECT ..." --reason "Conferir o pedido 1234 do chamado de suporte" --wait`
-5. Escrita: `--write`. Roda em transação. Com aprovação, a pessoa aprova a execução e depois, vendo as linhas afetadas, escolhe Commit ou Rollback (rollback automático em 2 minutos). Em `free-reads-writes` o Cais faz o commit sozinho (`auto_commit: true`), menos quando há alerta ou algo que o Cais não consegue contar (sem `WHERE`, `WHERE` sempre verdadeiro, tabela não transacional, view, função do banco, trigger ou chave estrangeira em cascata na tabela, comando além de INSERT/REPLACE/UPDATE/DELETE, outra escrita sua aberta no ambiente: vai para aprovação, com `approval_reason`) ou quando passa de 1.000 linhas afetadas no pedido, de 5.000 em 15 minutos no ambiente, ou o servidor avisa algo (espera o Commit da pessoa, com `commit_reason`). UPDATE e DELETE só rodam sozinhos se o usuário do banco do Cais enxerga todas as chaves estrangeiras; INSERT simples, sim. Não quebre uma escrita grande em pedaços para fugir do limite: peça com aprovação. Termine sempre com um `WHERE` e use `--wait`:
-   `cais llm query loja/dev --write --sql "UPDATE pedidos SET status = 'cancelado' WHERE id IN (4812, 4813)" --reason "Cancelar os 2 pedidos duplicados" --wait`
-   A resposta diz quem decidiu: `decided_by: "person"` quando a pessoa aprovou (ou recusou) aquele pedido, `decided_by: "policy"` quando o nível do ambiente ou a liberação de 15 minutos de leitura deixou rodar sem ela ver o pedido. Pedido expirado não traz `decided_by`. Escrita `committed` traz sempre `auto_commit`: `true` se o Cais fez o commit sozinho, `false` se a pessoa deu o Commit. Ao terminar uma escrita, conte à pessoa se ela passou por ela: por exemplo, "rodou e o Cais fez o commit sozinho (`policy`, `auto_commit: true`)" ou "você aprovou e deu o Commit (`person`)". O mesmo vale em `status` e em `requests`.
-6. Sem `--wait` o comando volta com `{ "request_id": "...", "status": "pending_approval" }`. Depois: `cais llm status <request_id> --wait`.
-7. Scripts do projeto: `cais llm scripts`, `cais llm script <id>`, `cais llm script-save --project loja --name "Pedidos duplicados por cliente" --sql "..."`. Você cria; não edita nem apaga. O script nasce marcado como "agente" até a pessoa salvar. O SQL do script segue as regras de um pedido com `--write` (sem DDL nem administração) e tem no máximo duas linhas em branco seguidas.
+4. Anything the environment does not allow waits for the user's approval. `--reason` is required on those requests and on every write, and must say why in one sentence (it goes to the trail):
+   `cais llm query loja/pro --sql "SELECT ..." --reason "Check order 1234 from the support ticket" --wait`
+5. Writes: `--write`. A write runs in a transaction. With approval, the user approves the execution and then, seeing the affected rows, chooses Commit or Rollback (automatic rollback after 2 minutes). In `free-reads-writes` Cais commits by itself (`auto_commit: true`), except when there is an alert or something Cais cannot count (no `WHERE`, an always-true `WHERE`, a non-transactional table, a view, a database function, a trigger or cascading foreign key on the table, a statement other than INSERT/REPLACE/UPDATE/DELETE, another write of yours open in the environment: it goes to approval, with `approval_reason`) or when it goes over 1,000 affected rows in the request, over 5,000 in 15 minutes in the environment, or the server warns about something (it waits for the user's Commit, with `commit_reason`). UPDATE and DELETE only run by themselves if the database user Cais connects as can see all foreign keys; a simple INSERT runs by itself either way. Do not split a large write into pieces to get around the limit: ask with approval. Always finish with a `WHERE` and use `--wait`:
+   `cais llm query loja/dev --write --sql "UPDATE pedidos SET status = 'cancelado' WHERE id IN (4812, 4813)" --reason "Cancel the 2 duplicate orders" --wait`
+   The response says who decided: `decided_by: "person"` when the user approved (or rejected) that request, `decided_by: "policy"` when the environment level or the 15-min read grant let it run without the user seeing the request. An expired request has no `decided_by`. A `committed` write always carries `auto_commit`: `true` if Cais committed by itself, `false` if the user pressed Commit. When a write finishes, tell the user whether it went through them: for example, "it ran and Cais committed by itself (`policy`, `auto_commit: true`)" or "you approved and pressed Commit (`person`)". The same applies in `status` and in `requests`.
+6. Without `--wait` the command returns `{ "request_id": "...", "status": "pending_approval" }`. Afterwards: `cais llm status <request_id> --wait`.
+7. Project scripts: `cais llm scripts`, `cais llm script <id>`, `cais llm script-save --project loja --name "Duplicate orders per customer" --sql "..."`. You create; you do not edit or delete. The script is created tagged "agent" until the user saves it. The script's SQL follows the rules of a request with `--write` (no DDL or administration) and has at most two blank lines in a row.
 
-Use `--client "<seu nome>"` (ou `CAIS_CLIENT`) para a pessoa ver quem pede. Para SQL grande: `--file consulta.sql` ou `-` (entrada padrão). Cada comando tem 30 s no servidor e corte em 35 s; um pedido de leitura tem 60 s no total e uma escrita aprovada, 60 s até a segunda decisão; escrita espera no máximo 10 s por lock. Escrita que falha devolve só o erro e `statement_index`, sem linhas. Se o SQL cita uma tabela não transacional (MyISAM), o Rollback não a desfaz: a escrita que grava fora da transação para com `non_transactional_write` e a resposta traz `rollback_incomplete: true` quando algo ficou gravado. `commit_unknown` quer dizer que a conexão caiu depois do Commit: confira o dado antes de repetir. O que o seu próprio SQL devolve (`CURRENT_USER()`, `@@hostname`) é dado consultado, não é escondido. Limites: 100 KB de SQL, `--max-rows` de 1 a 1000 (padrão 200).
+Use `--client "<your name>"` (or `CAIS_CLIENT`) so the user sees who is asking. For large SQL: `--file query.sql` or `-` (standard input). Each statement has 30 s on the server and a cutoff at 35 s; a read request has 60 s in total and an approved write has 60 s until the second decision; a write waits at most 10 s for a lock. A write that fails returns only the error and `statement_index`, with no rows. If the SQL names a non-transactional table (MyISAM), Rollback does not undo it: a write that would change data outside the transaction stops with `non_transactional_write` and the response carries `rollback_incomplete: true` when something was left written. `commit_unknown` means the connection dropped after the Commit: check the data before repeating. What your own SQL returns (`CURRENT_USER()`, `@@hostname`) is queried data and is not hidden. Limits: 100 KB of SQL, `--max-rows` from 1 to 1000 (default 200).
 
-## BigQuery (só leitura)
+## BigQuery (read-only)
 
-Um ambiente com `engine: "bigquery"` em `cais llm envs` é lido em GoogleSQL, sem escrita. O `default_database` é o dataset padrão; o projeto do Google Cloud nunca aparece, nem nas mensagens de erro (`<projeto>`, `<conta>`).
+An environment with `engine: "bigquery"` in `cais llm envs` is read in GoogleSQL, with no writes. The `default_database` is the default dataset; the Google Cloud project never appears, not even in error messages (`<project>`, `<account>`).
 
-- **Escrita:** `--write` volta com `engine_read_only` (saída 2). Não há DML, DDL, `CREATE TEMP`, script (`DECLARE`, `BEGIN ... END`, `IF`, `LOOP`), `CALL`, `EXECUTE IMMEDIATE`, `EXPORT DATA` nem `LOAD DATA`.
-- **SQL:** nomes entre crases e `dataset.tabela` (`projeto.dataset.tabela` só para outro projeto). `--database` é o dataset padrão do pedido. `schema <env>` lista datasets e tabelas; `schema <env> --database ds` traz as colunas com o tipo completo.
-- **Custo:** o BigQuery cobra pelo que lê, e `LIMIT` não reduz isso. Selecione só as colunas de que precisa, filtre pela coluna de partição e evite `SELECT *` em tabela grande. Cada resultado traz `bytes_estimated`, `bytes_processed` e `bytes_billed`.
-- **Leitura grande:** acima de 10 GiB estimados (ou do limite do ambiente, se for menor) o pedido espera a aprovação da pessoa, mesmo em `free-reads` e com a liberação de 15 minutos, e precisa de `--reason`. `approval_reason` traz a estimativa; use `--wait`. Conta a soma das estimativas do pedido. O job roda com teto de 10 GiB (ou do limite do ambiente, se for menor) ou da estimativa aprovada (em GiB, para cima). Se a estimativa crescer depois da aprovação e passar do teto, o comando não roda: `bytes_over_approved`, e vale pedir de novo.
-- **Também esperam a pessoa (`approval_reason`):** qualquer rotina do projeto que o servidor aponte no dry run (pode ser remota e rodar código fora do BigQuery), função sem qualificador que não é nativa, e as de IA generativa e de modelo (`ML.*`, `AI.*`), que custam fora dos bytes lidos.
-- **Recusados:** o comando que o servidor lê como outra coisa que não `SELECT` (`writes_in_read`); `EXTERNAL_QUERY` e `OBJ.*` (`function_not_allowed`); chamada encadeada, como `(x).f()` (`ambiguous_text`); `INFORMATION_SCHEMA.JOBS*`, `JOBS_BY_*` e `SESSIONS*`, que mostram o SQL de outras pessoas do projeto (`system_schema`); as diretivas `#legacySQL` e `#standardSQL` (`ambiguous_text` ou `executable_comment`); strings de três aspas (`'''` e `"""`) e comentário com `/*` dentro (`ambiguous_text`); o resto de `hidden_text` como no MySQL.
-- **Limites:** o job tem 30 s no servidor e corte em 35 s (`jobs.cancel`, `agent_timeout`); `--max-rows` como sempre.
+- **Writes:** `--write` returns `engine_read_only` (exit 2). There is no DML, DDL, `CREATE TEMP`, script (`DECLARE`, `BEGIN ... END`, `IF`, `LOOP`), `CALL`, `EXECUTE IMMEDIATE`, `EXPORT DATA` or `LOAD DATA`.
+- **SQL:** backtick-quoted names and `dataset.table` (`project.dataset.table` only for another project). `--database` is the request's default dataset. `schema <env>` lists datasets and tables; `schema <env> --database ds` returns the columns with the full type.
+- **Cost:** BigQuery bills for what it reads, and `LIMIT` does not reduce that. Select only the columns you need, filter on the partition column and avoid `SELECT *` on a large table. Each result carries `bytes_estimated`, `bytes_processed` and `bytes_billed`.
+- **Large reads:** above 10 GiB estimated (or the environment limit, if smaller) the request waits for the user's approval, even in `free-reads` and with the 15-min grant, and needs `--reason`. `approval_reason` carries the estimate; use `--wait`. The sum of the request's estimates counts. The job runs with a cap of 10 GiB (or the environment limit, if smaller) or the approved estimate (in GiB, rounded up). If the estimate grows after approval and goes over the cap, the statement does not run: `bytes_over_approved`, and you can request it again.
+- **Also wait for the user (`approval_reason`):** any project routine the server reports in the dry run (it may be remote and run code outside BigQuery), an unqualified function that is not built in, and the generative AI and model functions (`ML.*`, `AI.*`), which are billed on top of the bytes read.
+- **Refused:** a statement the server reads as anything other than `SELECT` (`writes_in_read`); `EXTERNAL_QUERY` and `OBJ.*` (`function_not_allowed`); chained calls, such as `(x).f()` (`ambiguous_text`); `INFORMATION_SCHEMA.JOBS*`, `JOBS_BY_*` and `SESSIONS*`, which show other people's SQL in the project (`system_schema`); the `#legacySQL` and `#standardSQL` directives (`ambiguous_text` or `executable_comment`); triple-quoted strings (`'''` and `"""`) and a comment with `/*` inside (`ambiguous_text`); the rest of `hidden_text` as in MySQL.
+- **Limits:** the job has 30 s on the server and a cutoff at 35 s (`jobs.cancel`, `agent_timeout`); `--max-rows` as usual.
 
-## Saídas
+## Exit codes
 
-| Código | Significa | O que fazer |
+| Code | Means | What to do |
 |---|---|---|
-| 0 | Sucesso: `succeeded`, `committed`, ou pedido pendente sem `--wait` | Siga. Se `pending_approval`, espere com `status --wait`. |
-| 1 | `failed`: erro do SQL, ou o Cais não conseguiu conectar no ambiente | Leia `error.message` e `error.code`; corrija o SQL. Em escrita já houve rollback. |
-| 2 | Uso, validação ou recusa da política (`code` diz qual) | Corrija o pedido: `--write`, `--reason`, sem DDL. Não insista no mesmo SQL. |
-| 3 | `rejected`, `expired` ou `rolled_back` | A pessoa disse não (veja `rejection_reason`) ou o tempo acabou. Não repita sem mudar algo. Diga o que aconteceu. |
-| 4 | Cais fechado ou acesso de agentes desligado | Peça para a pessoa abrir o Cais e ligar o acesso de agentes. Espere. |
-| 5 | Tempo de espera esgotado | O pedido segue valendo. Espere de novo com `status <id> --wait`. |
+| 0 | Success: `succeeded`, `committed`, or a pending request without `--wait` | Continue. If `pending_approval`, wait with `status --wait`. |
+| 1 | `failed`: SQL error, or Cais could not connect to the environment | Read `error.message` and `error.code`; fix the SQL. On a write, Cais has already rolled back. |
+| 2 | Usage, validation or policy refusal (`code` says which) | Fix the request: `--write`, `--reason`, no DDL. Do not insist on the same SQL. |
+| 3 | `rejected`, `expired` or `rolled_back` | The user said no (see `rejection_reason`) or time ran out. Do not repeat without changing something. Say what happened. |
+| 4 | Cais is closed or agent access is off | Ask the user to open Cais and turn on agent access. Wait. |
+| 5 | Wait timed out | The request is still valid. Wait again with `status <id> --wait`. |
 
-Cortar a saída com `head` não é erro: o comando sai em silêncio e o código de saída é o do pedido.
+Cutting the output with `head` is not an error: the command exits silently and the exit code is the request's.
 
-`"result_withheld": true` quer dizer que a pessoa não deixou você ver o resultado: só há contagens. Não peça de novo o mesmo dado de outro jeito.
+`"result_withheld": true` means the user did not let you see the result: there are only counts. Do not ask for the same data again in another way.
 
-## Dado pessoal em produção
+## Personal data in production
 
-Leituras em produção podem trazer CPF, e-mail e outros dados pessoais. Peça só as colunas e as linhas de que precisa (`SELECT id, status`, não `SELECT *`), com `WHERE` e `LIMIT`. Não copie dados pessoais para arquivos, commits, issues nem mensagens. Resuma sem identificar pessoas quando der.
+Reads in production can return national IDs (CPF), emails and other personal data. Ask only for the columns and rows you need (`SELECT id, status`, not `SELECT *`), with `WHERE` and `LIMIT`. Do not copy personal data to files, commits, issues or messages. Summarize without identifying people when you can.
 
-## Se algo não funciona
+## If something does not work
 
-- Exit 4 com o Cais aberto: o acesso de agentes está desligado.
-- `env_not_found`: rode `cais llm envs` e use o slug exato.
-- `reason_required`: faltou `--reason` num pedido que precisa de aprovação, ou numa escrita.
-- `queue_full`: há 20 pedidos esperando a pessoa. Espere ela decidir.
+- Exit 4 with Cais open: agent access is off.
+- `env_not_found`: run `cais llm envs` and use the exact slug.
+- `reason_required`: `--reason` is missing on a request that needs approval, or on a write.
+- `queue_full`: 20 requests are waiting for the user. Wait for them to decide.

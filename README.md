@@ -1,186 +1,186 @@
 # Cais
 
-Cais é um cliente SQL de desktop para MySQL e, só para leitura, BigQuery, feito com Electron, React e TypeScript. Ele organiza os bancos por projeto e ambiente (dev, hml, produção), reaproveita a mesma credencial em vários ambientes e entra no Cloud SQL do Google por IAM, com a conta do `gcloud`, sem proxy rodando à parte. É seguro por padrão: produção abre em somente leitura, transação é um modo da aba e não um ajuste escondido, e agentes de IA acessam os bancos por um CLI próprio (`cais llm`), com a aprovação da pessoa no app e sem nunca receber senha, token ou host.
+Cais is a desktop SQL client for MySQL and, read-only, for BigQuery, built with Electron, React and TypeScript. It organizes databases by project and environment (dev, staging, production), reuses the same credential across several environments, and signs in to Google Cloud SQL through IAM with the `gcloud` account, with no proxy running on the side. It is safe by default: production opens read-only, a transaction is a tab mode and not a hidden setting, and AI agents reach the databases through a dedicated CLI (`cais llm`), with the person's approval in the app and without ever receiving a password, token or host.
 
-![Aba em modo Transação, com a barra de Commit e Rollback](docs/images/transaction-light.png)
+![Tab in Transaction mode, with the Commit and Rollback bar](docs/images/transaction-light.png)
 
-## Funcionalidades
+## Features
 
-- **Projetos, ambientes e credenciais.** Cada projeto tem seus ambientes (host, porta, banco padrão, marcação de produção). Uma credencial é um cadastro próprio, usado por quantos ambientes precisar: usuário e senha (cifrada no cofre do sistema) ou Google IAM via `gcloud`, com impersonação opcional de service account.
-- **Login IAM no Cloud SQL.** Token de `gcloud sql generate-login-token`, plugin `mysql_clear_password` e TLS obrigatório. O Cais só lista as contas logadas e gera o token; nunca altera o `gcloud`.
-- **BigQuery, só leitura.** Um ambiente BigQuery (projeto do Google Cloud, dataset padrão e limite de bytes opcionais) usa a mesma credencial Google IAM via `gcloud`. Árvore de datasets, tabelas e colunas, editor em GoogleSQL, e cada consulta passa por um dry run que estima os bytes: acima do limite do ambiente o Cais pergunta antes de rodar, e o job de um agente sempre leva um teto de bytes faturados. A aba mostra o selo fixo "Somente leitura" no lugar do seletor de modo. Opcional, o interruptor "Estimar ao digitar" faz o dry run do comando sob o cursor a cada pausa (o texto vai ao Google a cada vez, por isso começa desligado): mostra "Vai processar X" na barra de status e os erros do servidor no editor, sem executar nem entrar na Trilha. Sem escrita, transação nem edição na grade nesta versão (veja o [roadmap](docs/roadmap.md)).
-- **Sessão por aba em três modos (MySQL):** Somente leitura, Transação e Auto-commit. Produção abre em Somente leitura, Auto-commit em produção pede confirmação, e fechar uma aba com transação aberta pergunta antes (com Rollback como padrão).
-- **Somente leitura de verdade**, em duas camadas: uma lista do que é permitido no app e, no MySQL, a sessão em `READ ONLY` no servidor, reafirmada antes de cada comando (no BigQuery, um dry run que só deixa passar `SELECT`).
-- **Editor SQL** (CodeMirror 6) com realce do MySQL ou do GoogleSQL e autocomplete por contexto: as colunas das tabelas do `FROM` e do `JOIN` do comando (sem qualificador, uma opção por tabela quando o nome se repete), bancos, tabelas e apelidos, na ordem que a posição pede. No MySQL, um sublinhado marca o erro de sintaxe enquanto se digita, sem enviar nada ao servidor.
-- **Resultados em grade virtualizada**: até 1.000 linhas por comando, com "Buscar até 50.000", cancelamento pelo servidor (`KILL QUERY` no MySQL), painel com o valor completo da célula e cópia do valor, em TSV, CSV, JSON ou tabela Markdown.
-- **Edição na grade**: altere células de um resultado de uma tabela com a chave primária inteira e gere o `UPDATE` equivalente (ou o `UPDATE` de uma célula, com o valor selecionado para você trocar por uma expressão) ou aplique na própria aba, respeitando o modo da sessão. Linhas marcadas para exclusão (menu ou Delete) saem como `DELETE` pela chave inteira, com confirmação sempre em Auto-commit. Linhas selecionadas viram um `INSERT` de várias linhas, com ou sem a chave primária.
-- **Estado da conexão em cada aba** (desconectado, conectando, conectado, executando, erro), com Conectar, Reconectar e Desconectar, e desconexão por inatividade depois de 30 minutos (nunca com transação aberta).
-- **Scripts salvos por projeto**, listados dentro de cada ambiente do projeto, com botão Salvar, Cmd+S e seletor por Cmd+O.
-- **Duplicar ambiente e projeto, renomear projeto.**
-- **Trilha**: tudo o que roda no Cais, pela pessoa e pelos agentes, num arquivo por dia, por 90 dias, com cada linha encadeada por HMAC. Nunca guarda dados de resultado.
-- **Proteção do cadastro**: o que decide para onde vai a credencial e o quanto um agente faz sozinho é assinado com uma chave do cofre do sistema; um ambiente alterado fora do Cais abre bloqueado.
-- **Acesso de agentes** pelo CLI `cais llm`, com três níveis por ambiente, aprovação no app, Commit ou Rollback da pessoa para escritas e escrita em produção sempre com aprovação.
-- **Interface em português (pt-BR) e inglês**, no idioma do sistema, e em tema claro ou escuro, seguindo o sistema.
+- **Projects, environments and credentials.** Each project has its environments (host, port, default database, production flag). A credential is its own registry entry, used by as many environments as needed: user and password (encrypted in the system vault) or Google IAM through `gcloud`, with optional service account impersonation.
+- **IAM login on Cloud SQL.** Token from `gcloud sql generate-login-token`, the `mysql_clear_password` plugin and mandatory TLS. Cais only lists the signed-in accounts and generates the token; it never changes `gcloud`.
+- **BigQuery, read-only.** A BigQuery environment (Google Cloud project, optional default dataset and byte limit) uses the same Google IAM credential through `gcloud`. Tree of datasets, tables and columns, a GoogleSQL editor, and every query goes through a dry run that estimates the bytes: above the environment limit Cais asks before running, and an agent's job always carries a billed-bytes ceiling. The tab shows a fixed "Read-only" badge in place of the mode selector. Optionally, the "Estimate while typing" switch runs a dry run of the statement under the cursor at each pause (the text goes to Google every time, so it starts off): it shows "Will process X" in the status bar and the server's errors in the editor, without running the statement or recording it in the Trail. No writes, transactions or grid editing in this version (see the [roadmap](docs/roadmap.md)).
+- **One session per tab, in three modes (MySQL):** Read-only, Transaction and Auto-commit. Production opens in Read-only, Auto-commit on production asks for confirmation, and closing a tab with an open transaction asks first (with Rollback as the default).
+- **Read-only that holds**, in two layers: an allowlist in the app and, on MySQL, the session set to `READ ONLY` on the server, reasserted before every statement (on BigQuery, a dry run that only lets `SELECT` through).
+- **SQL editor** (CodeMirror 6) with MySQL or GoogleSQL highlighting and context-aware autocomplete: the columns of the tables in the statement's `FROM` and `JOIN` (unqualified, one option per table when the name repeats), databases, tables and aliases, in the order the position calls for. On MySQL, an underline marks the syntax error while you type, without sending anything to the server.
+- **Results in a virtualized grid**: up to 1,000 rows per statement, with "Fetch up to 50,000", server-side cancellation (`KILL QUERY` on MySQL), a panel with the full cell value, and copying of the value or as TSV, CSV, JSON or a Markdown table.
+- **Grid editing**: change cells of a result from a single table that includes its full primary key and generate the equivalent `UPDATE` (or the `UPDATE` of one cell, with the value selected so you can replace it with an expression) or apply it in the tab itself, respecting the session mode. Rows marked for deletion (menu or Delete) become a `DELETE` by the full key, always with confirmation in Auto-commit. Selected rows become a multi-row `INSERT`, with or without the primary key.
+- **Connection state in every tab** (disconnected, connecting, connected, running, error), with Connect, Reconnect and Disconnect, and disconnection after 30 minutes of inactivity (never with an open transaction).
+- **Scripts saved per project**, listed inside each environment of the project, with a Save button, Cmd+S and a picker on Cmd+O.
+- **Duplicate environment and project, rename project.**
+- **Trail**: everything that runs in Cais, by the person and by agents, in one file per day, kept for 90 days, with each line chained by HMAC. It never stores result data.
+- **Registry protection**: what decides where the credential goes and how much an agent does on its own is signed with a key from the system vault; an environment changed outside Cais opens blocked.
+- **Agent access** through the `cais llm` CLI, with three levels per environment, approval in the app, the person's Commit or Rollback for writes, and writes on production always needing approval.
+- **Interface in Portuguese (pt-BR) and English**, in the system language, and in a light or dark theme, following the system.
 
-| Edição na grade | Pedido de agente |
+| Grid editing | Agent request |
 |---|---|
-| ![Grade com três alterações pendentes e os botões Gerar SQL, Aplicar e Descartar](docs/images/grid-edit-dark.png) | ![Modal de aprovação de uma escrita pedida por um agente](docs/images/agent-write-approval-light.png) |
+| ![Grid with three pending changes and the Generate SQL, Apply and Discard buttons](docs/images/grid-edit-dark.png) | ![Approval modal for a write requested by an agent](docs/images/agent-write-approval-light.png) |
 
-![Tela Trilha com pedidos de agentes e mudanças de configuração](docs/images/trail-light.png)
+![Trail screen with agent requests and configuration changes](docs/images/trail-light.png)
 
-## Requisitos
+## Requirements
 
-- Node 20.19 ou mais novo e npm 11.x (o lockfile muda conforme a versão do npm).
-- Docker, só para `npm run integration` e `npm run e2e`: eles sobem e removem sozinhos um container `mysql:8.4` chamado `cais-test-*`, em porta aleatória.
-- Para entrar no Cloud SQL por IAM: o Google Cloud SDK (`gcloud`) instalado e com a conta logada, e a instância preparada (veja [Login IAM no Cloud SQL](docs/comportamento.md#login-iam-no-cloud-sql)).
-- Para usar o BigQuery: o `gcloud` com a conta logada (o Cais pede o token a `gcloud auth print-access-token`), e a conta com `roles/bigquery.jobUser` no projeto e `roles/bigquery.dataViewer` nos datasets lidos (veja [BigQuery](docs/comportamento.md#bigquery-só-leitura)). O Docker não é preciso para os testes do BigQuery: eles usam um servidor falso local.
-- No Linux, para guardar senhas: um chaveiro com Secret Service ativo (GNOME Keyring ou KWallet). Sem ele, o Cais recusa salvar senha (veja [Instalar no Linux](#instalar-no-linux)).
+- Node 20.19 or newer and npm 11.x (the lockfile changes with the npm version).
+- Docker, only for `npm run integration` and `npm run e2e`: they start a `mysql:8.4` container named `cais-test-*` on a random port and remove it on their own.
+- To sign in to Cloud SQL through IAM: the Google Cloud SDK (`gcloud`) installed with the account signed in, and the instance prepared (see [IAM login on Cloud SQL](docs/behavior.md#iam-login-on-cloud-sql)).
+- To use BigQuery: `gcloud` with the account signed in (Cais asks `gcloud auth print-access-token` for the token), and the account with `roles/bigquery.jobUser` on the project and `roles/bigquery.dataViewer` on the datasets it reads (see [BigQuery](docs/behavior.md#bigquery-read-only)). Docker is not needed for the BigQuery tests: they use a local fake server.
+- On Linux, to store passwords: a keyring with an active Secret Service (GNOME Keyring or KWallet). Without it, Cais refuses to save a password (see [Install on Linux](#install-on-linux)).
 
-O empacotamento gera o app para macOS em Apple Silicon (arm64) e um `.deb` para Linux x64 (Ubuntu e derivados), cada um no sistema correspondente. Para Windows não há alvo de empacotamento (o socket dos agentes vira named pipe e o menu tem variante, mas rode pelo código-fonte com `npm run dev`).
+Packaging produces the app for macOS on Apple Silicon (arm64) and a `.deb` for Linux x64 (Ubuntu and derivatives), each on the matching system. There is no packaging target for Windows (the agent socket becomes a named pipe and the menu has a variant, but run from source with `npm run dev`).
 
-## Baixar
+## Download
 
-Os instaladores ficam na página de [Releases](../../releases) do repositório, com um `SHA256SUMS.txt` para conferir os arquivos.
+The installers are on the repository's [Releases](../../releases) page, with a `SHA256SUMS.txt` to check the files.
 
-- **Linux (Ubuntu e derivados, x64):** `sudo apt install ./cais_<versão>_amd64.deb` (veja [Instalar no Linux](#instalar-no-linux)).
-- **macOS (Apple Silicon):** abra o `.dmg` e arraste o `Cais.app` para `Aplicativos`. O app não é notarizado: na primeira abertura, use **Ajustes do Sistema › Privacidade e Segurança › Abrir Mesmo Assim** ou `xattr -dr com.apple.quarantine /Applications/Cais.app` (veja [Abrir o app sem assinatura no macOS](#abrir-o-app-sem-assinatura-no-macos)).
+- **Linux (Ubuntu and derivatives, x64):** `sudo apt install ./cais_<version>_amd64.deb` (see [Install on Linux](#install-on-linux)).
+- **macOS (Apple Silicon):** open the `.dmg` and drag `Cais.app` to `Applications`. The app is not notarized: on first launch, use **System Settings › Privacy & Security › Open Anyway** or `xattr -dr com.apple.quarantine /Applications/Cais.app` (see [Open the unsigned app on macOS](#open-the-unsigned-app-on-macos)).
 
-## Instalar e rodar em desenvolvimento
+## Install and run in development
 
 ```bash
 npm install
 npm run dev
 ```
 
-## Testes
+## Tests
 
 ```bash
-npm run typecheck              # tipos, nos projetos do main e do renderer
-npm run unit                   # unitários (sem Docker)
-npm run integration            # MySQL 8.4 real em container de teste (precisa do Docker)
-npm run build && npm run e2e   # interface de ponta a ponta com Electron (abre janelas; precisa do Docker)
-npm run check                  # tudo, na ordem: typecheck, unit, integration, build, e2e
-npm run live:bigquery          # opcional, fora do check: confere o servidor do BigQuery de verdade
+npm run typecheck              # types, in the main and renderer projects
+npm run unit                   # unit tests (no Docker)
+npm run integration            # real MySQL 8.4 in a test container (needs Docker)
+npm run build && npm run e2e   # end-to-end UI with Electron (opens windows; needs Docker)
+npm run check                  # everything, in order: typecheck, unit, integration, build, e2e
+npm run live:bigquery          # optional, not part of check: tests against the real BigQuery server
 ```
 
-O e2e grava capturas de tela em `tests/e2e/screenshots/` (fora do controle de versão; as imagens deste README ficam em `docs/images/`).
+The e2e suite writes screenshots to `tests/e2e/screenshots/` (outside version control; the images in this README live in `docs/images/`).
 
-Os testes do BigQuery nunca falam com o Google: o driver recebe o `fetch` e o endereço, e `tests/support/bigquery-fake.ts` é um servidor HTTP local. A suíte ao vivo (`npm run live:bigquery`) é à parte, só lê, nunca roda o `gcloud` e pula tudo sem as variáveis `CAIS_BQ_LIVE_PROJECT` (um projeto sandbox) e `CAIS_BQ_LIVE_TOKEN` (por exemplo `$(gcloud auth print-access-token)`); `CAIS_BQ_LIVE_DATASET`, `CAIS_BQ_LIVE_ROUTINE` e `CAIS_BQ_LIVE_VIEW` são opcionais (veja o cabeçalho de `tests/live/bigquery.test.ts`).
+The BigQuery tests never talk to Google: the driver receives the `fetch` and the address, and `tests/support/bigquery-fake.ts` is a local HTTP server. The live suite (`npm run live:bigquery`) is separate, only reads, never runs `gcloud` and skips everything without the variables `CAIS_BQ_LIVE_PROJECT` (a sandbox project) and `CAIS_BQ_LIVE_TOKEN` (for example `$(gcloud auth print-access-token)`); `CAIS_BQ_LIVE_DATASET`, `CAIS_BQ_LIVE_ROUTINE` and `CAIS_BQ_LIVE_VIEW` are optional (see the header of `tests/live/bigquery.test.ts`).
 
-## Empacotar
+## Package
 
 ```bash
 npm run dist
 ```
 
-Gera os alvos do sistema em que roda.
+Builds the targets for the system it runs on.
 
-No macOS (Apple Silicon):
+On macOS (Apple Silicon):
 
-- `dist/Cais-<versão>-arm64.dmg`
+- `dist/Cais-<version>-arm64.dmg`
 - `dist/mac-arm64/Cais.app`
 
-No Linux (x64):
+On Linux (x64):
 
-- `dist/cais_<versão>_amd64.deb`
+- `dist/cais_<version>_amd64.deb`
 
-### Abrir o app sem assinatura no macOS
+### Open the unsigned app on macOS
 
-O `.app` tem só uma assinatura ad-hoc local, sem Apple Developer ID e sem notarização. Aberto direto da pasta `dist/`, ele roda normalmente. Se o arquivo passar por download, AirDrop ou outro Mac, o macOS o coloca em quarentena e o Gatekeeper bloqueia a primeira abertura:
+The `.app` has only a local ad-hoc signature, with no Apple Developer ID and no notarization. Opened straight from the `dist/` folder, it runs normally. If the file goes through a download, AirDrop or another Mac, macOS quarantines it and Gatekeeper blocks the first launch:
 
-1. Arraste o `Cais.app` do `.dmg` para `Aplicativos`.
-2. Clique com o botão direito no app, escolha **Abrir** e confirme em **Abrir**. Ou vá em **Ajustes do Sistema › Privacidade e Segurança** e use **Abrir mesmo assim**.
-3. Pelo terminal: `xattr -dr com.apple.quarantine /Applications/Cais.app`.
+1. Drag `Cais.app` from the `.dmg` to `Applications`.
+2. Right-click the app, choose **Open** and confirm with **Open**. Or go to **System Settings › Privacy & Security** and use **Open Anyway**.
+3. From the terminal: `xattr -dr com.apple.quarantine /Applications/Cais.app`.
 
-Na primeira vez que você salvar uma senha, o macOS pode pedir acesso ao Keychain: é o cofre onde o Cais guarda as senhas cifradas e a chave de assinatura do cadastro.
+The first time you save a password, macOS may ask for Keychain access: it is the vault where Cais keeps the encrypted passwords and the registry signing key.
 
-### Instalar no Linux
+### Install on Linux
 
 ```bash
-sudo apt install ./dist/cais_<versão>_amd64.deb
+sudo apt install ./dist/cais_<version>_amd64.deb
 ```
 
-O pacote instala o app em `/opt/Cais`, o executável `cais-app` (em `/usr/bin`) e a entrada **Cais** no menu de aplicativos. O comando `cais` não vem no pacote: instale-o pelo menu **Arquivo › Instalar comando cais no terminal**, que cria o link em `~/.local/bin`.
+The package installs the app in `/opt/Cais`, the `cais-app` executable (in `/usr/bin`) and the **Cais** entry in the applications menu. The `cais` command does not come in the package: install it from the menu **File › Install cais Command in Terminal**, which creates the link in `~/.local/bin`.
 
-- **Senhas:** o cofre é o Secret Service (GNOME Keyring, KWallet). Sem chaveiro disponível, o Cais recusa salvar senha e a mensagem diz o que fazer. Se o ambiente gráfico não for reconhecido, abra o app com `cais-app --password-store=gnome-libsecret`.
-- **`gcloud`:** o Cais acha o `gcloud` no PATH, pelo shell de login ou em `/usr/bin`, `/snap/bin` e `/usr/lib/google-cloud-sdk/bin`.
-- **Sandbox do Chromium:** o instalador ajusta o `chrome-sandbox` e, onde o AppArmor está ligado, instala o perfil `cais-app` para liberar os user namespaces. O perfil no Ubuntu 24.04 ainda não foi conferido.
+- **Passwords:** the vault is the Secret Service (GNOME Keyring, KWallet). Without an available keyring, Cais refuses to save a password and the message says what to do. If the desktop environment is not recognized, open the app with `cais-app --password-store=gnome-libsecret`.
+- **`gcloud`:** Cais finds `gcloud` on the PATH, through the login shell, or in `/usr/bin`, `/snap/bin` and `/usr/lib/google-cloud-sdk/bin`.
+- **Chromium sandbox:** the installer sets up `chrome-sandbox` and, where AppArmor is on, installs the `cais-app` profile to allow user namespaces. The profile on Ubuntu 24.04 has not been verified yet.
 
-## Uso
+## Usage
 
-1. Em **Credenciais** (rodapé da barra lateral), cadastre uma credencial: usuário e senha, ou Google IAM (conta escolhida entre as logadas no `gcloud`; o usuário do banco é derivado do e-mail e pode ser editado).
-2. Pelo **+** da barra lateral, cadastre um projeto e um ambiente com motor, host, porta, banco padrão (opcional) e a credencial. No BigQuery, em vez de host e porta: o projeto do Google Cloud, o dataset padrão (opcional) e o limite de bytes por consulta (100 GiB por padrão; vazio é sem limite), com uma credencial Google IAM. **Produção** vem marcado quando o nome é `pro`, `prod` ou `production`, e pode ser trocado. **Testar conexão** confere antes de salvar.
-3. Clique no ambiente: abre (ou foca) uma aba conectada a ele. Escreva a query e rode.
+1. Under **Credentials** (bottom of the sidebar), register a credential: User and password, or Google IAM (account chosen among those signed in to `gcloud`; the database user is derived from the email and can be edited).
+2. With the **+** in the sidebar, register a project and an environment with engine, host, port, default database (optional) and the credential. For BigQuery, instead of host and port: the Google Cloud project, the default dataset (optional) and the byte limit per query (100 GiB by default; empty means no limit), with a Google IAM credential. **Production** comes checked when the name is `pro`, `prod` or `production`, and can be changed. **Test connection** checks before saving.
+3. Click the environment: it opens (or focuses) a tab connected to it. Write the query and run it.
 
-Na barra da aba ficam o ambiente, o estado da conexão, o banco atual, o modo (Somente leitura · Transação · Auto-commit), Salvar e Rodar. Com transação aberta, aparece a barra "Transação aberta · N comandos · tempo" com **Commit** e **Rollback**.
+The tab bar holds the environment, the connection state, the current database, the mode (Read-only · Transaction · Auto-commit), Save and Run. With an open transaction, the "Transaction open · N statements · time" bar appears with **Commit** and **Rollback**.
 
-| Atalho | O que faz |
+| Shortcut | What it does |
 |---|---|
-| Cmd+Enter | Roda o comando sob o cursor (ou a seleção) |
-| Cmd+Shift+Enter | Roda todos os comandos do editor |
-| Cmd+. | Cancela o comando em execução |
-| Cmd+T | Nova aba (seletor "projeto · ambiente") |
-| Cmd+W | Fecha a aba |
-| Cmd+S / Cmd+Shift+S | Salva o script / salva como outro script |
-| Cmd+O | Abre um script salvo |
+| Cmd+Enter | Runs the statement under the cursor (or the selection) |
+| Cmd+Shift+Enter | Runs every statement in the editor |
+| Cmd+. | Cancels the running statement |
+| Cmd+T | New tab ("project · environment" picker) |
+| Cmd+W | Closes the tab |
+| Cmd+S / Cmd+Shift+S | Saves the script / saves as another script |
+| Cmd+O | Opens a saved script |
 
-No Linux e no Windows, Ctrl faz o papel de Cmd (a interface mostra o atalho do seu sistema). O comportamento completo de cada tela, com os motivos, está em [docs/comportamento.md](docs/comportamento.md).
+On Linux and Windows, Ctrl takes the place of Cmd (the interface shows the shortcut for your system). The full behavior of each screen, with the reasons, is in [docs/behavior.md](docs/behavior.md).
 
-## Para agentes
+## For agents
 
-Agentes de IA com shell (Claude Code e outros) consultam e, com a sua aprovação, corrigem dados pelo comando `cais llm`. O agente **pede** e você decide no Cais; o Cais não entrega senha, token nem host ao comando.
+AI agents with a shell (Claude Code and others) query and, with your approval, fix data through the `cais llm` command. The agent **requests** and you decide in Cais; Cais does not hand a password, token or host to the command.
 
-1. No Cais, abra **Agentes** (rodapé da barra lateral) e ligue **Acesso de agentes**. Começa desligado, e desligado o socket nem existe.
-2. Menu **Cais › Instalar comando cais no terminal** (no Linux, menu **Arquivo**): cria o link `cais` em `/usr/local/bin` ou em `~/.local/bin`. O comando roda no Node do sistema (20 ou mais novo). No Windows, rode `node <caminho>/cais.mjs`.
-3. Dê ao agente a skill [skills/cais/SKILL.md](skills/cais/SKILL.md) e, no Claude Code, a permissão `Bash(cais llm:*)`.
+1. In Cais, open **Agents** (bottom of the sidebar) and turn on **Agent access**. It starts off, and while off the socket does not even exist.
+2. Menu **Cais › Install cais Command in Terminal** (on Linux, the **File** menu): creates the `cais` link in `/usr/local/bin` or in `~/.local/bin`. The command runs on the system Node (20 or newer). On Windows, run `node <path>/cais.mjs`.
+3. Give the agent the skill [skills/cais/SKILL.md](skills/cais/SKILL.md) and, in Claude Code, the permission `Bash(cais llm:*)`.
 
 ```bash
 cais llm guide
 cais llm envs
 cais llm query loja/dev --sql "SELECT id, status FROM pedidos LIMIT 10"
-cais llm query loja/dev --write --sql "UPDATE pedidos SET status = 'cancelado' WHERE id = 42" --reason "Pedido duplicado pelo cliente" --wait
+cais llm query loja/dev --write --sql "UPDATE pedidos SET status = 'cancelado' WHERE id = 42" --reason "Order duplicated by the customer" --wait
 ```
 
-Num ambiente BigQuery o agente só lê (`--write` é recusado), e uma leitura estimada acima de 10 GiB sempre espera a sua aprovação. Cada ambiente define o que um agente roda sem pedir (Tudo com aprovação; Leitura liberada, escrita com aprovação; Leitura e escrita liberadas). Em produção, escrita de agente sempre pede aprovação. A referência completa (comandos, saída JSON, códigos de saída, limites) está em [docs/agentes.md](docs/agentes.md).
+On a BigQuery environment the agent only reads (`--write` is refused), and a read estimated above 10 GiB always waits for your approval. Each environment defines what an agent runs without asking (Everything needs approval; Reads allowed, writes need approval; Reads and writes allowed). On production, an agent write always needs approval. The full reference (commands, JSON output, exit codes, limits) is in [docs/agents.md](docs/agents.md).
 
-## Segurança
+## Security
 
-- Senhas e tokens não saem do processo principal: a interface envia a senha uma vez, ao salvar, e nunca a recebe de volta. Senhas ficam cifradas pelo cofre do sistema (Keychain no macOS, Secret Service no Linux).
-- O renderer roda isolado (`contextIsolation`, `sandbox`, CSP restritiva, nenhum recurso remoto). O processo principal valida tudo o que chega com zod e reclassifica o SQL antes de executar.
-- O Cais recusa abrir com opções de depuração remota (só o gancho de testes de ponta a ponta as aceita), e o app empacotado não tem DevTools.
-- Agentes falam com o Cais por um socket local só do usuário (modo 0600), nunca recebem credencial, e cada pedido é reclassificado e registrado na Trilha antes de rodar.
-- Um agente sem sandbox, rodando como o mesmo usuário, não é contido pelo app. Para bancos de produção, rode o agente com sandbox e permita só `cais llm`.
+- Passwords and tokens never leave the main process: the interface sends the password once, when saving, and never receives it back. Passwords stay encrypted by the system vault (Keychain on macOS, Secret Service on Linux).
+- The renderer runs isolated (`contextIsolation`, `sandbox`, a restrictive CSP, no remote resources). The main process validates everything that arrives with zod and reclassifies the SQL before running it.
+- Cais refuses to start with remote debugging options (only the end-to-end test hook accepts them), and the packaged app has no DevTools.
+- Agents talk to Cais through a local socket owned by the user alone (mode 0600), never receive a credential, and every request is reclassified and recorded in the Trail before it runs.
+- An agent without a sandbox, running as the same user, is not contained by the app. For production databases, run the agent in a sandbox and allow only `cais llm`.
 
-O modelo de ameaças, as regras do classificador e os limites conhecidos estão em [docs/seguranca.md](docs/seguranca.md).
+The threat model, the classifier rules and the known limits are in [docs/security.md](docs/security.md).
 
-## Documentação
+## Documentation
 
-| Documento | Conteúdo |
+| Document | Contents |
 |---|---|
-| [docs/comportamento.md](docs/comportamento.md) | Como o Cais se comporta e por quê: modos, produção, abas, resultados, edição na grade, scripts, Trilha, cadastro |
-| [docs/agentes.md](docs/agentes.md) | Referência do CLI `cais llm` para agentes |
-| [docs/seguranca.md](docs/seguranca.md) | Modelo de segurança e de ameaças |
-| [docs/arquitetura.md](docs/arquitetura.md) | Processos, módulos, contratos, arquivos e empacotamento |
-| [docs/roadmap.md](docs/roadmap.md) | O que está fora da versão atual, com o motivo, e o que falta conferir |
-| [AGENTS.md](AGENTS.md) | Guia para quem contribui com o código (pessoas e agentes) |
+| [docs/behavior.md](docs/behavior.md) | How Cais behaves and why: modes, production, tabs, results, grid editing, scripts, Trail, registry |
+| [docs/agents.md](docs/agents.md) | Reference for the `cais llm` CLI for agents |
+| [docs/security.md](docs/security.md) | Security and threat model |
+| [docs/architecture.md](docs/architecture.md) | Processes, modules, contracts, files and packaging |
+| [docs/roadmap.md](docs/roadmap.md) | What is left out of the current version, with the reason, and what is left to verify |
+| [AGENTS.md](AGENTS.md) | Guide for contributors to the code (people and agents) |
 
-## Estrutura do projeto
+## Project structure
 
 ```
 src/
-  main/       processo principal: sessões, drivers, cadastro, cofre, Trilha, acesso de agentes, IPC
-  preload/    ponte tipada (window.cais) entre o renderer e o main
-  renderer/   interface em React
-  shared/     TypeScript puro usado pelos dois lados: modelo, dialetos (MySQL e GoogleSQL), contrato de IPC, i18n
-  cli/        o comando cais llm (empacotado num arquivo só, sem dependências)
-tests/        unit, integration (MySQL em container; BigQuery em servidor falso), e2e (Playwright com Electron) e live (BigQuery, opcional)
-scripts/      empacotamento do CLI e assinatura ad-hoc do app
-skills/cais/  skill para agentes usarem o CLI
-build/, resources/  ícones do app
+  main/       main process: sessions, drivers, registry, vault, Trail, agent access, IPC
+  preload/    typed bridge (window.cais) between the renderer and the main process
+  renderer/   React interface
+  shared/     pure TypeScript used by both sides: model, dialects (MySQL and GoogleSQL), IPC contract, i18n
+  cli/        the cais llm command (bundled into a single file, no dependencies)
+tests/        unit, integration (MySQL in a container; BigQuery on a fake server), e2e (Playwright with Electron) and live (BigQuery, optional)
+scripts/      CLI packaging and the app's ad-hoc signing
+skills/cais/  skill for agents to use the CLI
+build/, resources/  app icons
 ```
 
-Para contribuir, leia o [AGENTS.md](AGENTS.md): regras do projeto, convenções e comandos.
+To contribute, read [AGENTS.md](AGENTS.md): project rules, conventions and commands.
 
-## Licença
+## License
 
 [MIT](LICENSE).
