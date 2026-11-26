@@ -43,6 +43,10 @@ jobs:
   check:
     name: check
     needs: version
+    # A called workflow cannot raise the caller's token permissions: the gate job needs actions: read.
+    permissions:
+      contents: read
+      actions: read
     uses: ./.github/workflows/ci.yml
 
   linux:

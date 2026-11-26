@@ -17,7 +17,8 @@
     "e2e": "playwright test --config tests/e2e/playwright.config.ts",
     "check": "npm run typecheck && npm run unit && npm run integration && npm run build && npm run e2e",
     "dist": "umask 022 && npm run build && electron-builder --publish never",
-    "cli": "node scripts/build-cli.mjs && node out/cli/cais.mjs"
+    "cli": "node scripts/build-cli.mjs && node out/cli/cais.mjs",
+    "release": "node scripts/release.mjs"
   },
   "dependencies": {
     "mysql2": "3.24.6"
