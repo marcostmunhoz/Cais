@@ -1,9 +1,10 @@
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { _electron as electron, expect, test, type ElectronApplication, type Page } from '@playwright/test';
 
-const root = resolve(__dirname, '../..');
+import { electronOptions } from './helpers';
+
 const shots = join(__dirname, 'screenshots');
 const db = JSON.parse(process.env.CAIS_TEST_MYSQL!) as {
   host: string;
@@ -18,11 +19,7 @@ let app: ElectronApplication;
 let page: Page;
 
 async function launch(): Promise<void> {
-  app = await electron.launch({
-    args: [root],
-    cwd: root,
-    env: { ...process.env, CAIS_E2E: '1', CAIS_LOCALE: 'pt-BR', CAIS_USER_DATA: userData },
-  });
+  app = await electron.launch(electronOptions(userData));
   page = await app.firstWindow();
   await page.waitForLoadState('domcontentloaded');
 }
@@ -446,11 +443,7 @@ test('a corrupt catalog.json and tabs.json are set aside and the app opens empty
   const dir = mkdtempSync(join(tmpdir(), 'cais-e2e-corrupt-'));
   writeFileSync(join(dir, 'catalog.json'), '{broken');
   writeFileSync(join(dir, 'tabs.json'), '{"version":1,"tabs":[null],"activeTabId":null}');
-  const other = await electron.launch({
-    args: [root],
-    cwd: root,
-    env: { ...process.env, CAIS_E2E: '1', CAIS_LOCALE: 'pt-BR', CAIS_USER_DATA: dir },
-  });
+  const other = await electron.launch(electronOptions(dir));
   try {
     const win = await other.firstWindow();
     const notices = win.getByTestId('startup-notice');
