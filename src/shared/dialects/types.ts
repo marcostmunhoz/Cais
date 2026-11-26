@@ -1,5 +1,6 @@
 import type { Engine } from '../model';
 import type { CellValue, StatementKind } from '../results';
+import type { ScopeAnalysis } from './scope';
 
 export interface SqlStatement {
   /** Statement text without the trailing delimiter, trimmed. */
@@ -126,6 +127,11 @@ export interface Dialect {
   classify(statement: string): Classification;
   /** Alerts for a person reviewing the statement (pt-BR), such as "UPDATE sem WHERE". */
   warnings(statement: string): string[];
+  /**
+   * Which tables a statement names, under which alias, and what each position of it can see (see `scope.ts`). Reads
+   * incomplete text: the editor asks it while the statement is being typed.
+   */
+  analyze(statement: string): ScopeAnalysis;
   /** Lower-case identifier names a statement mentions (words and quoted names), for matching against the schema. */
   identifiers(statement: string): string[];
   /** Why SQL from an agent may read differently to a person than to the server (pt-BR), or null. */

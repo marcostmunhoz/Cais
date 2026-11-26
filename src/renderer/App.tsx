@@ -147,6 +147,7 @@ export function App({ platform }: { platform: string }) {
           <div className="editor-wrap" style={{ height: editorH, flex: 'none' }}>
             <Editor
               tabId={activeTab.id}
+              environmentId={environment.id}
               initialSql={activeTab.sql}
               engine={environment.engine}
               schema={schema}

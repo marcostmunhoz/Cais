@@ -7,6 +7,7 @@ export const en: Shape<typeof ptBR> = {
   tableDetail: 'table',
   viewDetail: 'view',
   databaseDetail: { database: 'database', dataset: 'dataset' },
+  syntaxError: (p) => `Possible syntax error: ${p.message}`,
   codemirror: {
     controlCharacter: 'Control character',
     completions: 'Completions',

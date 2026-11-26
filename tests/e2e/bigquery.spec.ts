@@ -38,6 +38,8 @@ test.beforeAll(async () => {
     pedidos_snap: { type: 'SNAPSHOT', schema: [{ name: 'id', type: 'INTEGER' }] },
   });
   fake.addDataset('logs', { acessos: { schema: [{ name: 'ip', type: 'STRING' }] } });
+  // a dataset only the editor reads (the tree never opens it)
+  fake.addDataset('extras', { itens: { schema: [{ name: 'sku', type: 'STRING' }, { name: 'qtd', type: 'INTEGER' }] } });
   // what a statement reads: eventos is large (3 GiB), everything else is small
   fake.bytesFor = (sql) => (/\beventos\b/.test(sql) ? 3 * GIB : 10 * 1024 * 1024);
   fake.resultFor = (sql) => {
@@ -333,6 +335,49 @@ test('the trail has the job id and the bytes of the person lines', async () => {
   // after the whole run: the columns were read for one dataset only, once, and the other one never
   expect(fake.requestsTo('/tables/', 'GET')).toHaveLength(7);
   expect(fake.requestsTo('/datasets/logs/tables/', 'GET')).toHaveLength(0);
+});
+
+test('the editor reads the columns of a dataset the statement names, without opening it in the tree', async () => {
+  const reads = () => fake.requestsTo('/datasets/extras/tables/', 'GET').length;
+  const queriesBefore = fake.realQueries.length;
+  expect(reads()).toBe(0);
+  const popup = page.locator('.cm-tooltip-autocomplete');
+  await page.locator('.cm-content').click();
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('SELECT * FROM extras.itens WHERE s');
+  // after a pause the dataset's columns are read: one tables.get for its one table, and no query
+  await expect.poll(reads, { timeout: 10_000 }).toBe(1);
+  // the columns reach the editor when the read ends: asking again completes them
+  await expect(async () => {
+    await page.keyboard.press('Backspace');
+    await page.keyboard.type('s');
+    await expect(popup).toContainText('sku', { timeout: 1000 });
+  }).toPass({ timeout: 10_000 });
+  await expect(popup).not.toContainText('valor');
+  await page.keyboard.press('Escape');
+  // once per dataset: more typing reads nothing new
+  await page.keyboard.type(' AND q');
+  await page.waitForTimeout(1200);
+  expect(reads()).toBe(1);
+  expect(fake.realQueries.length).toBe(queriesBefore);
+  await page.keyboard.press('Escape');
+});
+
+test('a full path with the project completes the dataset tables, and a BigQuery tab never shows a syntax mark', async () => {
+  const popup = page.locator('.cm-tooltip-autocomplete');
+  await page.locator('.cm-content').click();
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('SELECT * FROM `proj.extras.it');
+  await expect(popup).toContainText('itens');
+  await page.keyboard.press('Escape');
+  // no grammar of GoogleSQL is bundled: a statement with an error gets no local mark
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('SELECT * FRM pedidos;');
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(1500);
+  await expect(page.locator('.cm-lintRange-error')).toHaveCount(0);
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.press('Delete');
 });
 
 // last on purpose: it opens the second dataset, which the tests above count on staying unread

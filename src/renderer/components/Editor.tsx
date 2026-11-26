@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap } from '@codemirror/autocomplete';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
-import { sql, SQLDialect, type SQLNamespace } from '@codemirror/lang-sql';
+import { sql, SQLDialect } from '@codemirror/lang-sql';
 import { bracketMatching, HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { Compartment, EditorState, type Extension, RangeSetBuilder } from '@codemirror/state';
 import {
@@ -22,7 +22,11 @@ import type { Dialect } from '@shared/dialects/types';
 import type { SchemaTree } from '@shared/results';
 import { registerEditor, updateTabSql } from '../lib/actions';
 import { CODEMIRROR_DIALECTS } from '../lib/codemirrorDialects';
+import { schemaCompletion } from '../lib/completion';
+import { loadReferencedColumns, referencedDatasetsWatcher } from '../lib/datasets';
 import { m } from '../lib/i18n';
+import { syntaxCheckFor } from '../lib/syntax';
+import { syntaxLint } from '../lib/syntax/lint';
 
 export const highlightStyle = HighlightStyle.define([
   { tag: [tags.keyword, tags.operatorKeyword, tags.modifier], color: 'var(--accent-text)', fontWeight: '500' },
@@ -65,43 +69,27 @@ function activeStatementPlugin(dialect: Dialect) {
   );
 }
 
-function buildNamespace(tree: SchemaTree | undefined, term: Dialect['databaseTerm']): SQLNamespace {
-  const t = m().editor;
-  const ns: Record<string, SQLNamespace> = {};
-  for (const db of tree?.databases ?? []) {
-    const tables: Record<string, SQLNamespace> = {};
-    for (const table of db.tables) {
-      tables[table.name] = {
-        self: { label: table.name, type: 'class', detail: table.type === 'view' ? t.viewDetail : t.tableDetail },
-        children: table.columns.map((c) => ({
-          label: c.name,
-          type: 'property',
-          detail: c.key === 'PRI' ? `${c.type} · PK` : c.type,
-        })),
-      };
-    }
-    ns[db.name] = { self: { label: db.name, type: 'namespace', detail: t.databaseDetail[term] }, children: tables };
-  }
-  return ns;
-}
-
-
+/**
+ * The language reads the text (highlighting, keywords); the names of the schema come from `schemaCompletion`, which
+ * knows what the statement reads and what the position waits for.
+ */
 function sqlExtension(dialect: Dialect, tree: SchemaTree | undefined, database: string | null): Extension {
   const base = CODEMIRROR_DIALECTS[dialect.codemirrorDialect];
   const withKeywords = SQLDialect.define({
     ...base.spec,
     keywords: `${base.spec.keywords ?? ''} ${dialect.keywords.join(' ').toLowerCase()}`,
   });
-  return sql({
-    dialect: withKeywords,
-    schema: buildNamespace(tree, dialect.databaseTerm),
-    ...(database ? { defaultSchema: database } : {}),
-    upperCaseKeywords: true,
-  });
+  const t = m().editor;
+  const words = { table: t.tableDetail, view: t.viewDetail, database: t.databaseDetail[dialect.databaseTerm] };
+  return [
+    sql({ dialect: withKeywords, upperCaseKeywords: true }),
+    withKeywords.language.data.of({ autocomplete: schemaCompletion({ dialect, tree, database, words }) }),
+  ];
 }
 
 interface Props {
   tabId: string;
+  environmentId: string;
   initialSql: string;
   engine: Engine;
   schema: SchemaTree | undefined;
@@ -109,17 +97,18 @@ interface Props {
 }
 
 /** One CodeMirror view for all tabs: each tab keeps its own EditorState (text, cursor, undo history). */
-export function Editor({ tabId, initialSql, engine, schema, database }: Props) {
+export function Editor({ tabId, environmentId, initialSql, engine, schema, database }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const states = useRef(new Map<string, EditorState>());
   const compartment = useRef(new Compartment());
-  const current = useRef({ tabId, schema, database, engine });
-  current.current = { tabId, schema, database, engine };
+  const current = useRef({ tabId, environmentId, schema, database, engine });
+  current.current = { tabId, environmentId, schema, database, engine };
 
   const createState = (id: string, doc: string): EditorState => {
     const dialect = getDialect(current.current.engine);
     const t = m().editor;
+    const check = syntaxCheckFor(current.current.engine);
     return EditorState.create({
       doc,
       extensions: [
@@ -142,6 +131,10 @@ export function Editor({ tabId, initialSql, engine, schema, database }: Props) {
         compartment.current.of(sqlExtension(dialect, current.current.schema, current.current.database)),
         syntaxHighlighting(highlightStyle),
         activeStatementPlugin(dialect),
+        // engines with a grammar of their own mark the first syntax error of each statement
+        ...(check ? [syntaxLint({ dialect, check, message: (text) => t.syntaxError({ message: text }) })] : []),
+        // engines that read columns per dataset read the ones the statement names
+        referencedDatasetsWatcher((state) => loadReferencedColumns(current.current, state)),
         EditorView.contentAttributes.of({ 'aria-label': t.ariaLabel, spellcheck: 'false' }),
         EditorView.updateListener.of((update) => {
           if (update.docChanged && current.current.tabId === id) updateTabSql(id, update.state.doc.toString());
@@ -193,9 +186,11 @@ export function Editor({ tabId, initialSql, engine, schema, database }: Props) {
 
   // schema or current database changed: refresh the completion source
   useEffect(() => {
-    viewRef.current?.dispatch({
-      effects: compartment.current.reconfigure(sqlExtension(getDialect(engine), schema, database)),
-    });
+    const view = viewRef.current;
+    if (!view) return;
+    view.dispatch({ effects: compartment.current.reconfigure(sqlExtension(getDialect(engine), schema, database)) });
+    // the tree may have arrived after the statement was typed: its datasets are read now
+    loadReferencedColumns({ environmentId, engine, database }, view.state);
   }, [schema, database, engine]);
 
   return <div className="editor-host" ref={host} data-testid="editor" />;
