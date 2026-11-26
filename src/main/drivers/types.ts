@@ -97,6 +97,8 @@ export interface PrepareResult {
   /** Routines the server lists for the statement (views: unconfirmed live), each as "datasetId.routineId": never with the project. */
   routines?: string[];
   error?: StatementError;
+  /** With `error`: the server faulted the text of the statement itself (syntax, unknown name), not the way to reach it (auth, network, quota). */
+  errorInStatement?: boolean;
 }
 
 export interface DbSession {
@@ -112,9 +114,9 @@ export interface DbSession {
   useDatabase(name: string): Promise<StatementResult>;
   /**
    * Asks the server what it makes of a statement without running it. Optional: engines with no such step leave it out.
-   * Not used by the SessionManager yet.
+   * `signal` ends the request early (a newer one replaced it).
    */
-  prepare?(sql: string): Promise<PrepareResult>;
+  prepare?(sql: string, opts?: { signal?: AbortSignal }): Promise<PrepareResult>;
   /**
    * Whether a transaction is open on the server right now, or undefined when it cannot tell. Optional: an engine
    * without it leaves the SessionManager with the state it had.

@@ -17,6 +17,7 @@ import { DriverError } from './drivers/types';
 import { SessionManager } from './sessions';
 import { changedForAgents, type CatalogStore } from './store/catalog';
 import type { ScriptStore } from './store/scripts';
+import type { SettingsStore } from './store/settings';
 import type { TabsStore } from './store/tabs';
 import type { Trail } from './trail';
 
@@ -24,6 +25,7 @@ export interface Services {
   store: CatalogStore;
   tabs: TabsStore;
   scripts: ScriptStore;
+  settings: SettingsStore;
   agents: { access: AgentAccess; broker: AgentBroker };
   gcloud: GcloudTokenProvider;
   /** Accounts the registry offers for Google IAM; the gcloud provider's when absent (the e2e hook replaces it with a fixed list). */
@@ -148,7 +150,7 @@ function describeError(error: unknown): { message: string; code?: string } {
 }
 
 export function registerIpc(services: Services): void {
-  const { store, tabs, scripts, gcloud, sessions, agents } = services;
+  const { store, tabs, scripts, settings, gcloud, sessions, agents } = services;
   const schemaCache = new Map<string, SchemaTree>();
   /** Forgets the environment's schema, the per-dataset reads included (their keys start with the environment id). */
   const dropSchema = (envId: string): void => {
@@ -308,6 +310,17 @@ export function registerIpc(services: Services): void {
   );
   handle(CHANNELS.sessionDisconnect, t(id), (tabId) => sessions.disconnect(tabId as string));
   handle(CHANNELS.sessionState, t(id), (tabId) => sessions.state(tabId as string));
+  // a dry run only: main refuses it while the switch is off and reclassifies the text before anything is sent
+  handle(CHANNELS.sessionEstimate, t(id, z.string().max(1_100_000)), (tabId, sql) =>
+    sessions.estimate(tabId as string, sql as string),
+  );
+
+  const userSettings = () => ({ estimateAsYouType: settings.estimateAsYouType });
+  handle(CHANNELS.settingsGet, none, () => userSettings());
+  handle(CHANNELS.settingsSetEstimateAsYouType, t(z.boolean()), async (enabled) => {
+    await settings.setEstimateAsYouType(enabled as boolean);
+    return userSettings();
+  });
 
   handle(
     CHANNELS.schemaGet,

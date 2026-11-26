@@ -7,7 +7,7 @@ import { quoteIdent } from '@shared/dialects/bigquery';
 import type { BigqueryConnectParams, DbSession, DbSessionError, ExecuteOptions, PrepareResult } from '../types';
 import { DriverError } from '../types';
 import { anything, datasetGet, dryRunBody, dryRunResponse, jobGet, queryResponse, toDryRun, type BigqueryClient, type DryRun, type QueryResponse } from './client';
-import { mapBigqueryError } from './errors';
+import { BigqueryApiError, mapBigqueryError } from './errors';
 import { columnMeta, decodeRow, type SchemaField } from './values';
 
 /** How long jobs.query waits for a quick answer before handing back a job to poll. */
@@ -145,9 +145,9 @@ export class BigquerySession implements DbSession {
   }
 
   /** The dry run: what BigQuery reads the statement as, and how many bytes it would read. */
-  async prepare(sql: string): Promise<PrepareResult> {
+  async prepare(sql: string, opts: { signal?: AbortSignal } = {}): Promise<PrepareResult> {
     try {
-      const response = await this.dryRun(sql, undefined);
+      const response = await this.dryRun(sql, opts.signal);
       return {
         ...(response.statementType ? { serverKind: response.statementType } : {}),
         ...(response.totalBytesProcessed !== undefined ? { bytesEstimated: response.totalBytesProcessed } : {}),
@@ -155,8 +155,29 @@ export class BigquerySession implements DbSession {
         ...(response.routines.length > 0 ? { routines: response.routines.map((r) => `${r.datasetId}.${r.routineId}`) } : {}),
       };
     } catch (error) {
-      return { error: mapBigqueryError(error, { cancelled: false }) };
+      // 400 (invalid query) is about the text, and so is a 404 for something the text names; the rest (a 404 for the
+      // project or the default dataset, permission, quota, network) is about the way to the server
+      const inStatement = error instanceof BigqueryApiError && (error.status === 400 || (error.status === 404 && this.missingIsNamedBy(sql, error.apiMessage)));
+      return { error: mapBigqueryError(error, { cancelled: false }), ...(inStatement ? { errorInStatement: true } : {}) };
     }
+  }
+
+  /**
+   * A 404 says something is not there. It is a fault of the text when the text names it (a table, a view, a routine, or
+   * a dataset the text spells out). When it is the project or the tab's default dataset, the environment is what is wrong,
+   * unless the text itself spells that name.
+   */
+  private missingIsNamedBy(sql: string, message: string): boolean {
+    if (/\bat \[\d+:\d+\]/.test(message)) return true;
+    const named = /Not found: (\w+) (\S+)/i.exec(message);
+    if (!named) return false;
+    const kind = named[1]!.toLowerCase();
+    if (kind !== 'dataset' && kind !== 'project') return kind !== 'location' && kind !== 'job' && kind !== 'user';
+    const id = named[2]!.replace(/[`,.;:]+$/, '');
+    const ours = [this.params.project, this.dataset ? `${this.params.project}:${this.dataset}` : null];
+    if (!ours.includes(id)) return true;
+    const spelled = kind === 'project' ? this.params.project : this.dataset;
+    return !!spelled && sql.includes(spelled);
   }
 
   /** jobs.insert with dryRun: unlike jobs.query, it also reports the routines the statement reaches. */

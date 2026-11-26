@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { capabilitiesOf, connectionTargetKey, GIB, initialModeFor, isBigqueryDatasetId, isGcpProjectId, sameTarget } from '@shared/engines';
+import { capabilitiesOf, connectionTargetKey, fixedModeOf, GIB, initialModeFor, isBigqueryDatasetId, isGcpProjectId, sameTarget } from '@shared/engines';
 import { engineVersionLabel, getDialect } from '@shared/dialects/registry';
 
 describe('engine capabilities', () => {
@@ -12,6 +12,20 @@ describe('engine capabilities', () => {
     expect(initialModeFor(mysql, false)).toBe('autocommit');
     expect(initialModeFor({ modes: ['read-only'], gridEdit: false }, false)).toBe('read-only');
     expect(initialModeFor({ modes: ['transaction', 'read-only'], gridEdit: false }, false)).toBe('transaction');
+  });
+});
+
+describe('the mode picker', () => {
+  it('an engine with one mode has nothing to pick: that mode is fixed', () => {
+    expect(fixedModeOf(capabilitiesOf('bigquery'))).toBe('read-only');
+    expect(fixedModeOf({ modes: ['autocommit'], gridEdit: false })).toBe('autocommit');
+  });
+  it('an engine with more than one mode has a picker, and none is fixed', () => {
+    expect(fixedModeOf(capabilitiesOf('mysql'))).toBeNull();
+    expect(fixedModeOf({ modes: ['read-only', 'transaction'], gridEdit: false })).toBeNull();
+  });
+  it('an engine with no mode at all is not a badge either', () => {
+    expect(fixedModeOf({ modes: [], gridEdit: false })).toBeNull();
   });
 });
 

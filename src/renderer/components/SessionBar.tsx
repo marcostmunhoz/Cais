@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react';
-import { AlertTriangle, Clock, Play, PlugZap, Save, Square, Unplug } from 'lucide-react';
+import { AlertTriangle, Clock, Lock, Play, PlugZap, Save, Square, Unplug } from 'lucide-react';
 import { connectionView } from '@shared/connection';
 import { engineVersionLabel, getDialect } from '@shared/dialects/registry';
-import { capabilitiesOf } from '@shared/engines';
-import type { SessionMode } from '@shared/model';
+import { capabilitiesOf, fixedModeOf } from '@shared/engines';
 import { isScriptDirty } from '@shared/scripts';
 import { shortcutText } from '@shared/shortcuts';
 import {
@@ -17,13 +16,11 @@ import {
   rollbackTab,
   runTab,
   saveTab,
+  setEstimateAsYouType,
 } from '../lib/actions';
 import { formatElapsed } from '../lib/format';
 import { m } from '../lib/i18n';
 import { useStore } from '../lib/store';
-
-// every mode the app knows, in the order shown; the ones the engine does not accept are disabled
-const MODES: SessionMode[] = ['read-only', 'transaction', 'autocommit'];
 
 export function SessionBar({ tabId, platform }: { tabId: string; platform: string }) {
   const tab = useStore((s) => s.tabs.find((t) => t.id === tabId));
@@ -33,6 +30,7 @@ export function SessionBar({ tabId, platform }: { tabId: string; platform: strin
   const run = useStore((s) => s.runs[tabId]);
   const schema = useStore((s) => (env ? s.schemas[env.id] : undefined));
   const pending = useStore((s) => s.pendingModes[tabId]);
+  const estimateOn = useStore((s) => s.estimateAsYouType);
   void pending;
   const script = useStore((s) => s.scripts.find((sc) => sc.id === tab?.scriptId));
 
@@ -44,6 +42,9 @@ export function SessionBar({ tabId, platform }: { tabId: string; platform: strin
   const databases = schema?.tree?.databases.map((d) => d.name) ?? [];
   const options = database && !databases.includes(database) ? [database, ...databases] : databases;
   const txOpen = !!session?.transaction.open;
+  // the modes the engine accepts: the picker lists only those, and with a single one it is a badge instead
+  const caps = capabilitiesOf(env.engine);
+  const fixedMode = fixedModeOf(caps);
   const t = m().sessionBar;
   const view = connectionView(session, run);
   const chipDetail = view.status === 'connected' && view.detail ? engineVersionLabel(env.engine, view.detail) : view.detail;
@@ -103,24 +104,47 @@ export function SessionBar({ tabId, platform }: { tabId: string; platform: strin
             </option>
           ))}
         </select>
-        <div className="seg" role="radiogroup" aria-label={t.modeGroup}>
-          {MODES.map((option) => {
-            const supported = capabilitiesOf(env.engine).modes.includes(option);
-            return (
+        {fixedMode ? (
+          // an engine with one mode has nothing to choose: a fixed badge says what the tab does and why
+          <span
+            className="mode-badge"
+            data-testid="mode-badge"
+            role="note"
+            aria-label={`${t.modeGroup}: ${t.mode[fixedMode]}`}
+            title={t.modeFixedTitle({ engine: getDialect(env.engine).displayName })}
+          >
+            <Lock size={11} aria-hidden="true" /> {t.mode[fixedMode]}
+          </span>
+        ) : (
+          <div className="seg" role="radiogroup" aria-label={t.modeGroup}>
+            {caps.modes.map((option) => (
               <button
                 key={option}
                 role="radio"
                 aria-checked={mode === option}
                 className={mode === option ? 'on' : ''}
-                disabled={busy || !supported}
-                {...(supported ? {} : { title: t.modeUnsupported({ engine: getDialect(env.engine).displayName }) })}
+                disabled={busy}
                 onClick={() => void changeMode(tabId, option)}
               >
                 {t.mode[option]}
               </button>
-            );
-          })}
-        </div>
+            ))}
+          </div>
+        )}
+        {caps.dryRun && (
+          // the engine answers a dry run: the person decides whether the statement under the cursor is sent to it while typing
+          <button
+            className="estimate-switch"
+            role="switch"
+            aria-checked={estimateOn}
+            data-testid="estimate-switch"
+            title={t.estimateToggleTitle}
+            onClick={() => void setEstimateAsYouType(!estimateOn)}
+          >
+            <span className="track" aria-hidden="true" />
+            {t.estimateToggle}
+          </button>
+        )}
         <span className="spacer" />
         <button
           className={`btn ${dirty ? 'accent' : ''}`}

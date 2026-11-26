@@ -36,7 +36,11 @@ export const ptBR = {
     transaction: 'Transação',
     autocommit: 'Auto-commit',
   },
-  modeUnsupported: (p: { engine: string }) => `${p.engine} não aceita este modo.`,
+  modeFixedTitle: (p: { engine: string }) => `${p.engine} só lê nesta versão`,
+  /** BigQuery: the switch that dry-runs the statement under the cursor after a pause in typing. */
+  estimateToggle: 'Estimar ao digitar',
+  estimateToggleTitle:
+    'Estima os bytes da consulta sob o cursor a cada pausa na digitação e aponta erros no editor. O texto dela vai ao Google a cada vez; nada é executado nem cobrado.',
   cancel: 'Cancelar',
   run: 'Rodar',
   txOpen: (p: { statements: number; elapsed: string }) =>

@@ -40,6 +40,11 @@ const api: CaisApi = {
     close: (tabId, opts) => invoke(CHANNELS.sessionClose, tabId, opts),
     disconnect: (tabId) => invoke(CHANNELS.sessionDisconnect, tabId),
     state: (tabId) => invoke(CHANNELS.sessionState, tabId),
+    estimate: (tabId, sql) => invoke(CHANNELS.sessionEstimate, tabId, sql),
+  },
+  settings: {
+    get: () => invoke(CHANNELS.settingsGet),
+    setEstimateAsYouType: (enabled) => invoke(CHANNELS.settingsSetEstimateAsYouType, enabled),
   },
   schema: {
     get: (environmentId, opts) => invoke(CHANNELS.schemaGet, environmentId, opts),

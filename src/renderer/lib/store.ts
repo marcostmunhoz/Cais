@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import type { CatalogSnapshot, SavedScript, SessionMode, TabState } from '@shared/model';
 import type { AgentsSnapshot } from '@shared/agents';
-import type { PendingTransaction } from '@shared/ipc';
+import type { EstimateResponse, PendingTransaction } from '@shared/ipc';
 import type { SchemaTree, SessionState, StatementResult } from '@shared/results';
 import type { PendingCells } from '@shared/grid';
 
@@ -30,6 +30,15 @@ export interface SchemaView {
   error?: string;
   /** Engines that read columns per dataset (BigQuery): the state of that read, by dataset name. */
   datasets?: Record<string, { status: 'loading' | 'ready' | 'error'; error?: string }>;
+}
+
+/** The dry run of the statement under the cursor ("Estimar ao digitar"), as the status bar shows it. */
+export interface EstimateView {
+  /** The statement the answer is for. */
+  text: string;
+  /** A request for a newer text is in flight; `response` is still the last answer. */
+  pending: boolean;
+  response?: Extract<EstimateResponse, { state: 'ok' | 'error' | 'refused' }>;
 }
 
 /** BigQuery: statements estimated above the environment's byte limit, waiting for the person's answer. */
@@ -98,6 +107,10 @@ export interface AppState {
   pendingModes: Record<string, SessionMode>;
   runs: Record<string, RunView>;
   schemas: Record<string, SchemaView>;
+  /** "Estimar ao digitar" (BigQuery), kept in main's settings.json: on for every tab of an engine that answers a dry run. */
+  estimateAsYouType: boolean;
+  /** Per tab: what the dry run of its statement under the cursor said last. */
+  estimates: Record<string, EstimateView>;
   registry: RegistryRequest | null;
   picker: boolean;
   scriptPicker: boolean;
@@ -128,6 +141,8 @@ const initial: AppState = {
   pendingModes: {},
   runs: {},
   schemas: {},
+  estimateAsYouType: false,
+  estimates: {},
   registry: null,
   picker: false,
   scriptPicker: false,

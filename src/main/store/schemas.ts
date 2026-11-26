@@ -77,4 +77,6 @@ export const scriptsSchema = z.object({
 export const settingsSchema = z.object({
   version: z.literal(1),
   agentAccess: z.boolean(),
+  /** Optional: a settings.json written before it existed has none (off). Not part of the seal: it gives agents nothing. */
+  estimateAsYouType: z.boolean().optional(),
 });
