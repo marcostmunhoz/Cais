@@ -4,8 +4,7 @@ on:
   # Every branch push runs it, PR branches included: the run shows on the PR, so a
   # pull_request trigger would only duplicate it. The gate job skips a push whose tree a
   # previous successful run already tested (a merge of an up-to-date branch, the same tree
-  # pushed to another branch) and the release commit (release.yml checks it on the tag), the
-  # same approach the Git project uses in its CI.
+  # pushed to another branch), the same approach the Git project uses in its CI.
   push:
     branches: ['**']
   workflow_dispatch:
@@ -41,7 +40,6 @@ jobs:
           REF: ${{ github.ref }}
           RUN_ID: ${{ github.run_id }}
           TREE: ${{ github.event.head_commit.tree_id }}
-          MESSAGE: ${{ github.event.head_commit.message }}
         run: |
           set -euo pipefail
 
@@ -58,10 +56,6 @@ jobs:
           if [ "$EVENT" != "push" ]; then
             finish true "event $EVENT always runs the full check"
           fi
-          first_line="${MESSAGE%%$'\n'*}"
-          if [ "$REF" = "refs/heads/main" ] && [[ "$first_line" == chore\(release\):* ]]; then
-            finish false "release commit; the release workflow runs the full check on this tree before building"
-          fi
           if [ -z "$TREE" ]; then
             finish true "no tree id in the event"
           fi
@@ -69,8 +63,7 @@ jobs:
           if ! previous="$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?status=success&event=push&per_page=100" \
             --jq '[.workflow_runs[]
               | select(.head_commit.tree_id == env.TREE)
-              | select(.id != (env.RUN_ID | tonumber))
-              | select((.head_commit.message // "" | split("\n")[0] | startswith("chore(release):")) | not)]
+              | select(.id != (env.RUN_ID | tonumber))]
               | first // empty
               | "\(.html_url) \(.head_sha)"')"; then
             finish true "could not query previous runs"
@@ -85,7 +78,9 @@ jobs:
   check:
     name: check
     needs: gate
-    if: needs.gate.outputs.run == 'true'
+    # Fail open: a failed gate runs the check. A cancelled run never becomes green, because a
+    # skipped job counts as success for a required check.
+    if: ${{ !cancelled() && (needs.gate.result != 'success' || needs.gate.outputs.run == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
