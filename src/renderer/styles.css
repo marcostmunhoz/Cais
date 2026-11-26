@@ -2008,3 +2008,99 @@ kbd {
   justify-content: center;
   padding: 10px 0 4px;
 }
+
+/* About window ---------------------------------------------------------- */
+.dialog.about {
+  width: 400px;
+}
+
+.about-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 2px;
+  padding: 20px 20px 16px;
+}
+
+.about-logo {
+  width: 72px;
+  height: 72px;
+  margin-bottom: 8px;
+  user-select: none;
+}
+
+.about-name {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.about-version {
+  color: var(--text-secondary);
+  min-height: 1.4em;
+}
+
+.about-tagline {
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.about-list {
+  width: 100%;
+  margin: 16px 0 0;
+  text-align: left;
+  border-top: 0.5px solid var(--border);
+}
+
+.about-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 6px 0;
+  border-bottom: 0.5px solid var(--border);
+}
+
+.about-row dt {
+  color: var(--text-secondary);
+}
+
+.about-row dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.about-row .link-btn {
+  font-size: inherit;
+  font-family: inherit;
+}
+
+.about-update {
+  width: 100%;
+  margin-top: 14px;
+  text-align: left;
+}
+
+.about-update-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 600;
+}
+
+.about-hint,
+.about-result {
+  margin-top: 6px;
+  color: var(--text-secondary);
+}
+
+.about-hint {
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+.about-result .link-btn {
+  font-size: inherit;
+}

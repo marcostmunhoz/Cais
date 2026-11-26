@@ -30,6 +30,7 @@ Antes de mudar comportamento, leia [docs/comportamento.md](docs/comportamento.md
 - **Linux:** o cofre só vale com chaveiro de verdade (Secret Service; `basic_text` e `unknown` são recusados em `SafeStorageVault`). Os textos de atalho mostrados na interface saem de `src/shared/shortcuts.ts` (símbolos no macOS, Ctrl+… nos outros), nunca fixos no componente; o tratamento das teclas fica em `App.tsx` (`useGlobalShortcuts`) e deve bater com esses textos. O socket dos agentes cai em `$XDG_RUNTIME_DIR` quando o caminho padrão passa de 100 bytes. O deb instala o executável `cais-app` em `/opt/Cais`.
 - **Poucas opções:** nada de opção de configuração sem o motivo registrado em `docs/comportamento.md`.
 - **Idioma:** a interface segue o idioma do sistema, em pt-BR ou inglês. Todo texto que a pessoa vê sai dos catálogos de `src/shared/i18n/areas` (os dois idiomas, mesma chave), nunca escrito direto no componente. O que vai para agentes (saída do CLI, `guide`, respostas do broker) fica em português, fixo. Sem exclamação; termos do ofício como se fala (commit, rollback, schema, query).
+- **Rede:** só o processo principal sai da máquina (bancos, `bigquery.googleapis.com`, o subprocesso `gcloud` e, só quando a pessoa clica em Verificar na janela Sobre, `api.github.com`; lista completa em `docs/seguranca.md`). O que abre no navegador é fixo e montado no main (`app:openLink` recebe um nome, nunca um endereço). Nenhuma verificação roda sozinha.
 - **O Cais roda uma instância por usuário** (`requestSingleInstanceLock`) e recusa abrir com opções de depuração remota (`--inspect*`, `--remote-debugging-*`), menos no gancho de e2e. O DevTools só existe fora do pacote.
 
 ## Convenções
@@ -74,6 +75,7 @@ Todos rodam na raiz do projeto, com Node 20.19 ou mais novo e npm.
   - `CAIS_LOCALE` = `pt-BR` | `en`: o e2e fixa `pt-BR` por padrão e usa `en` só no teste de idioma;
   - `CAIS_IDLE_MS`: inteiro de 100 ms ou mais, encurta a desconexão por inatividade;
   - `CAIS_BIGQUERY_URL`: troca o endereço da API do BigQuery pelo do servidor falso;
+  - `CAIS_RELEASES_URL`: troca o endereço da API de releases do GitHub (verificação de versão da janela Sobre) pelo de um servidor falso; com `CAIS_E2E=1` e sem ele, a verificação responde "não foi possível" sem sair para a rede;
   - com `CAIS_E2E=1`, o token do BigQuery é um valor falso fixo (`cais-test-access-token`) e a lista de contas do `gcloud` é uma conta falsa fixa (`ana@exemplo.com`): o e2e nunca roda o `gcloud`.
 - **Banco:** os testes usam só o próprio container `cais-test-*`, em porta aleatória. Nunca a porta 3306 (para não colidir com um MySQL local), nunca outro container, nunca um banco real. Se um teste travar e deixar container para trás: `docker ps -a --filter name=cais-test-` e `docker rm -f` neles.
 - **`gcloud`:** nunca rodar o `gcloud` de verdade nos testes. Eles usam um `gcloud` falso (`spawn` injetável).

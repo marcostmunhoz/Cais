@@ -59,10 +59,37 @@ test('the application menu is in English', async () => {
   );
   const labels = menu.map((i) => i.label);
   expect(labels).toEqual(expect.arrayContaining(['Edit', 'View', 'Window']));
+  // About lives under Help, except on macOS (the app menu)
+  if (process.platform !== 'darwin') expect(labels).toContain('Help');
   const all = menu.flatMap((i) => i.items);
-  expect(all).toEqual(expect.arrayContaining(['Install cais Command in Terminal', 'Undo', 'Redo', 'Cut', 'Copy', 'Paste', 'Select All', 'Minimize']));
-  for (const pt of ['Editar', 'Desfazer', 'Colar', 'Janela', 'Exibir', 'Selecionar tudo']) expect(all.concat(labels)).not.toContain(pt);
+  expect(all).toEqual(expect.arrayContaining(['About Cais', 'Install cais Command in Terminal', 'Undo', 'Redo', 'Cut', 'Copy', 'Paste', 'Select All', 'Minimize']));
+  for (const pt of ['Editar', 'Desfazer', 'Colar', 'Janela', 'Exibir', 'Selecionar tudo', 'Ajuda', 'Sobre o Cais']) expect(all.concat(labels)).not.toContain(pt);
   await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+});
+
+test('the About window is in English; with no network under test the check says it could not check', async () => {
+  await app.evaluate(({ Menu }) => {
+    const find = (items: Electron.MenuItem[]): Electron.MenuItem | undefined => {
+      for (const item of items) {
+        if (item.label === 'About Cais') return item;
+        const inner = item.submenu ? find(item.submenu.items) : undefined;
+        if (inner) return inner;
+      }
+      return undefined;
+    };
+    find(Menu.getApplicationMenu()!.items)!.click();
+  });
+  const about = dialog('About Cais');
+  await expect(about).toBeVisible();
+  await expect(about.getByTestId('about-version')).toContainText('Version ');
+  await expect(about).toContainText('License');
+  await expect(about).toContainText('Latest version');
+  await expect(about.getByTestId('about-copy')).toHaveText('Copy info');
+  await about.getByTestId('about-check').click();
+  await expect(about.getByTestId('about-check-result')).toContainText('Could not check.');
+  await expect(about.getByTestId('about-open-releases')).toHaveText('Open releases');
+  await about.getByTestId('about-close').click();
+  await expect(about).toHaveCount(0);
 });
 
 test('sidebar, session bar and status bar in English; screenshot', async () => {

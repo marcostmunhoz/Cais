@@ -13,6 +13,8 @@ import { ptBR as commonPtBR } from './areas/common/pt-BR';
 import { en as commonEn } from './areas/common/en';
 import { ptBR as menuPtBR } from './areas/menu/pt-BR';
 import { en as menuEn } from './areas/menu/en';
+import { ptBR as aboutPtBR } from './areas/about/pt-BR';
+import { en as aboutEn } from './areas/about/en';
 import { ptBR as nativePtBR } from './areas/native/pt-BR';
 import { en as nativeEn } from './areas/native/en';
 import { ptBR as appPtBR } from './areas/app/pt-BR';
@@ -67,6 +69,7 @@ export * from './core';
 const ptBRMessages = {
   common: commonPtBR,
   menu: menuPtBR,
+  about: aboutPtBR,
   native: nativePtBR,
   app: appPtBR,
   sidebar: sidebarPtBR,
@@ -102,6 +105,7 @@ export type AreaMessages<A extends keyof Messages> = Messages[A];
 const enMessages: Messages = {
   common: commonEn,
   menu: menuEn,
+  about: aboutEn,
   native: nativeEn,
   app: appEn,
   sidebar: sidebarEn,

@@ -60,13 +60,13 @@ Um motor novo é um dialeto e um driver registrados; a interface e as políticas
 
 O `SessionManager` chama `prepare` por comando, compara a estimativa com o limite do ambiente e devolve `needsConfirmation` com `reason: 'bytes'`; o pedido confirmado volta com `confirmedBytes` por texto de comando, que vira o `maximumBytesBilled` do job. O `AgentExecutor.prepare` faz um dry run por comando na conexão de leitura do agente (só quando o motor tem `dryRun`: o MySQL não abre nem manda nada a mais), e o broker usa as rotinas do dry run (aprovação em qualquer nível, motivo `remoteFunction` com o primeiro `dataset.rotina`) e a estimativa para os 10 GiB fixos (`AGENT_BYTES_APPROVAL`), para o teto do job (o limiar, ou a estimativa arredondada ao GiB quando a pessoa aprovou por causa dos bytes) e para a aprovação por chamada de função. As linhas da Trilha levam `jobId`, `bytesEstimated` e `bytesBilled` por comando; na linha do pedido, os bytes somados e o `jobId` só quando houve um job.
 
-**O modelo por motor.** `Environment` é uma união discriminada por `engine`: o MySQL guarda `host` e `port`; o BigQuery guarda `gcpProject` e `maxBytesBilled?` (bytes; ausente é sem limite), e não tem host nem porta. `ConnectParams` segue a mesma divisão, e `connectParamsFor` (`auth/credentials.ts`) monta os parâmetros de um ambiente ou de um rascunho, com a origem (`person` ou `agent`) que vira o rótulo `cais` dos jobs do BigQuery. As capacidades do motor (modos aceitos, edição na grade) ficam em `src/shared/engines.ts`: o BigQuery só tem Somente leitura. Ganchos de teste do BigQuery, só no app não empacotado: `CAIS_BIGQUERY_URL` (endereço da API) e, com `CAIS_E2E=1`, um token falso fixo no lugar do `gcloud`.
+**O modelo por motor.** `Environment` é uma união discriminada por `engine`: o MySQL guarda `host` e `port`; o BigQuery guarda `gcpProject` e `maxBytesBilled?` (bytes; ausente é sem limite), e não tem host nem porta. `ConnectParams` segue a mesma divisão, e `connectParamsFor` (`auth/credentials.ts`) monta os parâmetros de um ambiente ou de um rascunho, com a origem (`person` ou `agent`) que vira o rótulo `cais` dos jobs do BigQuery. As capacidades do motor (modos aceitos, edição na grade) ficam em `src/shared/engines.ts`: o BigQuery só tem Somente leitura. Ganchos de teste do BigQuery, só no app não empacotado: `CAIS_BIGQUERY_URL` (endereço da API) e, com `CAIS_E2E=1`, um token falso fixo no lugar do `gcloud`. A verificação de versão tem o seu: `CAIS_RELEASES_URL` (endereço da API de releases) e, com `CAIS_E2E=1` e sem ele, a verificação falha na hora, sem rede.
 
 ## Processo principal
 
 | Módulo | Papel |
 |---|---|
-| `index.ts` | Ciclo de vida do app e da janela, menu, trava de instância única, recusa de opções de depuração, ganchos de teste, notificações |
+| `index.ts` | Ciclo de vida do app e da janela, menu (Sobre no menu do app no macOS e em Ajuda no Linux), trava de instância única, recusa de opções de depuração, ganchos de teste, notificações |
 | `ipc.ts` | Handlers do IPC: só a janela principal, entrada validada com zod, erros traduzidos |
 | `sessions.ts` | `SessionManager`: uma sessão por aba, modos, transação, confirmações, inatividade, linhas da Trilha da pessoa |
 | `scheduler.ts` | Relógio injetável, usado pelas sessões da pessoa e dos agentes (os testes usam um relógio falso) |
@@ -75,6 +75,7 @@ O `SessionManager` chama `prepare` por comando, compara a estimativa com o limit
 | `store/` | `CatalogStore`, `ScriptStore`, `SettingsStore`, `TabsStore`, `Seal`, `Vault` e a escrita atômica |
 | `trail.ts` | A Trilha: um arquivo por dia, encadeamento, tetos, máscara de senha, listagem e conferência |
 | `agents/` | Acesso de agentes: `server`, `broker`, `policy`, `sessions`, `access`, `audit`, `redact`, `errors` |
+| `updates.ts` | `ReleaseChecker`: a verificação de versão da janela Sobre (um `GET` à API de releases do GitHub, só sob clique), com `fetch`, endereço e relógio injetáveis, validação com zod, cache de 1 hora e as páginas fixas que o app abre no navegador (`linkUrl`) |
 | `cli-install.ts` | "Instalar comando cais no terminal" (pastas recebidas por parâmetro, para os testes nunca tocarem a máquina) |
 | `i18n.ts` | Resolve o idioma do main antes do menu |
 
@@ -102,8 +103,8 @@ Tudo fica em `app.getPath('userData')` (no macOS, `~/Library/Application Support
 - `connection.test`: testar um rascunho de ambiente.
 - `session`: abrir, conectar, desconectar, trocar modo, rodar, cancelar, commit, rollback, trocar banco, fechar, estado.
 - `schema`: árvore de bancos, tabelas e colunas, com cache por ambiente.
-- `tabs`, `scripts`, `trail`, `agents` (decisões da pessoa sobre pedidos e o interruptor) e `app` (a pessoa desistiu de sair com transações abertas).
-- Eventos do main para o renderer: mudanças de sessão, pedidos de agentes, pedido para resolver transações antes de sair.
+- `tabs`, `scripts`, `trail`, `agents` (decisões da pessoa sobre pedidos e o interruptor) e `app`: `app:quitCancelled` (a pessoa desistiu de sair com transações abertas), `app:about` (versões do app e do runtime para a janela Sobre), `app:checkLatest` (a verificação de versão, sem argumentos; só quando a pessoa clica) e `app:openLink` (abre no navegador uma de três páginas fixas, por nome: `repository`, `releases` ou `release`; o endereço é montado no main, veja [seguranca.md](seguranca.md#processo-principal-e-renderer)).
+- Eventos do main para o renderer: mudanças de sessão, pedidos de agentes, pedido para resolver transações antes de sair e `event:openAbout` (o item Sobre do menu pede a janela, que é um diálogo do renderer: `AboutDialog`, em `components/About.tsx`).
 
 ## Idioma (i18n)
 

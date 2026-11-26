@@ -21,6 +21,7 @@ export const ptBR = {
   toggleFullScreen: 'Alternar tela cheia',
   reload: 'Recarregar',
   toggleDevTools: 'Ferramentas do desenvolvedor',
+  help: 'Ajuda',
   window: 'Janela',
   minimize: 'Minimizar',
   zoom: 'Zoom',

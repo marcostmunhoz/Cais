@@ -90,6 +90,8 @@ export interface AppState {
   agentPanel: boolean;
   /** The Trilha panel is open. */
   trailPanel: boolean;
+  /** The About window is open. */
+  about: boolean;
   /** Requests whose modal the person closed with Esc: they stay pending, listed in the panel. */
   agentDismissed: string[];
   /** A request the person asked to review from the panel. */
@@ -122,6 +124,7 @@ const initial: AppState = {
   agents: { enabled: false, pending: [], awaitingCommit: [], grants: [], recent: [] },
   agentPanel: false,
   trailPanel: false,
+  about: false,
   agentDismissed: [],
   agentFocus: null,
   sessions: {},
