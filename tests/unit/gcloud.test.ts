@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { AGENT_LOCALE, renderRef, setLocale } from '@shared/i18n';
 import type { CaisError } from '@main/errors';
 import { GcloudTokenProvider, type ChildLike, type SpawnFn } from '@main/auth/gcloud';
+import { describeEvent, type LogEvent } from '@main/log';
 
 interface Call {
   command: string;
@@ -14,6 +15,7 @@ interface Reply {
   stdout?: string;
   stderr?: string;
   error?: NodeJS.ErrnoException;
+  signal?: string;
 }
 
 function fakeSpawn(handler: (call: Call) => Reply): { spawn: SpawnFn; calls: Call[] } {
@@ -33,7 +35,8 @@ function fakeSpawn(handler: (call: Call) => Reply): { spawn: SpawnFn; calls: Cal
       }
       if (reply.stdout) out.emit('data', Buffer.from(reply.stdout));
       if (reply.stderr) err.emit('data', Buffer.from(reply.stderr));
-      child.emit('close', reply.code ?? 0);
+      if (reply.signal) child.emit('close', null, reply.signal);
+      else child.emit('close', reply.code ?? 0);
     });
     return child;
   };
@@ -42,7 +45,7 @@ function fakeSpawn(handler: (call: Call) => Reply): { spawn: SpawnFn; calls: Cal
 
 function provider(
   handler: (call: Call) => Reply,
-  opts: { existing?: string[]; env?: NodeJS.ProcessEnv; now?: () => number; platform?: NodeJS.Platform } = {},
+  opts: { existing?: string[]; env?: NodeJS.ProcessEnv; now?: () => number; platform?: NodeJS.Platform; log?: (event: LogEvent) => void } = {},
 ) {
   const { spawn, calls } = fakeSpawn(handler);
   const existing = new Set(opts.existing ?? ['/usr/local/bin/gcloud']);
@@ -53,6 +56,7 @@ function provider(
     homedir: opts.platform === 'linux' ? '/home/x' : '/Users/x',
     exists: (path) => existing.has(path),
     now: opts.now ?? (() => 0),
+    ...(opts.log ? { log: opts.log } : {}),
   });
   return { p, calls };
 }
@@ -312,5 +316,73 @@ describe('GcloudTokenProvider: access tokens (BigQuery)', () => {
   it('an empty token is an error', async () => {
     const { p } = provider(() => ({ stdout: ' \n' }));
     await expect(p.getAccessToken('a@x.com')).rejects.toThrow('não devolveu um token');
+  });
+});
+
+describe('GcloudTokenProvider: failure log', () => {
+  const token = 'ya29.a0AfH6SMBxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx';
+  const lineOf = (event: LogEvent) => describeEvent(event).message;
+
+  it('logs the command id and the exit code, never what gcloud printed or the accounts', async () => {
+    const events: LogEvent[] = [];
+    const { p } = provider(() => ({ code: 2, stdout: `out ${token}`, stderr: `ERROR: maria@empresa.com ${token} denied` }), { log: (e) => events.push(e) });
+    await p.getToken('maria@empresa.com', 'sa@p.iam.gserviceaccount.com').catch(() => undefined);
+    await p.getAccessToken('maria@empresa.com').catch(() => undefined);
+    await p.listAccounts().catch(() => undefined);
+    expect(events).toEqual([
+      { kind: 'gcloud-failed', command: 'sql-login-token', outcome: 'exit', exit: 2, signal: null },
+      { kind: 'gcloud-failed', command: 'print-access-token', outcome: 'exit', exit: 2, signal: null },
+      { kind: 'gcloud-failed', command: 'auth-list', outcome: 'exit', exit: 2, signal: null },
+    ]);
+    const text = events.map(lineOf).join('\n');
+    expect(text).toBe(
+      [
+        'command failed command=sql-login-token outcome=exit exit=2 signal=none',
+        'command failed command=print-access-token outcome=exit exit=2 signal=none',
+        'command failed command=auth-list outcome=exit exit=2 signal=none',
+      ].join('\n'),
+    );
+    for (const secret of [token, 'maria', 'empresa', 'iam.gserviceaccount', 'denied', 'ERROR']) expect(JSON.stringify(events) + text).not.toContain(secret);
+  });
+
+  it('logs the signal when the process was killed', async () => {
+    const events: LogEvent[] = [];
+    const { p } = provider(() => ({ signal: 'SIGKILL', stderr: `secret ${token}` }), { log: (e) => events.push(e) });
+    await p.getToken('a@x.com').catch(() => undefined);
+    expect(events).toEqual([{ kind: 'gcloud-failed', command: 'sql-login-token', outcome: 'signal', exit: null, signal: 'SIGKILL' }]);
+    expect(lineOf(events[0]!)).toBe('command failed command=sql-login-token outcome=signal exit=none signal=SIGKILL');
+  });
+
+  it('logs a process that could not start, with no error text', async () => {
+    const events: LogEvent[] = [];
+    const error = Object.assign(new Error('spawn /usr/local/bin/gcloud EACCES for maria@empresa.com'), { code: 'EACCES' });
+    const { p } = provider(() => ({ error }), { log: (e) => events.push(e) });
+    await p.getToken('maria@empresa.com').catch(() => undefined);
+    expect(events).toEqual([{ kind: 'gcloud-failed', command: 'sql-login-token', outcome: 'spawn-error', exit: null, signal: null }]);
+  });
+
+  it('logs gcloud not being installed', async () => {
+    const events: LogEvent[] = [];
+    const { p } = provider(() => ({ error: Object.assign(new Error('x'), { code: 'ENOENT' }) }), { log: (e) => events.push(e) });
+    await p.getAccessToken('a@x.com').catch(() => undefined);
+    const none = provider(() => ({}), { existing: [], env: { PATH: '' }, log: (e) => events.push(e) });
+    await none.p.listAccounts().catch(() => undefined);
+    expect(events).toEqual([
+      { kind: 'gcloud-failed', command: 'print-access-token', outcome: 'not-found', exit: null, signal: null },
+      { kind: 'gcloud-failed', command: 'auth-list', outcome: 'not-found', exit: null, signal: null },
+    ]);
+  });
+
+  it('logs nothing on success, and a log that throws changes nothing', async () => {
+    const events: LogEvent[] = [];
+    const ok = provider(() => ({ stdout: 'tok' }), { log: (e) => events.push(e) });
+    expect(await ok.p.getToken('a@x.com')).toBe('tok');
+    expect(events).toEqual([]);
+    const bad = provider(() => ({ code: 1, stderr: 'boom' }), {
+      log: () => {
+        throw new Error('disk full');
+      },
+    });
+    await expect(bad.p.getToken('a@x.com')).rejects.toThrow('boom');
   });
 });

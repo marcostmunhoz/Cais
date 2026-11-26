@@ -86,6 +86,7 @@ The editor (`src/renderer/components/Editor.tsx`) combines `lang-sql` (highlight
 | `store/` | `CatalogStore`, `ScriptStore`, `SettingsStore`, `TabsStore`, `Seal`, `Vault` and the atomic write |
 | `trail.ts` | The Trail: one file per day, chaining, caps, password masking, listing and verification |
 | `agents/` | Agent access: `server`, `broker`, `policy`, `sessions`, `access`, `audit`, `redact`, `errors` |
+| `log.ts` | The local log (`main.log`): `FileLog` (injectable folder, file system, clock and size limit; rotation at 1 MB, 0600 and 0700 enforced, no links followed, rate limit for error loops, never throws), the `LogEvent` union (the only way in: typed events, no free text), `describeEvent` (rechecks every field when the line is built), `unhandledErrorEvent` (a closed name, a Node or MySQL code and frames, never the message) and the hooks for process errors and window events. It has no Electron import |
 | `updates.ts` | `ReleaseChecker`: the version check in the About window (a `GET` to the GitHub releases API, only on click), with injectable `fetch`, address and clock, zod validation, a 1-hour cache and the fixed pages the app opens in the browser (`linkUrl`) |
 | `cli-install.ts` | "Install cais Command in Terminal" (folders received as parameters, so tests never touch the machine) |
 | `skill-install.ts` | "Install Agent Skill…" (`installSkill({ source, skillsDir })`: both paths are parameters, so tests never touch `~/.claude`; refuses links and files that are not Cais's own, writes atomically) |
@@ -106,6 +107,8 @@ Everything lives in `app.getPath('userData')` (on macOS, `~/Library/Application 
 | `trail/YYYY-MM-DD.jsonl` | The Trail, one file per day (UTC), folder 0700, 90 days |
 | `agent-endpoint.json` | `{ socket, pid, protocol }`, only with agent access on |
 | `agent.sock` | The agent socket, only with access on (see [security.md](security.md#agent-channel-isolation)) |
+
+The local log is not here: it is in `app.getPath('logs')` (`~/Library/Logs/Cais` on macOS, `<data folder>/logs` on Linux), as `main.log` and `main.old.log` (0600, 1 MB each at most; see [security.md](security.md#the-local-log)).
 
 ## IPC
 

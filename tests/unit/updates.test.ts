@@ -12,6 +12,7 @@ import {
   releasePageUrl,
   type FetchLike,
 } from '@main/updates';
+import type { LogEvent } from '@main/log';
 
 function json(body: unknown, status = 200): Response {
   return new Response(typeof body === 'string' ? body : JSON.stringify(body), { status });
@@ -198,6 +199,80 @@ describe('ReleaseChecker', () => {
     });
     await checker.check();
     expect(calls).toEqual(['http://127.0.0.1:1/latest']);
+  });
+});
+
+describe('ReleaseChecker: failure log', () => {
+  function logged(version: string, reply: () => Response | Promise<Response>, timeoutMs?: number) {
+    const events: LogEvent[] = [];
+    let clock = 1_000_000;
+    const checker = new ReleaseChecker({
+      version,
+      fetch: async () => reply(),
+      now: () => (clock += 7),
+      log: (event) => events.push(event),
+      ...(timeoutMs ? { timeoutMs } : {}),
+    });
+    return { checker, events };
+  }
+
+  it.each([
+    ['http-404', () => json('not found', 404)],
+    ['http-500', () => json('', 500)],
+    ['http-403', () => new Response('{"message":"API rate limit exceeded for 1.2.3.4"}', { status: 403 })],
+    ['network', () => Promise.reject(new Error('getaddrinfo ENOTFOUND api.github.com'))],
+    ['body-too-large', () => json(`{"tag_name":"v0.2.0","pad":"${'x'.repeat(2_000_001)}"}`)],
+    ['invalid-json', () => json('<html>not json</html>')],
+    ['invalid-shape', () => json({ tag_name: 'latest' })],
+  ])('logs %s once, with the duration and nothing from the response', async (reason, reply) => {
+    const { checker, events } = logged('0.1.1', reply);
+    expect(await checker.check()).toEqual({ status: 'unavailable' });
+    expect(events).toEqual([{ kind: 'update-check-failed', reason, ms: expect.any(Number) }]);
+    const line = JSON.stringify(events);
+    expect(line).not.toContain('rate limit');
+    expect(line).not.toContain('api.github.com');
+    expect(line).not.toContain('not json');
+  });
+
+  it('logs timeout when the request is aborted', async () => {
+    const events: LogEvent[] = [];
+    const checker = new ReleaseChecker({
+      version: '0.1.1',
+      timeoutMs: 20,
+      log: (event) => events.push(event),
+      fetch: (_url, init) =>
+        new Promise<Response>((_resolve, reject) => init.signal!.addEventListener('abort', () => reject(new Error('aborted')))),
+    });
+    expect(await checker.check()).toEqual({ status: 'unavailable' });
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ kind: 'update-check-failed', reason: 'timeout' });
+  });
+
+  it('logs invalid-current-version without sending anything', async () => {
+    const { checker, events } = logged('dev', () => json({ tag_name: 'v0.2.0' }));
+    expect(await checker.check()).toEqual({ status: 'unavailable' });
+    expect(events).toEqual([{ kind: 'update-check-failed', reason: 'invalid-current-version', ms: expect.any(Number) }]);
+  });
+
+  it('logs nothing on success, and one line per real request (the cached failure does not repeat)', async () => {
+    const ok = logged('0.1.1', () => json({ tag_name: 'v0.2.0' }));
+    await ok.checker.check();
+    expect(ok.events).toEqual([]);
+    const bad = logged('0.1.1', () => json('', 500));
+    await bad.checker.check();
+    await bad.checker.check();
+    expect(bad.events).toHaveLength(1);
+  });
+
+  it('a log that throws does not change the answer', async () => {
+    const checker = new ReleaseChecker({
+      version: '0.1.1',
+      fetch: async () => json('', 500),
+      log: () => {
+        throw new Error('disk full');
+      },
+    });
+    expect(await checker.check()).toEqual({ status: 'unavailable' });
   });
 });
 
