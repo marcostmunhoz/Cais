@@ -179,9 +179,10 @@ Only the tag is pushed. --dry-run prints the steps and changes nothing.`);
     if (dry) {
       console.log('[dry-run] wait for the check on the release branch head, then:');
       ghCli(['pr', 'merge', '<pr-url>', '--merge', '--delete-branch'], { dry, mutating: true });
+      console.log('[dry-run] gh may already have switched to main and deleted the local branch; each step below tolerates that');
       git(['switch', 'main'], { dry, mutating: true });
       git(['pull', '--ff-only'], { dry, mutating: true });
-      git(['branch', '-D', rel], { dry, mutating: true });
+      console.log(`[dry-run] git branch -D ${rel} (only if it still exists)`);
       sha = '<merge-commit-sha>';
     } else {
       await waitForCheck(ghApi, repo, git(['rev-parse', 'HEAD']), `PR check (${rel})`);
@@ -189,7 +190,8 @@ Only the tag is pushed. --dry-run prints the steps and changes nothing.`);
       git(['switch', 'main']);
       git(['pull', '--ff-only']);
       if (packageVersion(root) !== version) throw new Fail(`package.json is not ${version} after the merge.`);
-      git(['branch', '-D', rel]);
+      // gh pr merge --delete-branch usually deletes the local branch itself (and switches to main).
+      if (git(['branch', '--list', rel])) git(['branch', '-D', rel]);
       sha = git(['rev-parse', 'HEAD']);
     }
   } else {

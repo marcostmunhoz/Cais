@@ -157,7 +157,7 @@ test('copying the info puts the versions on the clipboard', async () => {
   await expect(page.getByText('Informações copiadas.')).toBeVisible();
   await expect
     .poll(() => app.evaluate(({ clipboard }) => clipboard.readText()))
-    .toMatch(new RegExp(`^Cais ${appVersion.replace(/\./g, '\\.')}\\nElectron \\S+\\nChromium \\S+\\nNode \\S+\\nSistema: \\S+ \\S+$`));
+    .toMatch(new RegExp(`^Cais ${appVersion.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\nElectron \\S+\\nChromium \\S+\\nNode \\S+\\nSistema: \\S+ \\S+$`));
 });
 
 test('Escape closes the window; reopening it starts without a result', async () => {
