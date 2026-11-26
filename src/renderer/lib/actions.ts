@@ -12,15 +12,19 @@ import { MAX_CATALOG_NAME, sameName } from '@shared/names';
 import { getState, setState, type GridEdits, type ProjectNameRequest, type RunView, type ScriptNameRequest } from './store';
 import {
   buildCellUpdates,
+  buildGridInsert,
   buildGridUpdates,
   cellLock,
   gridEditability,
+  insertability,
   MAX_CELL_UPDATES,
+  MAX_INSERT_ROWS,
   pendingCount,
   remapCells,
   sameCell,
   type EditTarget,
   type Editability,
+  type Insertability,
   type KeyColumn,
   type PendingCells,
 } from '@shared/grid';
@@ -897,6 +901,19 @@ export function editabilityOf(tabId: string, result: StatementResult): Editabili
   });
 }
 
+/** Whether (and with which columns) a result of this tab can generate an INSERT, from the environment's schema as the renderer has it. */
+export function insertabilityOf(tabId: string, result: StatementResult): Insertability {
+  const s = getState();
+  const tab = s.tabs.find((t) => t.id === tabId);
+  const env = tab ? findEnvironment(tab.environmentId) : undefined;
+  const schema = env ? s.schemas[env.id] : undefined;
+  const engine = env?.engine ?? 'mysql';
+  return insertability(result, schema?.status === 'ready' ? schema.tree : undefined, getDialect(engine).valueKind, {
+    gridEdit: capabilitiesOf(engine).gridEdit,
+    name: getDialect(engine).displayName,
+  });
+}
+
 /** Sets (or, with `undefined`, removes) the new value of one cell. Typing the original value back removes the edit. */
 export function setCellEdit(tabId: string, result: StatementResult, row: number, column: number, value: CellValue | undefined): void {
   const run = getState().runs[tabId];
@@ -1040,6 +1057,51 @@ export async function generateCellUpdates(tabId: string, result: StatementResult
   try {
     const { text, ranges } = buildCellUpdates(getDialect(findEnvironment(environmentId)?.engine ?? 'mysql'), target, original, column, cells);
     activeEditor.insertText(text, ranges);
+  } catch (e) {
+    showToast(errorMessage(e));
+  }
+}
+
+/**
+ * Gerar INSERT: one multi-row `INSERT INTO … VALUES (…), (…);` of the rows at the end of the editor, selected, with the
+ * values the grid shows (pending edits applied). `withKey: false` leaves the primary key out. Nothing
+ * runs and the pending edits stay as they are. The columns come from the schema the renderer has: an INSERT finds no
+ * row by a key, so a stale schema cannot make it touch the wrong one, and the server has the last word when it runs.
+ */
+export function generateInserts(tabId: string, result: StatementResult, rows: readonly number[], withKey: boolean): void {
+  if (getState().activeTabId !== tabId || !activeEditor || rows.length === 0) return;
+  if (getState().runs[tabId]?.results.includes(result) !== true) return;
+  if (rows.length > MAX_INSERT_ROWS) {
+    showToast(m().grid.insert.tooMany({ max: MAX_INSERT_ROWS }));
+    return;
+  }
+  const target = insertabilityOf(tabId, result);
+  if (!target.insertable) {
+    showToast(render(target.reason));
+    return;
+  }
+  if (!withKey && !target.key) return;
+  const original = result.rows ?? [];
+  const pending = pendingEdits(tabId);
+  const picked: { row: number; values: readonly CellValue[] }[] = [];
+  for (const r of [...rows].sort((a, b) => a - b)) {
+    const row = original[r];
+    if (!row) {
+      showToast(m().grid.insert.stale);
+      return;
+    }
+    const edited = pending?.result === result ? pending.cells[r] : undefined;
+    picked.push({ row: r, values: edited ? row.map((v, c) => (Object.hasOwn(edited, c) ? (edited[c] ?? null) : v)) : row });
+  }
+  const environmentId = getState().tabs.find((t) => t.id === tabId)?.environmentId ?? '';
+  try {
+    const built = buildGridInsert(getDialect(findEnvironment(environmentId)?.engine ?? 'mysql'), target, picked, withKey);
+    if ('error' in built) {
+      showToast(render(built.error));
+      return;
+    }
+    activeEditor.insertText(`${built.sql};`);
+    if (target.omitted.length > 0) showToast(m().grid.insert.omitted({ columns: target.omitted.join(', ') }));
   } catch (e) {
     showToast(errorMessage(e));
   }

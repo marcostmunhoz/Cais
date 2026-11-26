@@ -76,22 +76,22 @@ function keyOf(row: readonly CellValue[], key: readonly KeyColumn[]): string {
 }
 
 /**
- * Whether a result can be edited in the grid, and how. `schema` is the environment's schema tree (undefined
- * while it loads); `valueKind` comes from the environment's dialect.
+ * The one base table a result reads from, found in the environment's schema: what editing a cell and generating an
+ * INSERT both start from. Gives the reason when the result is not a plain read of one known base table.
  */
-export function gridEditability(
+function findSourceTable(
   result: ResultLike,
   schema: SchemaTree | undefined,
-  valueKind: Dialect['valueKind'],
-  /** The engine's `gridEdit` capability and its name for the reason; absent means the engine edits. */
   engine?: { gridEdit: boolean; name: string },
-): Editability {
-  const refuse = (reason: MessageRef): Editability => ({ editable: false, reason });
+):
+  | { ok: false; reason: MessageRef }
+  | { ok: true; columns: ColumnMeta[]; source: { database: string; table: string }; table: SchemaTable; name: string } {
+  const refuse = (reason: MessageRef) => ({ ok: false as const, reason });
   if (engine && !engine.gridEdit) return refuse(ref('grid.reason.engineNoEdit', { engine: engine.name }));
   const columns = result.columns;
   if (result.error || result.kind !== 'read' || !READ_VERBS.has(result.verb) || !columns) return refuse(ref('grid.reason.notRead'));
 
-  // 1. the columns from tables must all come from one table, under one name (no join, no self-join)
+  // the columns from tables must all come from one table, under one name (no join, no self-join)
   const sources = new Map<string, { database: string; table: string; alias?: string }>();
   for (const c of columns) {
     if (!c.source) continue;
@@ -108,12 +108,33 @@ export function gridEditability(
   const source = [...sources.values()][0]!;
   const name = qualified(source.database, source.table);
 
-  // 2. a base table the schema knows, with a primary key
+  // a base table the schema knows
   if (!schema) return refuse(ref('grid.reason.schemaLoading'));
   const db = byName(schema.databases, source.database);
   const table: SchemaTable | undefined = db ? byName(db.tables, source.table) : undefined;
   if (!db || !table) return refuse(ref('grid.reason.unknownTable', { table: name }));
   if (table.type !== 'table') return refuse(ref('grid.reason.view', { table: name }));
+  return { ok: true, columns, source, table, name };
+}
+
+/**
+ * Whether a result can be edited in the grid, and how. `schema` is the environment's schema tree (undefined
+ * while it loads); `valueKind` comes from the environment's dialect.
+ */
+export function gridEditability(
+  result: ResultLike,
+  schema: SchemaTree | undefined,
+  valueKind: Dialect['valueKind'],
+  /** The engine's `gridEdit` capability and its name for the reason; absent means the engine edits. */
+  engine?: { gridEdit: boolean; name: string },
+): Editability {
+  const refuse = (reason: MessageRef): Editability => ({ editable: false, reason });
+  // 1-2. one base table the schema knows
+  const found = findSourceTable(result, schema, engine);
+  if (!found.ok) return refuse(found.reason);
+  const { columns, source, table, name } = found;
+
+  // 2b. a primary key
   const pk = table.columns.filter((c) => c.key === 'PRI');
   if (pk.length === 0) return refuse(ref('grid.reason.noPrimaryKey', { table: name }));
 
@@ -324,6 +345,125 @@ export function planAppend(
   return {
     changes,
     selections: ranges && ranges.length > 0 ? ranges.map((r) => ({ from: selection.from + r.from, to: selection.from + r.to })) : [selection],
+  };
+}
+
+/** The most rows one "Gerar INSERT" writes. */
+export const MAX_INSERT_ROWS = 1000;
+
+/** A result column that goes into a generated INSERT: where it is in the result and how the table names and types it. */
+export interface InsertColumn {
+  index: number;
+  column: string;
+  type: string;
+}
+
+/** Where a generated INSERT writes and what goes into it. */
+export interface InsertTarget {
+  insertable: true;
+  database: string;
+  table: string;
+  /** The result columns that go into the INSERT, in result order. */
+  columns: InsertColumn[];
+  /** Names of the result columns left out: expressions, generated columns, repeated columns, types that cannot be written. */
+  omitted: string[];
+  /**
+   * Positions in `columns` of the primary key, for the variant without it. Null when that variant makes no sense or
+   * cannot be known: the table has no key, the result lacks part of it, the server's flags disagree with the schema's
+   * key, or nothing but the key is selected.
+   */
+  key: number[] | null;
+}
+
+export type Insertability = InsertTarget | { insertable: false; reason: MessageRef };
+
+/**
+ * Whether a result can generate an INSERT, and with which columns. Looser than `gridEditability`: the rows are not
+ * found again by a key, so the table needs no primary key (only the variant without the key does) and the key may
+ * hold anything. The result still has to be a plain read of one base table, and its types must be the schema's.
+ */
+export function insertability(
+  result: ResultLike,
+  schema: SchemaTree | undefined,
+  valueKind: Dialect['valueKind'],
+  /** The engine's `gridEdit` capability and its name for the reason; absent means the engine writes. */
+  engine?: { gridEdit: boolean; name: string },
+): Insertability {
+  const found = findSourceTable(result, schema, engine);
+  if (!found.ok) return { insertable: false, reason: found.reason };
+  const { columns, source, table } = found;
+
+  const used = new Set<string>();
+  const out: InsertColumn[] = [];
+  const omitted: string[] = [];
+  for (const [index, c] of columns.entries()) {
+    if (!c.source) {
+      omitted.push(c.name);
+      continue;
+    }
+    const schemaColumn = byName(table.columns, c.source.column);
+    if (!schemaColumn) return { insertable: false, reason: ref('grid.reason.unknownColumn', { column: c.name }) };
+    const lower = schemaColumn.name.toLowerCase();
+    if (used.has(lower)) {
+      omitted.push(c.name);
+      continue;
+    }
+    used.add(lower);
+    if (schemaColumn.generated || c.generated) {
+      omitted.push(c.name);
+      continue;
+    }
+    const kind = valueKind(schemaColumn.type);
+    if (kind === 'unsupported' || valueKind(c.type) === 'unsupported') {
+      omitted.push(c.name);
+      continue;
+    }
+    // the schema's type is stale (the column changed type since it was read): the literal would be written wrong
+    if (valueKind(c.type) !== kind) return { insertable: false, reason: ref('grid.reason.staleColumn', { column: c.name }) };
+    out.push({ index, column: schemaColumn.name, type: schemaColumn.type });
+  }
+  if (out.length === 0) return { insertable: false, reason: ref('grid.insert.noColumns') };
+
+  // the key, for the variant without it: the whole key must be in the INSERT's columns, and the server must flag
+  // exactly those columns of the result as the key (a key that moved is not the key to leave out)
+  const pk = table.columns.filter((c) => c.key === 'PRI');
+  const positions = pk.map((k) => out.findIndex((c) => c.column.toLowerCase() === k.name.toLowerCase()));
+  const pkNames = new Set(pk.map((k) => k.name.toLowerCase()));
+  const disagrees =
+    columns.some((c) => c.source && c.primaryKeyPart === true && !pkNames.has(c.source.column.toLowerCase())) ||
+    positions.some((p) => p !== -1 && columns[out[p]!.index]!.primaryKeyPart === false);
+  // a table that is only its key still has the variant: `INSERT INTO t () VALUES ()` takes every default
+  const key = pk.length === 0 || positions.includes(-1) || disagrees ? null : positions;
+  return { insertable: true, database: source.database, table: source.table, columns: out, omitted, key };
+}
+
+/**
+ * "Gerar INSERT": one multi-row `INSERT INTO … (columns) VALUES (…), (…)`, without a terminator. `rows` are the
+ * values as the grid shows them (pending edits applied), with their row index in the result. `withKey: false` leaves
+ * the primary key columns out, for the server to fill. Gives the reason instead when a value cannot be written:
+ * a binary value the driver cut cannot go back.
+ */
+export function buildGridInsert(
+  dialect: Pick<Dialect, 'buildInsert'>,
+  target: InsertTarget,
+  rows: readonly { row: number; values: readonly CellValue[] }[],
+  withKey: boolean,
+): { sql: string } | { error: MessageRef } {
+  if (!withKey && !target.key) throw new Error('the key is not known');
+  const dropped = new Set(withKey ? [] : target.key);
+  const columns = target.columns.filter((_, p) => !dropped.has(p));
+  for (const { row, values } of rows) {
+    for (const c of columns) {
+      if (isTruncatedBinary(values[c.index] ?? null)) return { error: ref('grid.insert.truncated', { column: c.column, row: row + 1 }) };
+    }
+  }
+  return {
+    sql: dialect.buildInsert({
+      database: target.database,
+      table: target.table,
+      columns: columns.map((c) => ({ column: c.column, type: c.type })),
+      rows: rows.map(({ values }) => columns.map((c) => values[c.index] ?? null)),
+    }),
   };
 }
 

@@ -628,6 +628,7 @@ describe('the dialect object', () => {
     expect(() => d.quoteLiteral('x', 'STRING')).toThrow();
     expect(() => d.buildUpdate({ database: 'd', table: 't', set: [], where: [] })).toThrow();
     expect(() => d.buildUpdateLocated({ database: 'd', table: 't', set: [], where: [] })).toThrow();
+    expect(() => d.buildInsert({ database: 'd', table: 't', columns: [], rows: [] })).toThrow();
   });
   it('has agent rules for a read-only engine', () => {
     const r = d.agentRules;

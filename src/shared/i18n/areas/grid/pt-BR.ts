@@ -52,6 +52,16 @@ export const ptBR = {
     generateCell: 'Gerar UPDATE da célula',
     generateCells: (p: { count: number }) => `Gerar UPDATE de ${p.count} células`,
     generateTooMany: (p: { max: number }) => `Gerar UPDATE da célula aceita até ${p.max} células por vez. Selecione menos linhas.`,
+    insert: 'Gerar INSERT',
+    insertNoKey: 'Gerar INSERT sem chave primária',
+  },
+  insert: {
+    stale: 'O resultado mudou sob a seleção. Selecione as linhas de novo.',
+    noColumns: 'Nenhuma coluna deste resultado pode ir num INSERT: são expressões, colunas geradas ou de tipo sem suporte.',
+    truncated: (p: { column: string; row: number }) =>
+      `O valor binário de ${p.column} na linha ${p.row} está cortado na grade: não dá para gerar o INSERT.`,
+    omitted: (p: { columns: string }) => `Fora do INSERT: ${p.columns} (coluna gerada, repetida, expressão ou de tipo sem suporte).`,
+    tooMany: (p: { max: number }) => `Gerar INSERT aceita até ${p.max} linhas por vez. Selecione menos linhas.`,
   },
   cell: {
     editorLabel: (p: { column: string }) => `Novo valor de ${p.column}`,

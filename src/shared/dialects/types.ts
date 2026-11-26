@@ -78,6 +78,14 @@ export interface UpdateSpec {
   where: UpdateValue[];
 }
 
+/** One INSERT of one or more rows into one table: `rows[i][j]` is the value of `columns[j]`. */
+export interface InsertSpec {
+  database: string;
+  table: string;
+  columns: { column: string; type: string }[];
+  rows: (readonly CellValue[])[];
+}
+
 /**
  * What agents may and may not touch, as the engine names it. `decide()` (main/agents/policy.ts) and the broker
  * read these and know no engine's names. The refusal messages go to agents only (fixed pt-BR).
@@ -146,4 +154,9 @@ export interface Dialect {
   buildUpdate(spec: UpdateSpec): string;
   /** `buildUpdate`, plus where each SET value literal sits in the statement (offsets into `sql`, in order of `spec.set`). */
   buildUpdateLocated(spec: UpdateSpec): { sql: string; setValues: { from: number; to: number }[] };
+  /**
+   * `INSERT INTO db.table (<columns>) VALUES (…), (…)`, without a terminator: one line when there is one row, one
+   * line per row otherwise. Throws like `quoteLiteral`, and when there is no column or no row.
+   */
+  buildInsert(spec: InsertSpec): string;
 }

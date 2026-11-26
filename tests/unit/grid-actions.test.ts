@@ -28,6 +28,7 @@ interface State {
 interface Actions {
   applyEdits(tabId: string): Promise<void>;
   generateCellUpdates(tabId: string, result: StatementResult, column: number, rows: readonly number[]): Promise<void>;
+  generateInserts(tabId: string, result: StatementResult, rows: readonly number[], withKey: boolean): void;
   registerEditor(handle: unknown): void;
   requestCloseTab(tabId: string): Promise<void>;
 }
@@ -224,5 +225,71 @@ describe('Gerar UPDATE da célula in the renderer', () => {
     store.setState({ runs: { t: { running: false, connecting: false, results: [read()], active: 0 } } });
     await actions.generateCellUpdates('t', result, 1, [0]);
     expect(insertText).not.toHaveBeenCalled();
+  });
+});
+
+describe('Gerar INSERT in the renderer', () => {
+  const insertText = vi.fn();
+  beforeEach(() => {
+    insertText.mockClear();
+    actions.registerEditor({ getSelection: () => ({ cursor: 0 }), focus: vi.fn(), insertText });
+  });
+  afterAll(() => actions.registerEditor(null));
+
+  it('writes the rows as shown (the pending edit applied), selects nothing in particular and leaves the edits alone', () => {
+    actions.generateInserts('t', result, [1, 0], true);
+    expect(insertText).toHaveBeenCalledWith("INSERT INTO `shop`.`items` (`id`, `name`) VALUES\n  (1, 'x'),\n  (2, 'b');");
+    // nothing ran and no schema was read again: an INSERT finds no row by a key
+    expect(api.session.run).not.toHaveBeenCalled();
+    expect(api.schema.get).not.toHaveBeenCalled();
+    expect(store.getState().runs.t!.edits?.cells).toEqual({ 0: { 1: 'x' } });
+    expect(store.getState().toast).toBeNull();
+  });
+
+  it('without the primary key leaves the key column out; where the key is not whole in the result there is no such variant', () => {
+    actions.generateInserts('t', result, [0], false);
+    expect(insertText).toHaveBeenLastCalledWith("INSERT INTO `shop`.`items` (`name`) VALUES ('x');");
+    insertText.mockClear();
+    store.setState({ schemas: { dev: { status: 'ready', tree: tree(['id', 'tenant_id']) } } });
+    actions.generateInserts('t', result, [0], false);
+    expect(insertText).not.toHaveBeenCalled();
+    actions.generateInserts('t', result, [0], true);
+    expect(insertText).toHaveBeenCalledWith("INSERT INTO `shop`.`items` (`id`, `name`) VALUES (1, 'x');");
+  });
+
+  it('names the columns it left out', () => {
+    const withExpression = read();
+    withExpression.columns = [...withExpression.columns!, { name: 'two', type: 'bigint' }];
+    withExpression.rows = [[1, 'a', 2]];
+    store.setState({ runs: { t: { running: false, connecting: false, results: [withExpression], active: 0 } } });
+    actions.generateInserts('t', withExpression, [0], true);
+    expect(insertText).toHaveBeenCalledWith("INSERT INTO `shop`.`items` (`id`, `name`) VALUES (1, 'a');");
+    expect(store.getState().toast?.message).toBe('Fora do INSERT: two (coluna gerada, repetida, expressão ou de tipo sem suporte).');
+  });
+
+  it('refuses a cut binary value and more rows than the limit, inserting nothing', () => {
+    const cut = read('shop', [[1, { kind: 'binary', hex: 'ab', length: 400 }]]);
+    store.setState({ runs: { t: { running: false, connecting: false, results: [cut], active: 0 } } });
+    actions.generateInserts('t', cut, [0], true);
+    expect(insertText).not.toHaveBeenCalled();
+    expect(store.getState().toast?.message).toBe('O valor binário de name na linha 1 está cortado na grade: não dá para gerar o INSERT.');
+
+    store.setState({ toast: null, runs: { t: { running: false, connecting: false, results: [result], active: 0 } } });
+    actions.generateInserts('t', result, Array.from({ length: 1001 }, (_, i) => i), true);
+    expect(insertText).not.toHaveBeenCalled();
+    expect(store.getState().toast?.message).toContain('até 1000 linhas');
+  });
+
+  it('says why when the result cannot generate one, and does nothing for a result that is no longer the tab\'s', () => {
+    const noTable: StatementResult = { ...result, columns: [{ name: 'x', type: 'int' }], rows: [[1]] };
+    store.setState({ runs: { t: { running: false, connecting: false, results: [noTable], active: 0 } } });
+    actions.generateInserts('t', noTable, [0], true);
+    expect(insertText).not.toHaveBeenCalled();
+    expect(store.getState().toast?.message).toMatch(/não vêm de uma tabela/);
+
+    store.setState({ toast: null, runs: { t: { running: false, connecting: false, results: [read()], active: 0 } } });
+    actions.generateInserts('t', result, [0], true);
+    expect(insertText).not.toHaveBeenCalled();
+    expect(store.getState().toast).toBeNull();
   });
 });

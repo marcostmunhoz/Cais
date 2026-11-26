@@ -1,5 +1,5 @@
 import type { CellValue } from '../../results';
-import type { UpdateSpec, ValueKind } from '../types';
+import type { InsertSpec, UpdateSpec, ValueKind } from '../types';
 import { m } from '../../i18n';
 
 // Literals for the UPDATEs the grid generates. Two readers must agree on every literal: the
@@ -138,3 +138,19 @@ export function buildUpdateLocated(spec: UpdateSpec): { sql: string; setValues: 
 }
 
 export const buildUpdate = (spec: UpdateSpec): string => buildUpdateLocated(spec).sql;
+
+/**
+ * `INSERT INTO db.table (cols) VALUES (…)`: every value a literal that reads the same way to the server and to the
+ * splitter (see the top of this file). Several rows go one per line, so a reviewer reads one row at a time.
+ */
+export function buildInsert(spec: InsertSpec): string {
+  // no columns is `() VALUES ()`: every column takes its default (the INSERT without the primary key, of a table that is only a key)
+  if (spec.rows.length === 0) throw new Error(m().dialect.literal.noColumns);
+  const names = spec.columns.map((c) => quoteIdent(c.column)).join(', ');
+  const tuples = spec.rows.map((row) => {
+    if (row.length !== spec.columns.length) throw new Error(m().dialect.literal.noColumns);
+    return `(${spec.columns.map((c, i) => quoteLiteral(row[i] ?? null, c.type)).join(', ')})`;
+  });
+  const head = `INSERT INTO ${quoteIdent(spec.database)}.${quoteIdent(spec.table)} (${names}) VALUES`;
+  return tuples.length === 1 ? `${head} ${tuples[0]}` : `${head}\n${tuples.map((t) => `  ${t}`).join(',\n')}`;
+}

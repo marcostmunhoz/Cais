@@ -5,6 +5,7 @@ export const ptBR = {
     unsupported: (p: { type: string }) => `O tipo ${p.type} não pode ser escrito como valor.`,
     truncated: 'O valor binário está cortado: não dá para escrevê-lo de volta.',
     noKey: 'O UPDATE precisa de colunas para alterar e da chave inteira da linha.',
+    noColumns: 'O INSERT precisa de colunas e de linhas.',
   },
   /** Run statement at the cursor with nothing under it. */
   noStatement: 'Nenhum comando sob o cursor.',

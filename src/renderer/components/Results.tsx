@@ -4,13 +4,23 @@ import { ChevronDown, Copy, PanelRight, X } from 'lucide-react';
 import type { CellValue, ColumnMeta, StatementResult } from '@shared/results';
 import { getDialect } from '@shared/dialects/registry';
 import { capabilitiesOf } from '@shared/engines';
-import { cellInputText, cellLock, gridEditability, parseCellInput, pendingCount, type EditTarget, type PendingCells } from '@shared/grid';
+import {
+  cellInputText,
+  cellLock,
+  gridEditability,
+  insertability,
+  parseCellInput,
+  pendingCount,
+  type EditTarget,
+  type PendingCells,
+} from '@shared/grid';
 import {
   applyEdits,
   discardEdits,
   dismissEditNotice,
   effectiveMode,
   generateCellUpdates,
+  generateInserts,
   generateUpdates,
   loadSchema,
   selectResult,
@@ -245,10 +255,14 @@ function Grid({ columns, rows, focus, anchor, onSelect, onCopy, scroller, edited
       }}
       onContextMenu={(e) => {
         const hit = cellAt(e.target);
-        if (!hit || hit.r < 0 || hit.c < 0) return;
+        if (!hit || hit.r < 0) return;
         e.preventDefault();
-        const inside = sel && hit.r >= sel.r1 && hit.r <= sel.r2 && hit.c >= sel.c1 && hit.c <= sel.c2;
-        if (!inside) onSelect(hit, hit);
+        if (hit.c === -2) {
+          // the row gutter: the selected rows when they are whole rows and this is one of them, else this whole row
+          if (!(sel && sel.c1 === 0 && sel.c2 === lastCol && hit.r >= sel.r1 && hit.r <= sel.r2)) onSelect({ r: hit.r, c: 0 }, { r: hit.r, c: lastCol });
+        } else if (!(sel && hit.r >= sel.r1 && hit.r <= sel.r2 && hit.c >= sel.c1 && hit.c <= sel.c2)) {
+          onSelect(hit, hit);
+        }
         onCellMenu(hit, e.clientX, e.clientY);
       }}
     >
@@ -460,6 +474,14 @@ export function Results({ tabId }: { tabId: string }) {
     () => (active && columns ? gridEditability(active, schemaTree, getDialect(engine).valueKind, { gridEdit: capabilitiesOf(engine).gridEdit, name: getDialect(engine).displayName }) : null),
     [active, columns, schemaTree, engine],
   );
+  // Gerar INSERT: the same table, but no key is needed
+  const insertTarget = useMemo(
+    () =>
+      active && columns
+        ? insertability(active, schemaTree, getDialect(engine).valueKind, { gridEdit: capabilitiesOf(engine).gridEdit, name: getDialect(engine).displayName })
+        : null,
+    [active, columns, schemaTree, engine],
+  );
   // a table created or changed after the schema was read: read it again, once per result
   const refreshed = useRef(new WeakSet<StatementResult>());
   useEffect(() => {
@@ -467,11 +489,13 @@ export function Results({ tabId }: { tabId: string }) {
     const stale = target.editable
       ? target.columns.some((c) => !c.editable && c.reason.key === 'grid.reason.staleColumn')
       : target.reason.key === 'grid.reason.unknownTable' || target.reason.key === 'grid.reason.staleSchema';
-    if (!stale) return;
+    const insertStale =
+      !!insertTarget && !insertTarget.insertable && ['grid.reason.staleColumn', 'grid.reason.unknownColumn'].includes(insertTarget.reason.key);
+    if (!stale && !insertStale) return;
     if (refreshed.current.has(active)) return;
     refreshed.current.add(active);
     void loadSchema(environmentId, true);
-  }, [active, target, schemaStatus, environmentId]);
+  }, [active, target, insertTarget, schemaStatus, environmentId]);
 
   const edits = run?.edits && run.edits.result === active ? run.edits.cells : undefined;
   const pending = edits ? pendingCount(edits) : { changes: 0, rows: 0 };
@@ -539,6 +563,7 @@ export function Results({ tabId }: { tabId: string }) {
     if (how === 'enter') refocusGrid();
   };
   const cellEntries = (cell: Cell): MenuEntry[] => {
+    if (cell.c < 0) return []; // the row gutter has no cell to edit
     if (!active || !target?.editable || cellLock(target, cell.c, rows[cell.r]?.[cell.c] ?? null)) return [];
     const column = target.columns[cell.c] as EditTarget['columns'][number] & { editable: true };
     const out: MenuEntry[] = [{ label: m().grid.menu.edit, onSelect: () => startEdit(cell) }];
@@ -603,11 +628,37 @@ export function Results({ tabId }: { tabId: string }) {
           { label: m().results.copyMarkdown, onSelect: () => write(toMarkdown(columns, shownRows, sel)) },
         ]
       : [];
+  // Gerar INSERT (cell and row gutter menus): the rows of the selection, with or without the primary key
+  const insertEntries = (): MenuEntry[] => {
+    if (!active || !insertTarget?.insertable || !sel) return [];
+    const picked = Array.from({ length: sel.r2 - sel.r1 + 1 }, (_, i) => sel.r1 + i);
+    const out: MenuEntry[] = [
+      {
+        label: m().grid.menu.insert,
+        onSelect: () => {
+          setHint(null);
+          generateInserts(tabId, active, picked, true);
+        },
+      },
+    ];
+    if (insertTarget.key) {
+      out.push({
+        label: m().grid.menu.insertNoKey,
+        onSelect: () => {
+          setHint(null);
+          generateInserts(tabId, active, picked, false);
+        },
+      });
+    }
+    return out;
+  };
   const menuEntries = (cell?: Cell): MenuEntry[] => {
     const edit = cell ? cellEntries(cell) : [];
+    const insert = cell ? insertEntries() : [];
+    if (edit.length > 0 && insert[0]) insert[0] = { ...insert[0], separatorBefore: true };
     const copy = copyEntries();
-    if (edit.length > 0 && copy[0]) copy[0] = { ...copy[0], separatorBefore: true };
-    return [...edit, ...copy];
+    if (edit.length + insert.length > 0 && copy[0]) copy[0] = { ...copy[0], separatorBefore: true };
+    return [...edit, ...insert, ...copy];
   };
   const readOnly = mode === 'read-only';
   const editArea = (

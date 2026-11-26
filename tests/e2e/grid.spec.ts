@@ -470,3 +470,115 @@ test('Gerar UPDATE da célula is not offered where the cell cannot be edited', a
   await expect(page.getByRole('menuitem', { name: 'Gerar UPDATE da célula' })).toBeVisible();
   await page.keyboard.press('Escape');
 });
+
+test('Gerar INSERT: the selected rows, with and without the primary key, from the cell and the row gutter', async () => {
+  await db.query(
+    `CREATE TABLE grid_ins (
+       id INT PRIMARY KEY AUTO_INCREMENT, name VARCHAR(30) NOT NULL, note VARCHAR(50) NULL,
+       shout VARCHAR(30) AS (UPPER(name)) VIRTUAL, price DECIMAL(10,2) NOT NULL, tag VARBINARY(400) NULL
+     )`,
+  );
+  await db.query(
+    `INSERT INTO grid_ins (name, note, price, tag) VALUES
+       ('Ana', NULL, 1.50, X'00ff'), ('d''Ávila', 'x;y', 20.00, NULL), ('Caio', 'c', 3.25, REPEAT('a', 300))`,
+  );
+  const text = async () => (await editorText()).replace(/ /g, ' ');
+  const insert = page.getByRole('menuitem', { name: 'Gerar INSERT', exact: true });
+  const insertNoKey = page.getByRole('menuitem', { name: 'Gerar INSERT sem chave primária' });
+  const selected = () => page.evaluate<string>('String(window.getSelection())');
+  const gutter = (r: number) => page.locator(`[data-gr="${r}"]`);
+  const count = async () => Number(await dbValue('SELECT COUNT(*) FROM grid_ins'));
+
+  await run('SELECT * FROM grid_ins ORDER BY id;');
+  await expect(cell(0, 'name')).toHaveText('Ana', { timeout: 20_000 });
+
+  // two rows from a cell: one multi-row INSERT at the end of the editor, selected, and nothing runs. The generated
+  // column (shout) is left out and the toast says so.
+  await cell(0, 'name').click();
+  await cell(1, 'name').click({ modifiers: ['Shift'] });
+  await cell(1, 'name').click({ button: 'right' });
+  await expect(insertNoKey).toBeVisible({ timeout: 20_000 });
+  await insert.click();
+  await expect.poll(text).toContain(
+    "INSERT INTO `cais_test`.`grid_ins` (`id`, `name`, `note`, `price`, `tag`) VALUES\n  (1, 'Ana', NULL, 1.50, X'00ff'),\n  (2, 'd''Ávila', 'x;y', 20.00, NULL);",
+  );
+  await expect(page.locator('.toast')).toHaveText(/^Fora do INSERT: shout /);
+  await expect.poll(selected).toContain("(2, 'd''Ávila', 'x;y', 20.00, NULL);");
+  expect(await count()).toBe(3);
+
+  // without the primary key: the same rows with no id, for the server to number
+  await cell(0, 'name').click();
+  await cell(1, 'name').click({ modifiers: ['Shift'] });
+  await cell(1, 'name').click({ button: 'right' });
+  await insertNoKey.click();
+  await expect.poll(text).toContain(
+    "INSERT INTO `cais_test`.`grid_ins` (`name`, `note`, `price`, `tag`) VALUES\n  ('Ana', NULL, 1.50, X'00ff'),\n  ('d''Ávila', 'x;y', 20.00, NULL);",
+  );
+
+  // the row gutter has the same menu: a click outside the selection takes that whole row
+  await cell(2, 'name').click();
+  await gutter(1).click({ button: 'right' });
+  await expect(page.getByRole('menuitem', { name: 'Gerar INSERT sem chave primária' })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: 'Copiar como tabela Markdown' })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: 'Editar célula' })).toHaveCount(0);
+  await page.getByRole('menuitem', { name: 'Gerar INSERT sem chave primária' }).click();
+  await expect.poll(text).toContain("(`name`, `note`, `price`, `tag`) VALUES ('d''Ávila', 'x;y', 20.00, NULL);");
+  await expect(cell(1, 'name')).toHaveClass(/sel/);
+  expect(await count()).toBe(3);
+
+  // a whole column picked from its header is not whole rows: a right-click on one row's gutter takes that row only
+  await page.locator('[data-hc="1"]').click();
+  await gutter(1).click({ button: 'right' });
+  await insert.click();
+  await expect.poll(text).toContain("(`id`, `name`, `note`, `price`, `tag`) VALUES (2, 'd''Ávila', 'x;y', 20.00, NULL);");
+  await expect(page.locator('.toast')).not.toContainText('até 1.000');
+
+  // a pending edit is the value written, and stays pending
+  await editCell(0, 'name', 'Zed');
+  await gutter(0).click({ button: 'right' });
+  await insert.click();
+  await expect.poll(text).toContain("(`id`, `name`, `note`, `price`, `tag`) VALUES (1, 'Zed', NULL, 1.50, X'00ff');");
+  await expect(bar()).toContainText('1 alteração em 1 linha');
+  await page.getByTestId('edit-discard').click();
+
+  // a binary value the driver cut cannot go back: nothing is inserted, and the toast names the column and the row
+  const before = await text();
+  await gutter(2).click({ button: 'right' });
+  await insert.click();
+  await expect(page.locator('.toast')).toHaveText('O valor binário de tag na linha 3 está cortado na grade: não dá para gerar o INSERT.');
+  expect(await text()).toBe(before);
+
+  await db.query('DROP TABLE grid_ins');
+});
+
+test('Gerar INSERT: a table without a primary key only has the plain variant, and a read that is not one table has none', async () => {
+  await db.query('CREATE TABLE grid_nopk (a INT, b VARCHAR(10))');
+  await db.query("INSERT INTO grid_nopk VALUES (1, 'x'), (2, NULL)");
+  const text = async () => (await editorText()).replace(/ /g, ' ');
+
+  await run('SELECT * FROM grid_nopk;');
+  await expect(cell(0, 'b')).toHaveText('x', { timeout: 20_000 });
+  await cell(1, 'a').click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Gerar INSERT', exact: true }).click({ timeout: 20_000 });
+  await expect.poll(text).toContain('INSERT INTO `cais_test`.`grid_nopk` (`a`, `b`) VALUES (2, NULL);');
+  await cell(1, 'a').click({ button: 'right' });
+  await expect(page.getByRole('menuitem', { name: 'Gerar INSERT', exact: true })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: 'Gerar INSERT sem chave primária' })).toHaveCount(0);
+  await expect(page.getByRole('menuitem', { name: 'Editar célula' })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+
+  // a join, and a result of expressions only
+  await run('SELECT i.id, i.name, c.status FROM grid_items i JOIN cards c ON c.id = i.id + 4809 ORDER BY i.id;');
+  await expect(cell(0, 'status')).toHaveText('active', { timeout: 20_000 });
+  await cell(0, 'name').click({ button: 'right' });
+  await expect(page.getByRole('menuitem', { name: 'Copiar como tabela Markdown' })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: /Gerar INSERT/ })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await run('SELECT 1 AS one;');
+  await expect(cell(0, 'one')).toHaveText('1', { timeout: 20_000 });
+  await cell(0, 'one').click({ button: 'right' });
+  await expect(page.getByRole('menuitem', { name: 'Copiar valor' })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: /Gerar INSERT/ })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await db.query('DROP TABLE grid_nopk');
+});

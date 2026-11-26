@@ -8,6 +8,7 @@ export const en: Shape<typeof ptBR> = {
     unsupported: (p) => `Values of type ${p.type} cannot be written.`,
     truncated: 'The binary value is cut off, so it cannot be written back.',
     noKey: 'The UPDATE needs columns to change and the whole key of the row.',
+    noColumns: 'The INSERT needs columns and rows.',
   },
   noStatement: 'No statement under the cursor.',
   classify: {

@@ -51,6 +51,15 @@ export const en: Shape<typeof ptBR> = {
     generateCell: 'Generate cell UPDATE',
     generateCells: (p) => `Generate UPDATE for ${p.count} cells`,
     generateTooMany: (p) => `Generate cell UPDATE takes up to ${p.max} cells at a time. Select fewer rows.`,
+    insert: 'Generate INSERT',
+    insertNoKey: 'Generate INSERT without primary key',
+  },
+  insert: {
+    stale: 'The result changed under the selection. Select the rows again.',
+    noColumns: 'No column of this result can go into an INSERT: they are expressions, generated columns or of a type that cannot be written.',
+    truncated: (p) => `The binary value of ${p.column} in row ${p.row} is cut off in the grid, so the INSERT cannot be generated.`,
+    omitted: (p) => `Left out of the INSERT: ${p.columns} (generated, repeated, an expression or of a type that cannot be written).`,
+    tooMany: (p) => `Generate INSERT takes up to ${p.max} rows at a time. Select fewer rows.`,
   },
   cell: {
     editorLabel: (p) => `New value of ${p.column}`,

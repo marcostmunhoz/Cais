@@ -1,17 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import { mysqlDialect } from '@shared/dialects/mysql';
-import { buildUpdate, buildUpdateLocated, quoteLiteral, valueKind } from '@shared/dialects/mysql/literals';
+import { buildInsert, buildUpdate, buildUpdateLocated, quoteLiteral, valueKind } from '@shared/dialects/mysql/literals';
 import {
   buildCellUpdates,
+  buildGridInsert,
   buildGridUpdates,
   cellLock,
   gridEditability,
+  insertability,
+  MAX_INSERT_ROWS,
   parseCellInput,
   pendingCount,
   planAppend,
   remapCells,
   sameCell,
   type EditTarget,
+  type InsertTarget,
 } from '@shared/grid';
 import { render } from '@shared/i18n';
 import type { CellValue, ColumnMeta, SchemaTable, SchemaTree } from '@shared/results';
@@ -574,5 +578,192 @@ describe('gridEditability: engine capability', () => {
   it('an engine with grid editing, or none given, edits as before', () => {
     expect(gridEditability(result, schema, mysqlDialect.valueKind, { gridEdit: true, name: 'MySQL' }).editable).toBe(true);
     expect(gridEditability(result, schema, mysqlDialect.valueKind).editable).toBe(true);
+  });
+});
+
+// --- Gerar INSERT --------------------------------------------------------------------------------
+
+/** The generated statement must read as exactly one plain INSERT to the Cais itself. */
+function expectOneInsert(sql: string): void {
+  const parts = mysqlDialect.splitStatements(sql + ';');
+  expect(parts).toHaveLength(1);
+  expect(parts[0]!.text).toBe(sql);
+  const c = mysqlDialect.classify(sql);
+  expect(c.kind).toBe('write');
+  expect(c.verb).toBe('INSERT');
+  expect(c.executableComment).toBeUndefined();
+  expect(mysqlDialect.warnings(sql)).toEqual([]);
+}
+
+describe('buildInsert (MySQL)', () => {
+  const spec = (rows: CellValue[][]) => ({
+    database: 'app',
+    table: 'people',
+    columns: [
+      { column: 'id', type: 'int' },
+      { column: 'name', type: 'varchar(50)' },
+    ],
+    rows,
+  });
+
+  it('one row is one line, several rows are one per line, and the table is qualified with backticks', () => {
+    const one = buildInsert(spec([[1, 'Ana']]));
+    expect(one).toBe("INSERT INTO `app`.`people` (`id`, `name`) VALUES (1, 'Ana')");
+    expectOneInsert(one);
+    const many = buildInsert(spec([[1, 'Ana'], [2, null], [3, "d'Ávila"]]));
+    expect(many).toBe("INSERT INTO `app`.`people` (`id`, `name`) VALUES\n  (1, 'Ana'),\n  (2, NULL),\n  (3, 'd''Ávila')");
+    expectOneInsert(many);
+  });
+
+  it('writes every kind of value like an UPDATE does, so the splitter and the server read the same thing', () => {
+    const sql = buildInsert({
+      database: 'a`b',
+      table: 't;x',
+      columns: [
+        { column: 's', type: 'text' },
+        { column: 'bin', type: 'varbinary(16)' },
+        { column: 'bits', type: 'bit(8)' },
+        { column: 'd', type: 'decimal(10,2)' },
+        { column: 'j', type: 'json' },
+        { column: 'we`ird', type: 'int' },
+      ],
+      rows: [
+        ['/*! DROP TABLE t */ ; -- x', { kind: 'binary', hex: 'DEADbeef', length: 4 }, { kind: 'binary', hex: '05', length: 1 }, '-12.50', '{"a": "b\\"c"}', 7],
+        ['a\\b\nc', { kind: 'binary', hex: '', length: 0 }, null, null, null, null],
+      ],
+    });
+    expect(sql).toContain("'/*! DROP TABLE t */ ; -- x', X'deadbeef', b'00000101', -12.50, ");
+    expect(sql).toContain(`${quoteLiteral('a\\b\nc', 'text')}, X'', NULL, NULL, NULL, NULL)`);
+    expect(sql).toContain('(`s`, `bin`, `bits`, `d`, `j`, `we``ird`)');
+    expect(sql.startsWith('INSERT INTO `a``b`.`t;x` ')).toBe(true);
+    expectOneInsert(sql);
+  });
+
+  it('refuses no column, no row, a short row, a cut binary value and a type that cannot be written', () => {
+    expect(() => buildInsert({ ...spec([[1, 'a']]), columns: [] })).toThrow();
+    expect(() => buildInsert(spec([]))).toThrow();
+    expect(() => buildInsert(spec([[1]]))).toThrow();
+    const cut: CellValue = { kind: 'binary', hex: 'ab', length: 400 };
+    expect(() => buildInsert({ ...spec([[1, cut]]), columns: [{ column: 'id', type: 'int' }, { column: 'b', type: 'blob' }] })).toThrow();
+    expect(() => buildInsert({ ...spec([[1, 'x']]), columns: [{ column: 'id', type: 'int' }, { column: 'g', type: 'geometry' }] })).toThrow();
+    expect(() => buildInsert(spec([['abc', 'x']]))).toThrow();
+  });
+});
+
+describe('insertability', () => {
+  const ins = (columns: ColumnMeta[], rows: CellValue[][] = [], engine?: { gridEdit: boolean; name: string }) =>
+    insertability(read(columns, rows), schema, mysqlDialect.valueKind, engine);
+  const target = (columns: ColumnMeta[], rows: CellValue[][] = []): InsertTarget => {
+    const t = ins(columns, rows);
+    if (!t.insertable) throw new Error(render(t.reason));
+    return t;
+  };
+  const why = (t: ReturnType<typeof ins>): string => (t.insertable ? '' : render(t.reason));
+
+  it('a plain SELECT of one table: its columns under the table names, and the position of the key', () => {
+    const t = target([src('id'), src('name', { name: 'nome' }), src('email')]);
+    expect(t).toMatchObject({ database: 'app', table: 'people', omitted: [], key: [0] });
+    expect(t.columns).toEqual([
+      { index: 0, column: 'id', type: 'int' },
+      { index: 1, column: 'name', type: 'varchar(50)' },
+      { index: 2, column: 'email', type: 'varchar(80)' },
+    ]);
+  });
+
+  it('leaves out generated columns, expressions, repeated columns and types that cannot be written, and says which', () => {
+    const t = target([
+      src('id'),
+      src('upper_name'),
+      { name: 'two', type: 'bigint' },
+      src('name'),
+      src('name', { name: 'name2' }),
+      src('shape'),
+      src('email', { generated: true }),
+    ]);
+    expect(t.columns.map((c) => c.column)).toEqual(['id', 'name']);
+    expect(t.omitted).toEqual(['upper_name', 'two', 'name2', 'shape', 'email']);
+    // nothing left to write
+    expect(why(ins([src('upper_name'), src('shape')]))).toBe('Nenhuma coluna deste resultado pode ir num INSERT: são expressões, colunas geradas ou de tipo sem suporte.');
+  });
+
+  it('needs no primary key for the plain variant, and only knows the key when the result has all of it and more', () => {
+    // no key in the table: the INSERT is possible, the variant without the key is not
+    expect(target([src('a', {}, 'no_key')]).key).toBeNull();
+    // part of a composite key is not the key
+    expect(target([src('order_id', {}, 'items'), src('qty', {}, 'items')]).key).toBeNull();
+    expect(target([src('order_id', {}, 'items'), src('line', {}, 'items'), src('qty', {}, 'items')]).key).toEqual([0, 1]);
+    // the key columns anywhere in the result, and only the key is nothing to insert without it
+    expect(target([src('qty', {}, 'items'), src('line', {}, 'items'), src('order_id', {}, 'items')]).key).toEqual([2, 1]);
+    // only the key: the variant without it is `() VALUES ()`, every column takes its default
+    expect(target([src('id')]).key).toEqual([0]);
+    // the key of a table the grid cannot edit by (FLOAT, TIMESTAMP, NULL, repeated values) is still a key to leave out
+    expect(target([src('v', {}, 'measures'), src('n', {}, 'measures')], [[1.5, 1], [1.5, 2]]).key).toEqual([0]);
+    expect(target([src('sensor_id', {}, 'readings'), src('ts', {}, 'readings'), src('v', {}, 'readings')], [[1, '2026-01-01 00:00:00', '1.00']]).key).toEqual([0, 1]);
+    expect(target([src('id'), src('name')], [[null, 'x'], [null, 'y']]).key).toEqual([0]);
+  });
+
+  it('does not offer the key variant when the server flags another key than the schema', () => {
+    expect(target([src('id', { primaryKeyPart: false }), src('name')]).key).toBeNull();
+    expect(target([src('id'), src('name', { primaryKeyPart: true })]).key).toBeNull();
+  });
+
+  it('refuses what is not a plain read of one base table, like editing does', () => {
+    expect(why(ins([src('id'), src('name', {}, 'Users')], []))).toMatch(/Edição na grade só para resultado de uma tabela \(este vem de/);
+    expect(why(ins([src('id', {}, 'people_v')]))).toMatch(/é uma view/);
+    expect(why(ins([{ name: 'x', type: 'int' }]))).toMatch(/não vêm de uma tabela/);
+    expect(why(insertability(read([src('id')], []), undefined, mysqlDialect.valueKind))).toMatch(/Carregando o schema/);
+    expect(why(insertability({ kind: 'ddl', verb: 'CREATE' }, schema, mysqlDialect.valueKind))).toBe('Edição na grade só para o resultado de um SELECT.');
+    expect(why(insertability({ ...read([src('id')], []), error: { message: 'x' } }, schema, mysqlDialect.valueKind))).toBe('Edição na grade só para o resultado de um SELECT.');
+    expect(why(ins([src('id')], [], { gridEdit: false, name: 'Motor X' }))).toBe('Nesta versão o Motor X é só leitura.');
+    expect(ins([src('id')], [], { gridEdit: true, name: 'MySQL' }).insertable).toBe(true);
+  });
+
+  it('refuses a column the schema does not know and one whose type changed since the schema was read', () => {
+    expect(why(ins([src('id'), src('ghost', { source: { database: 'app', table: 'people', column: 'ghost', alias: 'people' } })]))).toMatch(/ghost não está no schema/);
+    expect(why(ins([src('id'), src('name', { type: 'int' })]))).toMatch(/O tipo de name mudou/);
+  });
+});
+
+describe('Gerar INSERT: buildGridInsert', () => {
+  const t = insertability(
+    read([src('id'), src('name'), src('upper_name'), src('avatar')], []),
+    schema,
+    mysqlDialect.valueKind,
+  ) as InsertTarget;
+  const row = (r: number, values: CellValue[]) => ({ row: r, values });
+
+  it('writes the columns of the result without the generated ones, the rows in the order given', () => {
+    expect(t.insertable).toBe(true);
+    const built = buildGridInsert(mysqlDialect, t, [row(0, [1, 'Ana', 'ANA', null]), row(2, [3, "d'A", 'D', { kind: 'binary', hex: 'ff00', length: 2 }])], true);
+    expect(built).toEqual({
+      sql: "INSERT INTO `app`.`people` (`id`, `name`, `avatar`) VALUES\n  (1, 'Ana', NULL),\n  (3, 'd''A', X'ff00')",
+    });
+    expectOneInsert((built as { sql: string }).sql);
+  });
+
+  it('without the key: the primary key columns are left out', () => {
+    expect(t.key).toEqual([0]);
+    expect(buildGridInsert(mysqlDialect, t, [row(0, [1, 'Ana', 'ANA', null])], false)).toEqual({
+      sql: "INSERT INTO `app`.`people` (`name`, `avatar`) VALUES ('Ana', NULL)",
+    });
+    const onlyKey = insertability(read([src('id')], []), schema, mysqlDialect.valueKind) as InsertTarget;
+    expect(buildGridInsert(mysqlDialect, onlyKey, [row(0, [1]), row(1, [2])], false)).toEqual({ sql: 'INSERT INTO `app`.`people` () VALUES\n  (),\n  ()' });
+    expect(buildGridInsert(mysqlDialect, onlyKey, [row(0, [1])], false)).toEqual({ sql: 'INSERT INTO `app`.`people` () VALUES ()' });
+    const noKey = { ...t, key: null };
+    expect(() => buildGridInsert(mysqlDialect, noKey, [row(0, [1, 'Ana', 'ANA', null])], false)).toThrow();
+  });
+
+  it('refuses a cut binary value in a column that goes in, naming the column and the row; one that stays out is no problem', () => {
+    const cut: CellValue = { kind: 'binary', hex: 'ab', length: 400 };
+    const built = buildGridInsert(mysqlDialect, t, [row(0, [1, 'Ana', 'ANA', null]), row(4, [5, 'Eva', 'EVA', cut])], true);
+    expect(built).toHaveProperty('error');
+    expect(render((built as { error: Parameters<typeof render>[0] }).error)).toBe('O valor binário de avatar na linha 5 está cortado na grade: não dá para gerar o INSERT.');
+    // the generated column is not written, so a cut value there does not matter
+    const fine = buildGridInsert(mysqlDialect, t, [row(0, [1, 'Ana', cut, null])], true);
+    expect(fine).toHaveProperty('sql');
+  });
+
+  it('has a row limit', () => {
+    expect(MAX_INSERT_ROWS).toBe(1000);
   });
 });

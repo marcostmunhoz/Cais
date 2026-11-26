@@ -52,6 +52,7 @@ export const bigqueryDialect: Dialect = {
   quoteLiteral: unsupported('writing a literal'),
   buildUpdate: unsupported('UPDATE'),
   buildUpdateLocated: unsupported('UPDATE'),
+  buildInsert: unsupported('INSERT'),
 };
 
 export { splitStatements, appendStatements, classify, warnings, identifiers, agentCodeProblem };
