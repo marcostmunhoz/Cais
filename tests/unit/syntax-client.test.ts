@@ -159,7 +159,7 @@ describe('the diagnostics of a document', () => {
   const dialect = getDialect('mysql');
   const run = (marked: string, check = async (text: string) => checkMysql(text)) => {
     const head = marked.indexOf('|');
-    const doc = marked.replace('|', '');
+    const doc = head === -1 ? marked : marked.slice(0, head) + marked.slice(head + 1);
     const state = EditorState.create({ doc, selection: { anchor: head === -1 ? doc.length : head } });
     return syntaxDiagnostics(state, { dialect, check, message: (m) => `erro: ${m}` });
   };

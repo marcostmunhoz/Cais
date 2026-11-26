@@ -6,7 +6,7 @@ import type { Engine } from '@shared/model';
 /** Reads `sql` with `|` standing for the cursor and returns what the position sees. */
 function at(engine: Engine, marked: string) {
   const offset = marked.indexOf('|');
-  const sql = marked.replace('|', '');
+  const sql = offset === -1 ? marked : marked.slice(0, offset) + marked.slice(offset + 1);
   const analysis = getDialect(engine).analyze(sql);
   const visible = tablesAt(analysis, offset).map((v) => `${v.depth}:${v.ref.path.join('.')}${v.ref.alias ? ` ${v.ref.alias}` : ''}`);
   return { visible, context: completionContext(analysis, offset), all: allTables(analysis).map((r) => r.path.join('.')) };
