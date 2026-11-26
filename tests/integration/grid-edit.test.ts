@@ -1,7 +1,7 @@
 import type mysql from 'mysql2/promise';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { getDialect } from '@shared/dialects/registry';
-import { buildGridUpdates, gridEditability, type EditTarget, type PendingCells } from '@shared/grid';
+import { buildCellUpdates, buildGridInsert, buildGridStatements, buildGridUpdates, deleteReach, gridEditability, insertability, type EditTarget, type InsertTarget, type PendingCells } from '@shared/grid';
 import { render } from '@shared/i18n';
 import type { MysqlEnvironment as Environment } from '@shared/model';
 import type { CellValue, SchemaTree, StatementResult } from '@shared/results';
@@ -175,6 +175,166 @@ describe.each([
   });
 });
 
+describe('Gerar UPDATE da célula', () => {
+  it('rewrites every kind of value as it is, and the selected literal can be typed over with an expression', async () => {
+    const id = '4611686018427387905';
+    await admin.query('DELETE FROM grid_kinds WHERE id = ?', [id]);
+    await admin.query('INSERT INTO grid_kinds (id, s) VALUES (?, ?)', [id, 'old']);
+    const s = await open();
+    const read = `SELECT * FROM grid_kinds WHERE id = ${id}`;
+    const seed = await exec(s, read);
+    const target = gridEditability(seed, await schema(), dialect.valueKind) as EditTarget;
+    expect(target.editable).toBe(true);
+    const names = seed.columns!.map((c) => c.name);
+    const cells: PendingCells = { 0: {} };
+    for (const [name, value] of Object.entries(VALUES)) cells[0]![names.indexOf(name)] = value;
+    const [update] = buildGridUpdates(dialect, target, seed.rows!, cells);
+    expect((await s.execute(update!.sql, { maxRows: 1 })).error).toBeUndefined();
+
+    // the row as the server holds it now: NULLs and every typed value of VALUES
+    const before = await exec(s, read);
+    for (const name of names.filter((n) => n !== 'id')) {
+      const column = names.indexOf(name);
+      const value = before.rows![0]![column] ?? null;
+      const { text } = buildCellUpdates(dialect, target, before.rows!, column, [{ row: 0, value }]);
+      const done = await s.execute(text.slice(0, -1), { maxRows: 1 });
+      expect(done.error, name).toBeUndefined();
+      expect(done.affectedRows, name).toBe(1);
+    }
+    const after = await exec(s, read);
+    expect(after.rows![0]!.map((v) => (typeof v === 'object' && v !== null ? v : v === null ? null : String(v)))).toEqual(
+      before.rows![0]!.map((v) => (typeof v === 'object' && v !== null ? v : v === null ? null : String(v))),
+    );
+
+    // typing over the selected literal: the statement is still one UPDATE by the key and the server evaluates it
+    const sCol = names.indexOf('s');
+    const { text, ranges } = buildCellUpdates(dialect, target, before.rows!, sCol, [{ row: 0, value: before.rows![0]![sCol] ?? null }]);
+    const typed = text.slice(0, ranges[0]!.from) + "CONCAT('a', UPPER('b'))" + text.slice(ranges[0]!.to, -1);
+    expect(dialect.splitStatements(typed + ';')).toHaveLength(1);
+    expect((await s.execute(typed, { maxRows: 1 })).affectedRows).toBe(1);
+    const last = await exec(s, `SELECT s FROM grid_kinds WHERE id = ${id}`);
+    expect(last.rows![0]![0]).toBe('aB');
+  });
+});
+
+describe('Gerar INSERT', () => {
+  /** The INSERT the grid would generate for a read of one table, and what it leaves out. */
+  async function generate(s: DbSession, read: string, rows: number[], withKey: boolean): Promise<{ result: StatementResult; target: InsertTarget; sql: string }> {
+    const result = await exec(s, read);
+    const target = insertability(result, await schema(), dialect.valueKind);
+    expect(target.insertable).toBe(true);
+    const t = target as InsertTarget;
+    const built = buildGridInsert(dialect, t, rows.map((r) => ({ row: r, values: result.rows![r]! })), withKey);
+    expect(built).toHaveProperty('sql');
+    return { result, target: t, sql: (built as { sql: string }).sql };
+  }
+
+  /** A row of grid_kinds holding every tricky value of VALUES, written by the generated UPDATE the grid already tests. */
+  async function seedKinds(s: DbSession, id: string): Promise<string[]> {
+    await admin.query('DELETE FROM grid_kinds WHERE id = ?', [id]);
+    await admin.query('INSERT INTO grid_kinds (id, s) VALUES (?, ?)', [id, 'old']);
+    const seed = await exec(s, `SELECT * FROM grid_kinds WHERE id = ${id}`);
+    const target = gridEditability(seed, await schema(), dialect.valueKind) as EditTarget;
+    const names = seed.columns!.map((c) => c.name);
+    const cells: PendingCells = { 0: {} };
+    for (const [name, value] of Object.entries(VALUES)) cells[0]![names.indexOf(name)] = value;
+    const [update] = buildGridUpdates(dialect, target, seed.rows!, cells);
+    expect((await s.execute(update!.sql, { maxRows: 1 })).error).toBeUndefined();
+    return names;
+  }
+
+  it('writes every kind of value back exactly: NULL, JSON, binary, BIT, decimals, dates, text with backslashes and NULs', async () => {
+    const ids = ['4611686018427387910', '4611686018427387911'];
+    const s = await open();
+    const names = await seedKinds(s, ids[0]!);
+    await admin.query('DELETE FROM grid_kinds WHERE id = ?', [ids[1]]);
+    await admin.query('INSERT INTO grid_kinds (id, s) VALUES (?, ?)', [ids[1], 'only this']);
+
+    // row 0 holds every typed value, row 1 holds NULLs
+    const read = `SELECT * FROM grid_kinds WHERE id IN (${ids.join(', ')}) ORDER BY id`;
+    const { result: before, sql, target: ins } = await generate(s, read, [0, 1], true);
+    expect(ins.omitted).toEqual([]);
+    expect(ins.key).toEqual([0]);
+    expect(dialect.classify(sql)).toMatchObject({ kind: 'write', verb: 'INSERT' });
+    expect(dialect.splitStatements(sql + ';')).toHaveLength(1);
+
+    await admin.query('DELETE FROM grid_kinds WHERE id IN (?, ?)', ids);
+    const done = await s.execute(sql, { maxRows: 1 });
+    expect(done.error).toBeUndefined();
+    expect(done.affectedRows).toBe(2);
+    expect(done.warnings).toBeUndefined();
+
+    const after = await exec(s, read);
+    expect(after.rows).toEqual(before.rows);
+    // the typed values are really there, not just equal to themselves
+    const row = after.rows![0]!;
+    for (const name of ['s', 't', 'ch', 'd', 'b', 'dt', 'e', 'st', 'bt', 'vb', 'y', 'f']) {
+      expect(row[names.indexOf(name)], name).toEqual(VALUES[name]);
+    }
+    expect(after.rows![1]!.filter((v) => v === null)).toHaveLength(names.length - 2);
+  });
+
+  it('under NO_BACKSLASH_ESCAPES the same INSERT writes the same values', async () => {
+    const id = '4611686018427387912';
+    const s = await open();
+    await seedKinds(s, id);
+    expect((await s.execute("SET SESSION sql_mode = CONCAT(@@sql_mode, ',NO_BACKSLASH_ESCAPES')", { maxRows: 1 })).error).toBeUndefined();
+    const read = `SELECT * FROM grid_kinds WHERE id = ${id}`;
+    const { result: before, sql } = await generate(s, read, [0], true);
+    await admin.query('DELETE FROM grid_kinds WHERE id = ?', [id]);
+    expect((await s.execute(sql, { maxRows: 1 })).error).toBeUndefined();
+    expect((await exec(s, read)).rows).toEqual(before.rows);
+  });
+
+  it('leaves generated columns out, and without the key the server fills it in', async () => {
+    await admin.query('DELETE FROM grid_people WHERE id > 2');
+    const s = await open();
+    const read = 'SELECT * FROM grid_people WHERE id <= 2 ORDER BY id';
+    const withKey = await generate(s, read, [0, 1], true);
+    expect(withKey.target.omitted).toEqual(['upper_name', 'name_len']);
+    expect(withKey.sql).toContain('(`id`, `name`, `changed_at`) VALUES');
+    const noKey = await generate(s, read, [0, 1], false);
+    expect(noKey.sql).toContain('(`name`, `changed_at`) VALUES');
+
+    // without the key: two new rows with new keys, the same names, and the generated columns computed by the server
+    const done = await s.execute(noKey.sql, { maxRows: 1 });
+    expect(done.error).toBeUndefined();
+    expect(done.affectedRows).toBe(2);
+    const added = await exec(s, 'SELECT id, name, upper_name, name_len FROM grid_people WHERE id > 2 ORDER BY id');
+    expect(added.rows!.map((r) => [r[1], r[2], r[3]])).toEqual([['Ana', 'ANA', 3], ['Bia', 'BIA', 3]]);
+    expect(added.rows!.every((r) => Number(r[0]) > 2)).toBe(true);
+
+    // with the key: the same ids again once the originals are gone
+    const original = await exec(s, read);
+    await admin.query('DELETE FROM grid_people WHERE id <= 2');
+    expect((await s.execute(withKey.sql, { maxRows: 1 })).affectedRows).toBe(2);
+    expect((await exec(s, read)).rows).toEqual(original.rows);
+    await admin.query('DELETE FROM grid_people WHERE id > 2');
+  });
+
+  it('a table whose key has no default: the plain variant works, the one without the key is refused by the server when it runs', async () => {
+    const s = await open();
+    const read = 'SELECT * FROM grid_other';
+    const result = await exec(s, read);
+    const target = insertability(result, await schema(), dialect.valueKind) as InsertTarget;
+    expect(target.insertable).toBe(true);
+    expect(target.key).toEqual([0]);
+    const withoutKey = buildGridInsert(dialect, target, [{ row: 0, values: result.rows![0]! }], false) as { sql: string };
+    expect(withoutKey.sql).toBe('INSERT INTO `' + fixture().database + "`.`grid_other` (`name`) VALUES ('Zé')");
+    const refused = await s.execute(withoutKey.sql, { maxRows: 1 });
+    expect(refused.error?.message).toMatch(/default value/i);
+    expect(Number((await exec(s, 'SELECT COUNT(*) FROM grid_other')).rows![0]![0])).toBe(1);
+  });
+
+  it('a read of a view or of a join generates nothing', async () => {
+    const s = await open();
+    const tree = await schema();
+    for (const sql of ['SELECT id, name FROM grid_people_v', 'SELECT p.id, o.name FROM grid_people p JOIN grid_other o ON o.id > p.id']) {
+      expect(insertability(await exec(s, sql), tree, dialect.valueKind).insertable, sql).toBe(false);
+    }
+  });
+});
+
 describe('Aplicar through the SessionManager', () => {
   const env: Environment = { id: 'e', projectId: 'p', name: 'dev', engine: 'mysql', host: '', port: 0, credentialId: 'c', production: false };
   const lines: PersonTrailLine[] = [];
@@ -205,5 +365,127 @@ describe('Aplicar through the SessionManager', () => {
     expect(lines.filter((l) => l.event === 'statement' && l.state === 'ok').map((l) => l.detail)).toEqual(['Edição na grade', 'Edição na grade']);
     await manager.rollback('tx');
     await manager.close('tx');
+  });
+});
+
+describe('Excluir linha (DELETE of the grid)', () => {
+  const env: Environment = { id: 'e', projectId: 'p', name: 'dev', engine: 'mysql', host: '', port: 0, credentialId: 'c', production: false };
+  const lines: PersonTrailLine[] = [];
+  let manager: SessionManager;
+  const db = () => fixture().database;
+
+  beforeAll(async () => {
+    const f = fixture();
+    manager = new SessionManager({
+      getEnvironment: (id) => (id === 'e' ? { ...env, host: f.host, port: f.port } : undefined),
+      resolveConnectParams: async () => params(),
+      getDriver: () => mysqlDriver,
+      getDialect,
+      emit: () => undefined,
+      now: () => Date.now(),
+      trail: { append: (l) => lines.push(l) },
+    });
+    await admin.query('CREATE TABLE grid_del_parent (id INT PRIMARY KEY, name VARCHAR(20)) ENGINE=InnoDB');
+    await admin.query('CREATE TABLE grid_del_cascade (id INT PRIMARY KEY, parent_id INT, FOREIGN KEY (parent_id) REFERENCES grid_del_parent (id) ON DELETE CASCADE) ENGINE=InnoDB');
+    await admin.query('CREATE TABLE grid_del_restrict (id INT PRIMARY KEY, parent_id INT, FOREIGN KEY (parent_id) REFERENCES grid_del_parent (id) ON DELETE RESTRICT) ENGINE=InnoDB');
+    await admin.query("INSERT INTO grid_del_parent VALUES (1, 'a'), (2, 'b'), (3, 'c'), (4, 'd')");
+    await admin.query('INSERT INTO grid_del_cascade VALUES (1, 1)');
+    await admin.query('INSERT INTO grid_del_restrict VALUES (1, 2)');
+  });
+  afterAll(async () => {
+    await manager.closeAll();
+    await admin?.query('DROP TABLE IF EXISTS grid_del_cascade, grid_del_restrict, grid_del_parent');
+  });
+
+  /** The statements the grid builds for rows marked in a read of grid_del_parent. */
+  async function statements(s: DbSession, deleted: number[], cells: PendingCells = {}) {
+    const result = await exec(s, 'SELECT * FROM grid_del_parent ORDER BY id');
+    const target = gridEditability(result, await schema(), dialect.valueKind) as EditTarget;
+    expect(target.editable).toBe(true);
+    return buildGridStatements(dialect, target, result.rows!, cells, deleted);
+  }
+
+  it('the generated DELETE removes exactly the row of the key, found 1, and the UPDATEs run first', async () => {
+    const s = await open();
+    const built = await statements(s, [3], { 0: { 1: 'A' } });
+    expect(built.map((b) => b.verb)).toEqual(['UPDATE', 'DELETE']);
+    expect(built[1]!.sql).toBe('DELETE FROM `' + db() + '`.`grid_del_parent` WHERE `id` = 4');
+    const res = [];
+    for (const b of built) res.push(await s.execute(b.sql, { maxRows: 1 }));
+    expect(res.map((r) => [r.error, r.affectedRows])).toEqual([[undefined, 1], [undefined, 1]]);
+    const after = await exec(s, 'SELECT id, name FROM grid_del_parent ORDER BY id');
+    expect(after.rows!.map((r) => [String(r[0]), r[1]])).toEqual([['1', 'A'], ['2', 'b'], ['3', 'c']]);
+    await admin.query("UPDATE grid_del_parent SET name = 'a' WHERE id = 1");
+    await admin.query("INSERT INTO grid_del_parent VALUES (4, 'd')");
+  });
+
+  it('a DELETE of a row that is already gone finds 0', async () => {
+    const s = await open();
+    const built = await statements(s, [2]);
+    await admin.query('DELETE FROM grid_del_parent WHERE id = 3');
+    const done = await s.execute(built[0]!.sql, { maxRows: 1 });
+    expect(done.error).toBeUndefined();
+    expect(done.affectedRows).toBe(0);
+    await admin.query("INSERT INTO grid_del_parent VALUES (3, 'c')");
+  });
+
+  it('through the SessionManager: the grid label, found 1 each, and Rollback undoes the DELETEs', async () => {
+    lines.length = 0;
+    await manager.open('del', 'e');
+    await manager.setMode('del', 'transaction');
+    const s = await open();
+    // a mixed batch: one UPDATE (row 0), then the two DELETEs
+    const built = await statements(s, [2, 3], { 0: { 1: 'A' } });
+    expect(built.map((b) => b.verb)).toEqual(['UPDATE', 'DELETE', 'DELETE']);
+    const res = await manager.run('del', { sql: built.map((b) => `${b.sql};`).join('\n'), scope: 'all', cursor: 0, maxRows: 1, origin: 'grid' });
+    expect(res.results.map((r) => r.affectedRows)).toEqual([1, 1, 1]);
+    expect(res.session.transaction.open).toBe(true);
+    expect(lines.filter((l) => l.event === 'statement' && l.state === 'ok').map((l) => l.detail)).toEqual(['Edição na grade', 'Edição na grade', 'Edição na grade']);
+    // the trail has the key in the command text, never the row's content
+    expect(JSON.stringify(lines)).not.toContain("'c'");
+    expect(Number((await manager.run('del', { sql: 'SELECT COUNT(*) FROM grid_del_parent', scope: 'all', cursor: 0, maxRows: 1 })).results[0]!.rows![0]![0])).toBe(2);
+    await manager.rollback('del');
+    expect(Number((await exec(s, 'SELECT COUNT(*) FROM grid_del_parent')).rows![0]![0])).toBe(4);
+    expect((await exec(s, 'SELECT name FROM grid_del_parent WHERE id = 1')).rows![0]![0]).toBe('a');
+    await manager.close('del');
+  });
+
+  it('a DELETE stopped by a RESTRICT foreign key is an error that stops the sequence; nothing after it runs', async () => {
+    await manager.open('fk', 'e');
+    const s = await open();
+    // id 2 is referenced by grid_del_restrict; id 4 is free
+    const built = await statements(s, [1, 3]);
+    const res = await manager.run('fk', { sql: built.map((b) => `${b.sql};`).join('\n'), scope: 'all', cursor: 0, maxRows: 1, origin: 'grid' });
+    // the run stops at the first error: the free row after it was not deleted
+    expect(res.results).toHaveLength(1);
+    expect(res.results[0]!.error).toBeDefined();
+    expect(Number((await exec(s, 'SELECT COUNT(*) FROM grid_del_parent WHERE id IN (2, 4)')).rows![0]![0])).toBe(2);
+    await manager.close('fk');
+  });
+
+  it('in Somente leitura the main refuses the DELETE and nothing leaves the app', async () => {
+    await manager.open('ro', 'e', { mode: 'read-only' });
+    const s = await open();
+    const built = await statements(s, [0]);
+    const res = await manager.run('ro', { sql: `${built[0]!.sql};`, scope: 'all', cursor: 0, maxRows: 1, origin: 'grid' });
+    expect(res.results[0]!.error?.code).toBe('REFUSED');
+    expect(Number((await exec(s, 'SELECT COUNT(*) FROM grid_del_parent')).rows![0]![0])).toBe(4);
+    await manager.close('ro');
+  });
+
+  it('under the grid label the main refuses INSERT and anything that is not an UPDATE or a DELETE', async () => {
+    await manager.open('lbl', 'e');
+    await manager.setMode('lbl', 'transaction');
+    const table = '`' + db() + '`.`grid_del_parent`';
+    await expect(manager.run('lbl', { sql: `INSERT INTO ${table} VALUES (9, 'z')`, scope: 'all', cursor: 0, maxRows: 1, origin: 'grid' })).rejects.toMatchObject({ code: 'grid-not-edit' });
+    await expect(manager.run('lbl', { sql: `TRUNCATE TABLE ${table}`, scope: 'all', cursor: 0, maxRows: 1, origin: 'grid' })).rejects.toMatchObject({ code: 'grid-not-edit' });
+    await manager.rollback('lbl');
+    await manager.close('lbl');
+  });
+
+  it('the schema the renderer has says which tables a DELETE reaches', async () => {
+    const tree = await schema();
+    expect(deleteReach(tree, db(), 'grid_del_parent')!.cascades).toContain(`${db()}.grid_del_cascade`.toLowerCase());
+    expect(deleteReach(tree, db(), 'grid_del_cascade')!.cascades).toEqual([]);
   });
 });

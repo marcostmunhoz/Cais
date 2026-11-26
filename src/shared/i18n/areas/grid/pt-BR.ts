@@ -2,6 +2,15 @@ import { createFormat } from '../../core';
 
 const f = createFormat('pt-BR');
 
+/** "2 UPDATEs e 1 DELETE": the statements Aplicar ran, by verb. */
+const commands = (p: { updates: number; deletes: number }): string =>
+  [
+    p.updates > 0 ? f.count(p.updates, { one: 'UPDATE', other: 'UPDATEs' }) : '',
+    p.deletes > 0 ? f.count(p.deletes, { one: 'DELETE', other: 'DELETEs' }) : '',
+  ]
+    .filter(Boolean)
+    .join(' e ');
+
 /** Area "grid", pt-BR (the reference catalog: `en.ts` must follow its shape). */
 export const ptBR = {
   reason: {
@@ -29,6 +38,7 @@ export const ptBR = {
     unsupportedType: (p: { column: string; type: string }) => `${p.column} é do tipo ${p.type}, que não é editável na grade.`,
     staleColumn: (p: { column: string }) => `O tipo de ${p.column} mudou desde que o schema foi carregado. Atualize a árvore do ambiente.`,
     truncatedValue: 'O valor binário está cortado na grade: não dá para editá-lo.',
+    deleted: 'A linha está marcada para exclusão. Desfaça a exclusão para editá-la.',
   },
   invalid: {
     integer: (p: { column: string }) => `Valor inválido para ${p.column}: use um número inteiro.`,
@@ -36,12 +46,17 @@ export const ptBR = {
     hex: (p: { column: string }) => `Valor inválido para ${p.column}: digite os bytes em hexadecimal.`,
   },
   bar: {
-    summary: (p: { changes: number; rows: number }) =>
-      `${f.count(p.changes, { one: 'alteração', other: 'alterações' })} em ${f.count(p.rows, { one: 'linha', other: 'linhas' })}`,
-    generate: 'Gerar UPDATE',
-    generateTitle: 'Põe os UPDATEs no fim do editor, sem rodar',
+    summary: (p: { changes: number; rows: number; deletions: number }) =>
+      [
+        !(p.deletions > 0 && p.changes === 0) ? `${f.count(p.changes, { one: 'alteração', other: 'alterações' })} em ${f.count(p.rows, { one: 'linha', other: 'linhas' })}` : '',
+        p.deletions > 0 ? f.count(p.deletions, { one: 'exclusão', other: 'exclusões' }) : '',
+      ]
+        .filter(Boolean)
+        .join(' · '),
+    generate: 'Gerar SQL',
+    generateTitle: 'Põe os UPDATEs e DELETEs no fim do editor, sem rodar',
     apply: 'Aplicar',
-    applyTitle: 'Roda os UPDATEs nesta aba',
+    applyTitle: 'Roda os UPDATEs e DELETEs nesta aba',
     applyReadOnly: 'Troque para Transação ou Auto-commit',
     discard: 'Descartar',
   },
@@ -49,6 +64,28 @@ export const ptBR = {
     edit: 'Editar célula',
     setNull: 'Definir como NULL',
     undo: 'Desfazer edição',
+    generateCell: 'Gerar UPDATE da célula',
+    generateCells: (p: { count: number }) => `Gerar UPDATE de ${p.count} células`,
+    generateTooMany: (p: { max: number }) => `Gerar UPDATE da célula aceita até ${p.max} células por vez. Selecione menos linhas.`,
+    deleteRow: 'Excluir linha',
+    deleteRows: (p: { count: number }) => `Excluir ${p.count} linhas`,
+    undoDelete: 'Desfazer exclusão',
+    insert: 'Gerar INSERT',
+    insertNoKey: 'Gerar INSERT sem chave primária',
+  },
+  insert: {
+    stale: 'O resultado mudou sob a seleção. Selecione as linhas de novo.',
+    noColumns: 'Nenhuma coluna deste resultado pode ir num INSERT: são expressões, colunas geradas ou de tipo sem suporte.',
+    truncated: (p: { column: string; row: number }) =>
+      `O valor binário de ${p.column} na linha ${p.row} está cortado na grade: não dá para gerar o INSERT.`,
+    omitted: (p: { columns: string }) => `Fora do INSERT: ${p.columns} (coluna gerada, repetida, expressão ou de tipo sem suporte).`,
+    tooMany: (p: { max: number }) => `Gerar INSERT aceita até ${p.max} linhas por vez. Selecione menos linhas.`,
+  },
+  reach: {
+    cascade: (p: { table: string; tables: string }) =>
+      `A tabela ${p.table} tem chaves estrangeiras em cascata (ON DELETE ou ON UPDATE): excluir pode apagar ou alterar linhas de ${p.tables}.`,
+    trigger: (p: { table: string }) => `A tabela ${p.table} tem trigger: se algum for de exclusão, o que ele grava não entra na contagem de linhas.`,
+    unknown: 'Parte dos metadados do banco (triggers ou chaves estrangeiras) não pôde ser lida: a exclusão pode alcançar outras tabelas.',
   },
   cell: {
     editorLabel: (p: { column: string }) => `Novo valor de ${p.column}`,
@@ -57,8 +94,15 @@ export const ptBR = {
   confirmApply: {
     title: 'Aplicar em Auto-commit em produção',
     body: (p: { environment: string }) =>
-      `Cada UPDATE é confirmado na hora, sem Rollback. Este ambiente (${p.environment}) é de produção.`,
+      `Cada comando é confirmado na hora, sem Rollback. Este ambiente (${p.environment}) é de produção.`,
     confirm: 'Aplicar',
+  },
+  confirmDelete: {
+    title: 'Excluir linhas em Auto-commit',
+    body: (p: { rows: number }) =>
+      `Cada comando é confirmado na hora, sem Rollback. ${p.rows === 1 ? 'A linha marcada será excluída' : `As ${f.formatNumber(p.rows)} linhas marcadas serão excluídas`} do banco.`,
+    rows: (p: { rows: number }) => `${p.rows === 1 ? 'A linha marcada será excluída' : `As ${f.formatNumber(p.rows)} linhas marcadas serão excluídas`} do banco.`,
+    confirm: 'Excluir',
   },
   confirmDiscard: {
     title: 'Descartar as edições da grade',
@@ -68,17 +112,16 @@ export const ptBR = {
   },
   notice: {
     close: 'Fechar',
-    applied: (p: { count: number }) => `Edição aplicada: ${f.count(p.count, { one: 'UPDATE', other: 'UPDATEs' })}.`,
-    appliedInTransaction: (p: { count: number }) =>
-      `${f.count(p.count, { one: 'UPDATE rodou', other: 'UPDATEs rodaram' })} na transação. Faça Commit para gravar.`,
-    notOne: (p: { statement: number; rows: number }) =>
-      `O UPDATE ${f.formatNumber(p.statement)} ${p.rows === 0 ? 'não encontrou a linha' : `encontrou ${f.count(p.rows, { one: 'linha', other: 'linhas' })}`} (esperado: 1).`,
-    failed: (p: { statement: number; message: string }) => `O UPDATE ${f.formatNumber(p.statement)} falhou: ${p.message}`,
+    applied: (p: { updates: number; deletes: number }) => `Edição aplicada: ${commands(p)}.`,
+    appliedInTransaction: (p: { updates: number; deletes: number }) => `Rodaram na transação: ${commands(p)}. Faça Commit para gravar.`,
+    notOne: (p: { verb: string; statement: number; rows: number }) =>
+      `O ${p.verb} ${f.formatNumber(p.statement)} ${p.rows === 0 ? 'não encontrou a linha' : `encontrou ${f.count(p.rows, { one: 'linha', other: 'linhas' })}`} (esperado: 1).`,
+    failed: (p: { verb: string; statement: number; message: string }) => `O ${p.verb} ${f.formatNumber(p.statement)} falhou: ${p.message}`,
     transaction: 'A transação continua aberta: confira e faça Rollback se algo não está certo.',
     autocommitSaved: (p: { count: number }) =>
       p.count === 0
-        ? 'Em Auto-commit: nenhum UPDATE foi gravado antes do erro.'
-        : `Em Auto-commit, ${p.count === 1 ? 'o UPDATE anterior ao erro já está gravado' : `os ${f.formatNumber(p.count)} UPDATEs anteriores ao erro já estão gravados`}.`,
+        ? 'Em Auto-commit: nenhum comando foi gravado antes do erro.'
+        : `Em Auto-commit, ${p.count === 1 ? 'o comando anterior ao erro já está gravado' : `os ${f.formatNumber(p.count)} comandos anteriores ao erro já estão gravados`}.`,
     refreshFailed: (p: { message: string }) => `A consulta não pôde ser rodada de novo: ${p.message}`,
     otherTable: 'ela leu outra tabela (o banco da sessão mudou). O resultado anterior foi mantido.',
   },

@@ -3,6 +3,15 @@ import type { ptBR } from './pt-BR';
 
 const f = createFormat('en');
 
+/** "2 UPDATEs and 1 DELETE": the statements Apply ran, by verb. */
+const commands = (p: { updates: number; deletes: number }): string =>
+  [
+    p.updates > 0 ? f.count(p.updates, { one: 'UPDATE', other: 'UPDATEs' }) : '',
+    p.deletes > 0 ? f.count(p.deletes, { one: 'DELETE', other: 'DELETEs' }) : '',
+  ]
+    .filter(Boolean)
+    .join(' and ');
+
 /** Area "grid", English. */
 export const en: Shape<typeof ptBR> = {
   reason: {
@@ -29,6 +38,7 @@ export const en: Shape<typeof ptBR> = {
     unsupportedType: (p) => `${p.column} has type ${p.type}, which cannot be edited in the grid.`,
     staleColumn: (p) => `The type of ${p.column} changed since the schema was loaded. Refresh the environment tree.`,
     truncatedValue: 'The binary value is cut off in the grid, so it cannot be edited.',
+    deleted: 'The row is marked for deletion. Undo the deletion to edit it.',
   },
   invalid: {
     integer: (p) => `Invalid value for ${p.column}: use a whole number.`,
@@ -36,11 +46,17 @@ export const en: Shape<typeof ptBR> = {
     hex: (p) => `Invalid value for ${p.column}: type the bytes in hexadecimal.`,
   },
   bar: {
-    summary: (p) => `${f.count(p.changes, { one: 'change', other: 'changes' })} in ${f.count(p.rows, { one: 'row', other: 'rows' })}`,
-    generate: 'Generate UPDATE',
-    generateTitle: 'Puts the UPDATE statements at the end of the editor, without running them',
+    summary: (p) =>
+      [
+        !(p.deletions > 0 && p.changes === 0) ? `${f.count(p.changes, { one: 'change', other: 'changes' })} in ${f.count(p.rows, { one: 'row', other: 'rows' })}` : '',
+        p.deletions > 0 ? f.count(p.deletions, { one: 'deletion', other: 'deletions' }) : '',
+      ]
+        .filter(Boolean)
+        .join(' · '),
+    generate: 'Generate SQL',
+    generateTitle: 'Puts the UPDATE and DELETE statements at the end of the editor, without running them',
     apply: 'Apply',
-    applyTitle: 'Runs the UPDATE statements in this tab',
+    applyTitle: 'Runs the UPDATE and DELETE statements in this tab',
     applyReadOnly: 'Switch to Transaction or Auto-commit',
     discard: 'Discard',
   },
@@ -48,6 +64,26 @@ export const en: Shape<typeof ptBR> = {
     edit: 'Edit cell',
     setNull: 'Set to NULL',
     undo: 'Undo edit',
+    generateCell: 'Generate cell UPDATE',
+    generateCells: (p) => `Generate UPDATE for ${p.count} cells`,
+    generateTooMany: (p) => `Generate cell UPDATE takes up to ${p.max} cells at a time. Select fewer rows.`,
+    deleteRow: 'Delete row',
+    deleteRows: (p) => `Delete ${p.count} rows`,
+    undoDelete: 'Undo delete',
+    insert: 'Generate INSERT',
+    insertNoKey: 'Generate INSERT without primary key',
+  },
+  insert: {
+    stale: 'The result changed under the selection. Select the rows again.',
+    noColumns: 'No column of this result can go into an INSERT: they are expressions, generated columns or of a type that cannot be written.',
+    truncated: (p) => `The binary value of ${p.column} in row ${p.row} is cut off in the grid, so the INSERT cannot be generated.`,
+    omitted: (p) => `Left out of the INSERT: ${p.columns} (generated, repeated, an expression or of a type that cannot be written).`,
+    tooMany: (p) => `Generate INSERT takes up to ${p.max} rows at a time. Select fewer rows.`,
+  },
+  reach: {
+    cascade: (p) => `Table ${p.table} has cascading foreign keys (ON DELETE or ON UPDATE): deleting may remove or change rows of ${p.tables}.`,
+    trigger: (p) => `Table ${p.table} has a trigger: if any is a delete trigger, what it writes is not in the row count.`,
+    unknown: 'Some of the database metadata (triggers or foreign keys) could not be read: the deletion may reach other tables.',
   },
   cell: {
     editorLabel: (p) => `New value of ${p.column}`,
@@ -55,8 +91,15 @@ export const en: Shape<typeof ptBR> = {
   },
   confirmApply: {
     title: 'Apply in Auto-commit on production',
-    body: (p) => `Each UPDATE is committed right away, with no Rollback. This environment (${p.environment}) is production.`,
+    body: (p) => `Each statement is committed right away, with no Rollback. This environment (${p.environment}) is production.`,
     confirm: 'Apply',
+  },
+  confirmDelete: {
+    title: 'Delete rows in Auto-commit',
+    body: (p) =>
+      `Each statement is committed right away, with no Rollback. ${p.rows === 1 ? 'The marked row' : `The ${f.formatNumber(p.rows)} marked rows`} will be deleted from the database.`,
+    rows: (p) => `${p.rows === 1 ? 'The marked row' : `The ${f.formatNumber(p.rows)} marked rows`} will be deleted from the database.`,
+    confirm: 'Delete',
   },
   confirmDiscard: {
     title: 'Discard the grid edits',
@@ -66,16 +109,16 @@ export const en: Shape<typeof ptBR> = {
   },
   notice: {
     close: 'Close',
-    applied: (p) => `Edit applied: ${f.count(p.count, { one: 'UPDATE', other: 'UPDATEs' })}.`,
-    appliedInTransaction: (p) => `${f.count(p.count, { one: 'UPDATE ran', other: 'UPDATEs ran' })} in the transaction. Commit to save.`,
+    applied: (p) => `Edit applied: ${commands(p)}.`,
+    appliedInTransaction: (p) => `Ran in the transaction: ${commands(p)}. Commit to save.`,
     notOne: (p) =>
-      `UPDATE ${f.formatNumber(p.statement)} ${p.rows === 0 ? 'did not find the row' : `found ${f.count(p.rows, { one: 'row', other: 'rows' })}`} (expected: 1).`,
-    failed: (p) => `UPDATE ${f.formatNumber(p.statement)} failed: ${p.message}`,
+      `${p.verb} ${f.formatNumber(p.statement)} ${p.rows === 0 ? 'did not find the row' : `found ${f.count(p.rows, { one: 'row', other: 'rows' })}`} (expected: 1).`,
+    failed: (p) => `${p.verb} ${f.formatNumber(p.statement)} failed: ${p.message}`,
     transaction: 'The transaction is still open: check it and roll back if something is wrong.',
     autocommitSaved: (p) =>
       p.count === 0
-        ? 'In Auto-commit: no UPDATE was saved before the error.'
-        : `In Auto-commit, the ${p.count === 1 ? 'UPDATE before the error is' : `${f.formatNumber(p.count)} UPDATEs before the error are`} already saved.`,
+        ? 'In Auto-commit: no statement was saved before the error.'
+        : `In Auto-commit, the ${p.count === 1 ? 'statement before the error is' : `${f.formatNumber(p.count)} statements before the error are`} already saved.`,
     refreshFailed: (p) => `The query could not run again: ${p.message}`,
     otherTable: 'it read another table (the session database changed). The previous result was kept.',
   },

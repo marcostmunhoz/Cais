@@ -223,6 +223,15 @@ test('a query shows rows, bytes processed and billed in the footer, and the grid
   // the engine does not edit in the grid: a double click opens no editor
   await grid.getByText('99.90').dblclick();
   await expect(page.getByTestId('cell-editor')).toHaveCount(0);
+  // nor does it offer Gerar INSERT, from a cell or from the row gutter; the Copy entries are there
+  await grid.getByText('99.90').click({ button: 'right' });
+  await expect(page.getByRole('menuitem', { name: 'Copiar como tabela Markdown' })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: /Gerar INSERT/ })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await page.locator('[data-gr="0"]').click({ button: 'right' });
+  await expect(page.getByRole('menuitem', { name: 'Copiar como tabela Markdown' })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: /Gerar INSERT/ })).toHaveCount(0);
+  await page.keyboard.press('Escape');
 
   await setTheme(app, page, 'light');
   await page.screenshot({ path: join(shots, 'bigquery-results-light.png') });

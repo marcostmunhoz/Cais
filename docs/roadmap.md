@@ -11,7 +11,7 @@ O que está fora da versão atual, com o que cada item exige, e o que ainda falt
 | **Escrita de agente** | O modo Transação, mais a aprovação e o Commit como no MySQL, com `MERGE` entre os verbos de escrita e os mesmos tetos de linhas (`numDmlAffectedRows`). Não há trigger nem chave estrangeira em cascata, então o commit automático fica mais simples. Linhas que ainda estão no streaming buffer não aceitam `UPDATE` nem `DELETE`. |
 | **Scripts e procedures** (`DECLARE`, `SET`, `BEGIN … END`, `IF`, `LOOP`, `CALL`) | Sessão por aba e uma classificação de script inteiro, já que o tipo do servidor é `SCRIPT` e os filhos só aparecem depois de rodar. |
 | **Parâmetros de consulta** (`@nome`) | Um jeito de informar os valores sem montar SQL com texto. |
-| **Edição na grade** | O BigQuery não garante chave primária: só daria para tabela com `PRIMARY KEY … NOT ENFORCED` declarada, com o aviso de que o servidor não confere unicidade, e com Auto-commit ou Transação. |
+| **Edição na grade** (UPDATE e exclusão de linha) | O BigQuery não garante chave primária: só daria para tabela com `PRIMARY KEY … NOT ENFORCED` declarada, com o aviso de que o servidor não confere unicidade, e com Auto-commit ou Transação. |
 | **Vários projetos na árvore** | Dados num projeto e jobs cobrados em outro é comum. Exige uma lista de projetos de dados por ambiente, cada um lido à parte. |
 | **Prévia de tabela sem custo** | O duplo clique poderia usar `tabledata.list`, que não cobra, em vez do `SELECT … LIMIT 100`. Fica fora do caminho do SQL, então precisa de linha própria na Trilha. |
 | **Partição e cluster** | Mostrar na árvore e avisar no editor quando a consulta não filtra pela partição. |

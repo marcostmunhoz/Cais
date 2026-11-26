@@ -3,7 +3,7 @@ import { autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap } 
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { sql, SQLDialect } from '@codemirror/lang-sql';
 import { bracketMatching, HighlightStyle, syntaxHighlighting } from '@codemirror/language';
-import { Compartment, EditorState, type Extension, RangeSetBuilder } from '@codemirror/state';
+import { Compartment, EditorSelection, EditorState, type Extension, RangeSetBuilder } from '@codemirror/state';
 import {
   Decoration,
   type DecorationSet,
@@ -18,6 +18,7 @@ import {
 import { tags } from '@lezer/highlight';
 import { getDialect, statementAtCursor } from '@shared/dialects/registry';
 import { capabilitiesOf } from '@shared/engines';
+import { planAppend } from '@shared/grid';
 import type { Engine } from '@shared/model';
 import type { Dialect } from '@shared/dialects/types';
 import type { SchemaTree } from '@shared/results';
@@ -126,6 +127,10 @@ export function Editor({ tabId, environmentId, initialSql, engine, schema, datab
           addSpecialChars: /[\u00ad\u061c\u115f\u1160\u180e\u200b-\u200f\u2028-\u202e\u2060-\u206f\u2800\u3164\ufe00-\ufe0f\ufeff\uffa0\r\u000b\u000c\u0085]/,
         }),
         history(),
+        // several ranges: Gerar UPDATE da célula selects one value per row, and typing replaces them all
+        EditorState.allowMultipleSelections.of(true),
+        // only Gerar UPDATE da célula makes several ranges: a click never adds one
+        EditorView.clickAddsSelectionRange.of(() => false),
         drawSelection(),
         bracketMatching(),
         closeBrackets(),
@@ -154,14 +159,28 @@ export function Editor({ tabId, environmentId, initialSql, engine, schema, datab
     viewRef.current = view;
     registerEditor({
       getSelection: () => {
-        const sel = view.state.selection.main;
-        return { cursor: sel.head, ...(sel.empty ? {} : { selection: { from: sel.from, to: sel.to } }) };
+        const { main, ranges } = view.state.selection;
+        if (ranges.length > 1) {
+          // several ranges (Gerar UPDATE da célula): run the whole block from the first statement to the last
+          const doc = view.state.doc.toString();
+          const statements = getDialect(current.current.engine).splitStatements(doc);
+          const first = statementAtCursor(statements, ranges[0]!.from, doc);
+          const last = statementAtCursor(statements, ranges[ranges.length - 1]!.to, doc);
+          if (first !== -1 && last !== -1 && first <= last) {
+            return { cursor: main.head, selection: { from: statements[first]!.start, to: statements[last]!.end } };
+          }
+        }
+        return { cursor: main.head, ...(main.empty ? {} : { selection: { from: main.from, to: main.to } }) };
       },
       focus: () => view.focus(),
-      insertText: (text) => {
+      insertText: (text, ranges) => {
         // the dialect knows what the script leaves open (an unterminated statement, a DELIMITER block)
-        const { changes, selection } = getDialect(current.current.engine).appendStatements(view.state.doc.toString(), text);
-        view.dispatch({ changes, selection: { anchor: selection.from, head: selection.to }, scrollIntoView: true });
+        const { changes, selections } = planAppend(getDialect(current.current.engine), view.state.doc.toString(), text, ranges);
+        view.dispatch({
+          changes,
+          selection: EditorSelection.create(selections.map((r) => EditorSelection.range(r.from, r.to))),
+          scrollIntoView: true,
+        });
         view.focus();
       },
     });

@@ -11,13 +11,26 @@ import { errorCode, errorMessage } from './errors';
 import { MAX_CATALOG_NAME, sameName } from '@shared/names';
 import { getState, setState, type GridEdits, type ProjectNameRequest, type RunView, type ScriptNameRequest } from './store';
 import {
-  buildGridUpdates,
+  buildCellUpdates,
+  buildGridInsert,
+  cellLock,
   gridEditability,
+  insertability,
+  MAX_CELL_UPDATES,
+  MAX_INSERT_ROWS,
+  deleteReach,
+  buildGridStatements,
+  hasPending,
   pendingCount,
   remapCells,
+  remapRows,
   sameCell,
+  withDeleted,
+  type DeleteReach,
   type EditTarget,
+  type GridStatement,
   type Editability,
+  type Insertability,
   type KeyColumn,
   type PendingCells,
 } from '@shared/grid';
@@ -32,8 +45,11 @@ const api = (): Window['cais'] => window.cais;
 export interface EditorHandle {
   getSelection(): { cursor: number; selection?: { from: number; to: number } };
   focus(): void;
-  /** Appends statements at the end of the document (ending an unterminated last statement first) and selects them. */
-  insertText(text: string): void;
+  /**
+   * Appends statements at the end of the document (ending an unterminated last statement first) and selects them,
+   * or, with `ranges` (offsets into `text`), selects only those ranges, all at once.
+   */
+  insertText(text: string, ranges?: readonly { from: number; to: number }[]): void;
 }
 let activeEditor: EditorHandle | null = null;
 export function registerEditor(handle: EditorHandle | null): void {
@@ -881,7 +897,7 @@ export function pendingEdits(tabId: string): GridEdits | undefined {
 
 export function pendingEditCount(tabId: string): number {
   const edits = pendingEdits(tabId);
-  return edits ? pendingCount(edits.cells).changes : 0;
+  return edits ? pendingCount(edits.cells, edits.deleted).total : 0;
 }
 
 function askDiscardEdits(tabId: string, then: () => void): void {
@@ -913,19 +929,46 @@ export function editabilityOf(tabId: string, result: StatementResult): Editabili
   });
 }
 
+/** Whether (and with which columns) a result of this tab can generate an INSERT, from the environment's schema as the renderer has it. */
+export function insertabilityOf(tabId: string, result: StatementResult): Insertability {
+  const s = getState();
+  const tab = s.tabs.find((t) => t.id === tabId);
+  const env = tab ? findEnvironment(tab.environmentId) : undefined;
+  const schema = env ? s.schemas[env.id] : undefined;
+  const engine = env?.engine ?? 'mysql';
+  return insertability(result, schema?.status === 'ready' ? schema.tree : undefined, getDialect(engine).valueKind, {
+    gridEdit: capabilitiesOf(engine).gridEdit,
+    name: getDialect(engine).displayName,
+  });
+}
+
 /** Sets (or, with `undefined`, removes) the new value of one cell. Typing the original value back removes the edit. */
 export function setCellEdit(tabId: string, result: StatementResult, row: number, column: number, value: CellValue | undefined): void {
   const run = getState().runs[tabId];
   if (!run || !run.results.includes(result)) return;
   const current = pendingEdits(tabId);
   const cells: PendingCells = current?.result === result ? { ...current.cells } : {};
+  const deleted = current?.result === result ? current.deleted : [];
   const rowEdits = { ...(cells[row] ?? {}) };
   const original = result.rows?.[row]?.[column] ?? null;
   if (value === undefined || sameCell(value, original)) delete rowEdits[column];
   else rowEdits[column] = value;
   if (Object.keys(rowEdits).length > 0) cells[row] = rowEdits;
   else delete cells[row];
-  patchRun(tabId, { edits: pendingCount(cells).changes > 0 ? { result, cells } : undefined, editNotice: undefined });
+  patchRun(tabId, { edits: hasPending(cells, deleted) ? { result, cells, deleted } : undefined, editNotice: undefined });
+}
+
+/**
+ * Marks rows for deletion (or, with `marked: false`, unmarks them). A marked row keeps its pending cell edits, which come
+ * back when the mark is undone. Nothing is checked here: whether the result can be edited is the caller's gate.
+ */
+export function markRowsDeleted(tabId: string, result: StatementResult, rows: readonly number[], marked: boolean): void {
+  const run = getState().runs[tabId];
+  if (!run || !run.results.includes(result)) return;
+  const current = pendingEdits(tabId);
+  const cells: PendingCells = current?.result === result ? current.cells : {};
+  const deleted = withDeleted(current?.result === result ? current.deleted : [], rows, marked);
+  patchRun(tabId, { edits: hasPending(cells, deleted) ? { result, cells, deleted } : undefined, editNotice: undefined });
 }
 
 export function discardEdits(tabId: string): void {
@@ -939,16 +982,18 @@ const sameKey = (a: readonly KeyColumn[], b: readonly KeyColumn[]): boolean =>
   a.length === b.length && a.every((k, i) => k.index === b[i]!.index && k.column === b[i]!.column && k.type === b[i]!.type);
 
 /**
- * The UPDATEs of the pending edits. The key comes from the environment's schema, read when it was first needed:
- * it is read again here, because a key that grew by a column the query did not select (a migration while the
- * Cais was open) is invisible in the result and would make the WHERE match several rows.
+ * The edit target of a result with the environment's schema read again: a key that grew by a column the query did not
+ * select (a migration while the Cais was open) is invisible in the result and would make the WHERE match several
+ * rows. Null (after saying why) when the result cannot be edited, the key moved or `stillCurrent` turned false while
+ * the schema was read.
  */
-async function editStatements(
+async function readTarget(
   tabId: string,
-): Promise<{ edits: GridEdits; target: Editability & { editable: true }; updates: { row: number; sql: string }[] } | null> {
-  const edits = pendingEdits(tabId);
-  if (!edits || preparingEdits.has(tabId)) return null;
-  const before = editabilityOf(tabId, edits.result);
+  result: StatementResult,
+  stillCurrent: () => boolean,
+): Promise<(Editability & { editable: true }) | null> {
+  if (!stillCurrent() || preparingEdits.has(tabId)) return null;
+  const before = editabilityOf(tabId, result);
   if (!before.editable) {
     showToast(render(before.reason));
     return null;
@@ -968,8 +1013,8 @@ async function editStatements(
     preparingEdits.delete(tabId);
   }
   // the person may have changed the edits (or run again) meanwhile
-  if (pendingEdits(tabId) !== edits) return null;
-  const target = editabilityOf(tabId, edits.result);
+  if (!stillCurrent()) return null;
+  const target = editabilityOf(tabId, result);
   if (!target.editable) {
     showToast(render(target.reason));
     return null;
@@ -978,8 +1023,25 @@ async function editStatements(
     showToast(m().grid.reason.staleSchema);
     return null;
   }
+  return target;
+}
+
+/**
+ * The UPDATEs and DELETEs of the pending edits. The key comes from the environment's schema, read when it was first needed:
+ * it is read again here, because a key that grew by a column the query did not select (a migration while the
+ * Cais was open) is invisible in the result and would make the WHERE match several rows.
+ */
+async function editStatements(
+  tabId: string,
+): Promise<{ edits: GridEdits; target: Editability & { editable: true }; statements: GridStatement[] } | null> {
+  const edits = pendingEdits(tabId);
+  if (!edits) return null;
+  const target = await readTarget(tabId, edits.result, () => pendingEdits(tabId) === edits);
+  if (!target) return null;
   // a column that changed on the server since the edit (e.g. text to number) is locked now: say which, in the catalog's words
-  for (const cols of Object.values(edits.cells)) {
+  const marked = new Set(edits.deleted);
+  for (const [r, cols] of Object.entries(edits.cells)) {
+    if (marked.has(Number(r))) continue; // a row marked for deletion applies no edit
     for (const c of Object.keys(cols).map(Number)) {
       const col = target.columns[c];
       if (col && !col.editable) {
@@ -988,26 +1050,120 @@ async function editStatements(
       }
     }
   }
+  const environmentId = getState().tabs.find((t) => t.id === tabId)?.environmentId ?? '';
   const dialect = getDialect(findEnvironment(environmentId)?.engine ?? 'mysql');
   try {
-    const updates = buildGridUpdates(dialect, target, edits.result.rows ?? [], edits.cells);
-    return updates.length > 0 ? { edits, target, updates } : null;
+    const statements = buildGridStatements(dialect, target, edits.result.rows ?? [], edits.cells, edits.deleted);
+    return statements.length > 0 ? { edits, target, statements } : null;
   } catch (e) {
     showToast(errorMessage(e));
     return null;
   }
 }
 
-/** Gerar UPDATE: the statements go to the end of the editor, selected, and the pending edits are cleared. Nothing runs. */
+/** Gerar SQL: the UPDATEs and DELETEs go to the end of the editor, selected, and the pending edits are cleared. Nothing runs. */
 export async function generateUpdates(tabId: string): Promise<void> {
   if (getState().activeTabId !== tabId || !activeEditor) return;
   const plan = await editStatements(tabId);
   if (!plan || getState().activeTabId !== tabId || !activeEditor) return;
-  activeEditor.insertText(plan.updates.map((u) => `${u.sql};`).join('\n'));
+  activeEditor.insertText(plan.statements.map((u) => `${u.sql};`).join('\n'));
   patchRun(tabId, { edits: undefined, editNotice: undefined });
 }
 
-/** Aplicar: the UPDATEs run through the tab's normal path, so the mode decides. */
+/**
+ * Gerar UPDATE da célula: `UPDATE … SET <column> = <value shown> WHERE <whole key>;` for each of the rows, at the end
+ * of the editor, with every value literal selected for the person to type over. Same gate as editing a cell. Nothing
+ * runs and the pending edits stay as they are: the value is the one the grid shows, pending edit included.
+ */
+export async function generateCellUpdates(tabId: string, result: StatementResult, column: number, rows: readonly number[]): Promise<void> {
+  if (getState().activeTabId !== tabId || !activeEditor || rows.length === 0) return;
+  if (rows.length > MAX_CELL_UPDATES) {
+    showToast(m().grid.menu.generateTooMany({ max: MAX_CELL_UPDATES }));
+    return;
+  }
+  const stillCurrent = () => getState().runs[tabId]?.results.includes(result) === true && getState().activeTabId === tabId;
+  const target = await readTarget(tabId, result, stillCurrent);
+  if (!target || !stillCurrent() || !activeEditor) return;
+  const original = result.rows ?? [];
+  const pending = pendingEdits(tabId);
+  const cells: { row: number; value: CellValue }[] = [];
+  for (const r of [...rows].sort((a, b) => a - b)) {
+    const row = original[r];
+    if (!row) return;
+    const lock = cellLock(target, column, row[column] ?? null);
+    if (lock) {
+      showToast(render(lock));
+      return;
+    }
+    const edited = pending?.result === result ? pending.cells[r] : undefined;
+    cells.push({ row: r, value: edited && Object.hasOwn(edited, column) ? (edited[column] ?? null) : (row[column] ?? null) });
+  }
+  const environmentId = getState().tabs.find((t) => t.id === tabId)?.environmentId ?? '';
+  try {
+    const { text, ranges } = buildCellUpdates(getDialect(findEnvironment(environmentId)?.engine ?? 'mysql'), target, original, column, cells);
+    activeEditor.insertText(text, ranges);
+  } catch (e) {
+    showToast(errorMessage(e));
+  }
+}
+
+/**
+ * Gerar INSERT: one multi-row `INSERT INTO … VALUES (…), (…);` of the rows at the end of the editor, selected, with the
+ * values the grid shows (pending edits applied). `withKey: false` leaves the primary key out. Nothing
+ * runs and the pending edits stay as they are. The columns come from the schema the renderer has: an INSERT finds no
+ * row by a key, so a stale schema cannot make it touch the wrong one, and the server has the last word when it runs.
+ */
+export function generateInserts(tabId: string, result: StatementResult, rows: readonly number[], withKey: boolean): void {
+  if (getState().activeTabId !== tabId || !activeEditor || rows.length === 0) return;
+  if (getState().runs[tabId]?.results.includes(result) !== true) return;
+  if (rows.length > MAX_INSERT_ROWS) {
+    showToast(m().grid.insert.tooMany({ max: MAX_INSERT_ROWS }));
+    return;
+  }
+  const target = insertabilityOf(tabId, result);
+  if (!target.insertable) {
+    showToast(render(target.reason));
+    return;
+  }
+  if (!withKey && !target.key) return;
+  const original = result.rows ?? [];
+  const pending = pendingEdits(tabId);
+  const picked: { row: number; values: readonly CellValue[] }[] = [];
+  for (const r of [...rows].sort((a, b) => a - b)) {
+    const row = original[r];
+    if (!row) {
+      showToast(m().grid.insert.stale);
+      return;
+    }
+    const edited = pending?.result === result ? pending.cells[r] : undefined;
+    picked.push({ row: r, values: edited ? row.map((v, c) => (Object.hasOwn(edited, c) ? (edited[c] ?? null) : v)) : row });
+  }
+  const environmentId = getState().tabs.find((t) => t.id === tabId)?.environmentId ?? '';
+  try {
+    const built = buildGridInsert(getDialect(findEnvironment(environmentId)?.engine ?? 'mysql'), target, picked, withKey);
+    if ('error' in built) {
+      showToast(render(built.error));
+      return;
+    }
+    activeEditor.insertText(`${built.sql};`);
+    if (target.omitted.length > 0) showToast(m().grid.insert.omitted({ columns: target.omitted.join(', ') }));
+  } catch (e) {
+    showToast(errorMessage(e));
+  }
+}
+
+/** What a DELETE of the table may also touch, as lines the person reads (empty when the schema shows nothing). */
+export function reachNotes(reach: DeleteReach | null, table: string): string[] {
+  if (!reach) return [];
+  const t = m().grid.reach;
+  const out: string[] = [];
+  if (reach.cascades.length > 0) out.push(t.cascade({ table, tables: reach.cascades.join(', ') }));
+  if (reach.triggers) out.push(t.trigger({ table }));
+  if (reach.unknown) out.push(t.unknown);
+  return out;
+}
+
+/** Aplicar: the UPDATEs and DELETEs run through the tab's normal path, so the mode decides. */
 export async function applyEdits(tabId: string): Promise<void> {
   const tab = getState().tabs.find((t) => t.id === tabId);
   if (!tab || getState().runs[tabId]?.running) return;
@@ -1017,13 +1173,20 @@ export async function applyEdits(tabId: string): Promise<void> {
   const mode = effectiveMode(tabId);
   if (mode === 'read-only') return;
   const env = findEnvironment(tab.environmentId);
-  if (env?.production && mode === 'autocommit') {
+  const deletions = plan.statements.filter((u) => u.verb === 'DELETE').length;
+  // Auto-commit commits each statement at once: in production always, and whenever rows are about to be deleted
+  if (mode === 'autocommit' && (env?.production || deletions > 0)) {
+    const schema = getState().schemas[tab.environmentId];
+    const notes = deletions > 0 ? reachNotes(deleteReach(schema?.status === 'ready' ? schema.tree : undefined, plan.target.database, plan.target.table), plan.target.table) : [];
+    const production = !!env?.production;
+    const t = m().grid;
     setState({
       confirm: {
-        title: m().grid.confirmApply.title,
-        body: m().grid.confirmApply.body({ environment: env.name }),
-        items: plan.updates.map((u) => `${u.sql};`),
-        confirmLabel: m().grid.confirmApply.confirm,
+        title: production ? t.confirmApply.title : t.confirmDelete.title,
+        body: production ? t.confirmApply.body({ environment: env!.name }) : t.confirmDelete.body({ rows: deletions }),
+        notes: production && deletions > 0 ? [t.confirmDelete.rows({ rows: deletions }), ...notes] : notes,
+        items: plan.statements.map((u) => `${u.sql};`),
+        confirmLabel: production ? t.confirmApply.confirm : t.confirmDelete.confirm,
         danger: true,
         onConfirm: () => {
           setState({ confirm: null });
@@ -1037,7 +1200,7 @@ export async function applyEdits(tabId: string): Promise<void> {
 }
 
 async function runEdits(tabId: string, plan: NonNullable<Awaited<ReturnType<typeof editStatements>>>): Promise<void> {
-  const { edits, target, updates } = plan;
+  const { edits, target, statements } = plan;
   if (getState().runs[tabId]?.running || queuedRuns.has(tabId)) return;
   queuedRuns.add(tabId);
   let connected: boolean;
@@ -1052,7 +1215,7 @@ async function runEdits(tabId: string, plan: NonNullable<Awaited<ReturnType<type
   let response: RunResponse;
   try {
     response = await api().session.run(tabId, {
-      sql: updates.map((u) => `${u.sql};`).join('\n'),
+      sql: statements.map((u) => `${u.sql};`).join('\n'),
       scope: 'all',
       cursor: 0,
       maxRows: 1,
@@ -1065,7 +1228,7 @@ async function runEdits(tabId: string, plan: NonNullable<Awaited<ReturnType<type
   }
   setSession(response.session);
   if (response.needsConfirmation) {
-    // an UPDATE never commits implicitly: nothing ran
+    // a grid statement never commits implicitly: nothing ran
     patchRun(tabId, { running: false });
     return;
   }
@@ -1073,22 +1236,30 @@ async function runEdits(tabId: string, plan: NonNullable<Awaited<ReturnType<type
   const notice: string[] = [];
   const ran = response.results.filter((r) => !r.error);
   const failed = response.results.find((r) => r.error);
+  const verbOf = (index: number): GridStatement['verb'] => statements[index]?.verb ?? 'UPDATE';
   for (const r of ran) {
     // affected rows count the rows found (FOUND_ROWS): anything but one means a stale key or a changed row
-    if (r.affectedRows !== 1) notice.push(m().grid.notice.notOne({ statement: r.index + 1, rows: r.affectedRows ?? 0 }));
+    if (r.affectedRows !== 1) notice.push(m().grid.notice.notOne({ verb: verbOf(r.index), statement: r.index + 1, rows: r.affectedRows ?? 0 }));
   }
-  if (failed?.error) notice.push(m().grid.notice.failed({ statement: failed.index + 1, message: failed.error.message }));
+  if (failed?.error) notice.push(m().grid.notice.failed({ verb: verbOf(failed.index), statement: failed.index + 1, message: failed.error.message }));
   if (notice.length > 0) {
     const session = response.session;
     if (session.mode === 'transaction' && session.transaction.open) notice.push(m().grid.notice.transaction);
     else if (failed && session.mode === 'autocommit') notice.push(m().grid.notice.autocommitSaved({ count: ran.length }));
   }
-  // the rows whose UPDATE did not run keep their edits
+  // the rows whose statement did not run keep their edits and their deletion mark (a marked row's edits come back with it)
   const kept: PendingCells = {};
-  if (failed) for (const u of updates.slice(failed.index)) if (edits.cells[u.row]) kept[u.row] = edits.cells[u.row]!;
+  const keptDeleted: number[] = [];
+  if (failed) {
+    for (const u of statements.slice(failed.index)) {
+      if (edits.cells[u.row]) kept[u.row] = edits.cells[u.row]!;
+      if (u.verb === 'DELETE') keptDeleted.push(u.row);
+    }
+  }
+  const keep = () => (hasPending(kept, keptDeleted) ? { result: edits.result, cells: kept, deleted: keptDeleted } : undefined);
 
   if (ran.length === 0) {
-    patchRun(tabId, { running: false, edits: pendingCount(kept).changes > 0 ? { result: edits.result, cells: kept } : undefined, editNotice: notice });
+    patchRun(tabId, { running: false, edits: keep(), editNotice: notice });
     return;
   }
 
@@ -1115,6 +1286,7 @@ async function runEdits(tabId: string, plan: NonNullable<Awaited<ReturnType<type
   if (!run) return;
   let result = edits.result;
   let cells = kept;
+  let deleted: number[] = keptDeleted;
   // the read runs in the session's current database: after a USE (or a database picked in the session bar)
   // it may read another table of the same name. Keep the old result then: its edits belong to the target.
   if (fresh && !fromTable(fresh, target)) {
@@ -1124,16 +1296,18 @@ async function runEdits(tabId: string, plan: NonNullable<Awaited<ReturnType<type
   if (fresh && run.results.includes(edits.result)) {
     result = { ...fresh, index: edits.result.index };
     cells = remapCells(target.key, edits.result.rows ?? [], result.rows ?? [], kept);
+    deleted = remapRows(target.key, edits.result.rows ?? [], result.rows ?? [], keptDeleted);
   }
   patchRun(tabId, {
     running: false,
     results: run.results.map((r) => (r === edits.result ? result : r)),
-    edits: pendingCount(cells).changes > 0 ? { result, cells } : undefined,
+    edits: hasPending(cells, deleted) ? { result, cells, deleted } : undefined,
     editNotice: notice.length > 0 ? notice : undefined,
   });
   if (notice.length === 0) {
     const inTransaction = getState().sessions[tabId]?.transaction.open;
-    showToast((inTransaction ? m().grid.notice.appliedInTransaction : m().grid.notice.applied)({ count: ran.length }), 'info');
+    const count = (verb: GridStatement['verb']) => ran.filter((r) => verbOf(r.index) === verb).length;
+    showToast((inTransaction ? m().grid.notice.appliedInTransaction : m().grid.notice.applied)({ updates: count('UPDATE'), deletes: count('DELETE') }), 'info');
   }
 }
 
