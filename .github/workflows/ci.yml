@@ -1,8 +1,11 @@
 name: CI
 
 on:
-  # Every branch push, PR branches included: the run shows on the PR, so a pull_request
-  # trigger would only run the same suite twice (the repository is private, minutes count).
+  # Every branch push runs it, PR branches included: the run shows on the PR, so a
+  # pull_request trigger would only duplicate it. The gate job skips a push whose tree a
+  # previous successful run already tested (a merge of an up-to-date branch, the same tree
+  # pushed to another branch) and the release commit (release.yml checks it on the tag), the
+  # same approach the Git project uses in its CI.
   push:
     branches: ['**']
   workflow_dispatch:
@@ -18,8 +21,71 @@ concurrency:
   cancel-in-progress: ${{ startsWith(github.ref, 'refs/heads/') && github.ref != 'refs/heads/main' }}
 
 jobs:
+  # Decides whether the check runs. Fails open: on any doubt, the check runs.
+  gate:
+    name: gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    steps:
+      - name: Decide
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          RUN_ID: ${{ github.run_id }}
+          TREE: ${{ github.event.head_commit.tree_id }}
+          MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          set -euo pipefail
+
+          finish() {
+            echo "run=$1" >> "$GITHUB_OUTPUT"
+            echo "gate: run=$1 ($2)"
+            echo "run=$1: $2" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          }
+
+          case "$REF" in
+            refs/tags/*) finish true "called for a tag; the release always runs the full check" ;;
+          esac
+          if [ "$EVENT" != "push" ]; then
+            finish true "event $EVENT always runs the full check"
+          fi
+          first_line="${MESSAGE%%$'\n'*}"
+          if [ "$REF" = "refs/heads/main" ] && [[ "$first_line" == chore\(release\):* ]]; then
+            finish false "release commit; the release workflow runs the full check on this tree before building"
+          fi
+          if [ -z "$TREE" ]; then
+            finish true "no tree id in the event"
+          fi
+
+          if ! previous="$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?status=success&event=push&per_page=100" \
+            --jq '[.workflow_runs[]
+              | select(.head_commit.tree_id == env.TREE)
+              | select(.id != (env.RUN_ID | tonumber))
+              | select((.head_commit.message // "" | split("\n")[0] | startswith("chore(release):")) | not)]
+              | first // empty
+              | "\(.html_url) \(.head_sha)"')"; then
+            finish true "could not query previous runs"
+          fi
+          if [ -n "$previous" ]; then
+            url="${previous%% *}"
+            sha="${previous##* }"
+            finish false "tree $TREE already passed in $url (commit $sha)"
+          fi
+          finish true "no previous successful run for tree $TREE"
+
   check:
     name: check
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:

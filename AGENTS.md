@@ -67,7 +67,7 @@ All run from the project root, with Node 20.19 or newer and npm.
 
 - A release is made like this: `npm version x.y.z` (creates the `chore(release): x.y.z` commit and the `vx.y.z` tag, through `.npmrc`) and then `git push --follow-tags`. The `release.yml` workflow checks that the tag matches the `package.json` version, runs `npm run check`, builds the deb (Linux) and the dmg (macOS arm64, ad-hoc signing) and publishes the GitHub Release with both files and `SHA256SUMS.txt`.
 - Tags and releases are made only by the user, never by an agent, unless the user asks.
-- CI (`ci.yml`) runs `npm run check` on Linux on every push to any branch, and the result shows on the pull request. macOS only runs on release, because its minutes cost 10 times more.
+- CI (`ci.yml`) runs `npm run check` on Linux on every push to any branch, and the result shows on the pull request. A first `gate` job skips a push whose tree already passed in an earlier successful run and the `chore(release)` commit on main (`release.yml` runs the full check on the tag); `workflow_dispatch` and the release always run the full check. macOS only runs on release, because its minutes cost 10 times more.
 - Actions are pinned by full SHA, with the version in a comment. Only `actions/*`, and the only secret is `github.token`.
 
 ## Tests
