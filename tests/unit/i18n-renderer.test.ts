@@ -99,6 +99,9 @@ describe('renderer catalog areas', () => {
   it('pt-BR keeps the texts the e2e selectors use', () => {
     expect(pt.sessionBar.mode['read-only']).toBe('Somente leitura');
     expect(pt.sessionBar.txOpen({ statements: 2, elapsed: '5s' })).toBe('Transação aberta · 2 comandos · 5s');
+    expect(pt.sessionBar.modeFixedTitle({ engine: 'BigQuery', mode: 'read-only' })).toBe('BigQuery só lê nesta versão');
+    expect(pt.sessionBar.modeFixedTitle({ engine: 'X', mode: 'transaction' })).toBe('X só aceita o modo Transação');
+    expect(pt.sessionBar.modeFixedTitle({ engine: 'X', mode: 'autocommit' })).toBe('X só aceita o modo Auto-commit');
     expect(pt.statusBar.rows({ n: 1 })).toBe('1 linha');
     expect(pt.statusBar.truncated({ n: 1000 })).toBe('Truncado em 1.000 linhas');
     expect(pt.results.label.rows({ n: 1, verb: 'SELECT', rows: 0 })).toBe('1 · SELECT · 0 linhas');
@@ -109,6 +112,9 @@ describe('renderer catalog areas', () => {
   it('en renders the same entries in English', () => {
     expect(en.sessionBar.mode['read-only']).toBe('Read-only');
     expect(en.sessionBar.txOpen({ statements: 1, elapsed: '5s' })).toBe('Transaction open · 1 statement · 5s');
+    expect(en.sessionBar.modeFixedTitle({ engine: 'BigQuery', mode: 'read-only' })).toBe('BigQuery is read-only in this version');
+    expect(en.sessionBar.modeFixedTitle({ engine: 'X', mode: 'transaction' })).toBe('X only accepts Transaction mode');
+    expect(en.sessionBar.modeFixedTitle({ engine: 'X', mode: 'autocommit' })).toBe('X only accepts Auto-commit mode');
     expect(en.statusBar.affectedRows({ n: 3 })).toBe('3 rows affected');
     expect(en.statusBar.runHint({ shortcut: 'Ctrl+Enter' })).toBe('Ctrl+Enter runs the statement under the cursor');
     expect(en.results.label.error({ n: 2, verb: 'UPDATE' })).toBe('2 · UPDATE · error');

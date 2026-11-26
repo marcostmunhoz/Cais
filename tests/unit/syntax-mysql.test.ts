@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { MySqlLexer } from 'dt-sql-parser/dist/lib/mysql/MySqlLexer';
 import { MySQL } from 'dt-sql-parser/dist/parser/mysql';
 import { checkMysql, MAX_CHECKED_LENGTH, shouldCheck, UNREADABLE_NAMES } from '../../src/renderer/lib/syntax/mysql';
+import { buildDelete, buildInsert, buildUpdate, buildUpdateLocated } from '@shared/dialects/mysql/literals';
 import { INVALID_MYSQL, VALID_MYSQL } from '../support/mysql-corpus';
 
 const lineOf = (text: string, offset: number): number => text.slice(0, offset).split('\n').length;
@@ -149,5 +150,48 @@ describe('the keywords the grammar cannot read as names', () => {
       .filter((w) => parser.validate(`SELECT ${w.toLowerCase()} FROM t`).length > 0)
       .sort();
     expect(failing).toEqual([...UNREADABLE_NAMES].sort());
+  });
+});
+
+describe('MySQL syntax check: what the grid generates', () => {
+  const bin = (hex: string) => ({ kind: 'binary' as const, hex, length: hex.length / 2 });
+  const columns = [
+    { column: 'id', type: 'int', value: 7 },
+    { column: 'name', type: 'varchar(40)', value: "O'Brien \\ (x)" },
+    { column: 'note', type: 'text', value: null },
+    { column: 'raw', type: 'varbinary(16)', value: bin('00ff10') },
+    { column: 'flags', type: 'bit(8)', value: bin('05') },
+    { column: 'doc', type: 'json', value: '{"a": [1, 2, {"b": null}]}' },
+    { column: 'price', type: 'decimal(10,2)', value: '12.50' },
+    { column: 'born', type: 'date', value: '2020-01-31' },
+    { column: 'seen', type: 'datetime', value: '2020-01-31 10:00:00' },
+    { column: 'ts', type: 'timestamp', value: '2020-01-31 10:00:00' },
+  ];
+  const key = [{ column: 'id', type: 'int', value: 7 }];
+  const set = columns.slice(1);
+
+  it('reads the INSERTs, with and without the key, one row or several, and the all-defaults one', () => {
+    const statements = [
+      buildInsert({ database: 'app', table: 'people', columns: columns.map(({ column, type }) => ({ column, type })), rows: [columns.map((c) => c.value), columns.map((c) => c.value)] }),
+      buildInsert({ database: 'app', table: 'people', columns: columns.map(({ column, type }) => ({ column, type })), rows: [columns.map((c) => c.value)] }),
+      buildInsert({ database: 'app', table: 'people', columns: set.map(({ column, type }) => ({ column, type })), rows: [set.map((c) => c.value)] }),
+      buildInsert({ database: 'app', table: 'people', columns: [], rows: [[]] }),
+      buildInsert({ database: 'app', table: 'people', columns: [], rows: [[], []] }),
+    ];
+    for (const sql of statements) expect(checkMysql(sql), sql).toEqual([]);
+  });
+
+  it('reads the UPDATEs and DELETEs', () => {
+    const statements = [
+      buildUpdate({ database: 'app', table: 'people', set, where: key }),
+      buildUpdateLocated({ database: 'app', table: 'people', set: [set[0]!], where: key }).sql,
+      buildDelete({ database: 'app', table: 'people', where: key }),
+    ];
+    for (const sql of statements) expect(checkMysql(sql), sql).toEqual([]);
+  });
+
+  it('still flags an empty () that is a real mistake', () => {
+    expect(checkMysql('INSERT INTO t (a) VALUES (1) ON DUPLICATE KEY UPDATE a = (')).not.toEqual([]);
+    expect(checkMysql('SELECT * FROM t WHERE a IN ()')).not.toEqual([]);
   });
 });

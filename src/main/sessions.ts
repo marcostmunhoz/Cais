@@ -447,6 +447,10 @@ export class SessionManager {
    */
   async estimate(tabId: string, sql: string): Promise<EstimateResponse> {
     const skipped = (reason: EstimateSkip): EstimateResponse => ({ state: 'skipped', reason });
+    // any newer request of the tab cancels the one in flight, even one that is itself skipped or refused: the text it
+    // was asked about is gone
+    this.estimating.get(tabId)?.abort();
+    this.estimating.delete(tabId);
     if (!this.deps.estimateEnabled?.()) return skipped('off');
     const entry = this.entries.get(tabId);
     const session = entry?.session;
@@ -459,7 +463,6 @@ export class SessionManager {
     const refusal = this.refusal(entry.state.mode, dialect.classify(text));
     if (refusal) return { state: 'refused', message: refusal };
 
-    this.estimating.get(tabId)?.abort();
     const controller = new AbortController();
     this.estimating.set(tabId, controller);
     let prep: PrepareResult;

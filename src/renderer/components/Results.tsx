@@ -35,6 +35,7 @@ import {
   copyValueText,
   displayCell,
   formatDuration,
+  isColumnSelection,
   isNumericType,
   isPartialBinary,
   isSingleCell,
@@ -602,14 +603,17 @@ export function Results({ tabId }: { tabId: string }) {
     // wider selection (which cells would it mean?)
     if (!sel || sel.c1 === sel.c2) {
       const inColumn = !!sel && sel.c1 === cell.c && cell.r >= sel.r1 && cell.r <= sel.r2;
-      const picked = inColumn ? Array.from({ length: sel.r2 - sel.r1 + 1 }, (_, i) => sel.r1 + i) : [cell.r];
-      out.push({
-        label: picked.length === 1 ? m().grid.menu.generateCell : m().grid.menu.generateCells({ count: picked.length }),
-        onSelect: () => {
-          setHint(null);
-          void generateCellUpdates(tabId, active, cell.c, picked);
-        },
-      });
+      // rows marked for deletion are left out: they get no UPDATE (the deletion wins)
+      const picked = (inColumn ? Array.from({ length: sel.r2 - sel.r1 + 1 }, (_, i) => sel.r1 + i) : [cell.r]).filter((r) => !deletedSet.has(r));
+      if (picked.length > 0) {
+        out.push({
+          label: picked.length === 1 ? m().grid.menu.generateCell : m().grid.menu.generateCells({ count: picked.length }),
+          onSelect: () => {
+            setHint(null);
+            void generateCellUpdates(tabId, active, cell.c, picked);
+          },
+        });
+      }
     }
     return out;
   };
@@ -703,9 +707,11 @@ export function Results({ tabId }: { tabId: string }) {
     }
     return out;
   };
-  // The delete key: marks the selected rows, or unmarks them when they all are marked already
+  // The delete key: marks the selected rows, or unmarks them when they all are marked already. A selection of whole
+  // columns (from the headers) is not a choice of rows: it marks nothing.
   const deleteKey = () => {
     if (!active || !target || run?.running) return;
+    if (isColumnSelection(sel, shownRows.length, columns?.length ?? 0)) return;
     if (!target.editable) {
       setHint(render(target.reason));
       return;

@@ -111,7 +111,7 @@ export function SessionBar({ tabId, platform }: { tabId: string; platform: strin
             data-testid="mode-badge"
             role="note"
             aria-label={`${t.modeGroup}: ${t.mode[fixedMode]}`}
-            title={t.modeFixedTitle({ engine: getDialect(env.engine).displayName })}
+            title={t.modeFixedTitle({ engine: getDialect(env.engine).displayName, mode: fixedMode })}
           >
             <Lock size={11} aria-hidden="true" /> {t.mode[fixedMode]}
           </span>

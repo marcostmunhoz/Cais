@@ -88,7 +88,7 @@ export interface UserSettings {
 }
 
 /** Why `estimate` did nothing (and sent nothing). */
-export type EstimateSkip = 'off' | 'not-connected' | 'busy' | 'unsupported' | 'no-statement' | 'cancelled';
+export type EstimateSkip = 'off' | 'not-connected' | 'unsupported' | 'no-statement' | 'cancelled';
 
 /**
  * The answer to a dry run of the statement being typed. Never a result set, never a job: nothing ran.

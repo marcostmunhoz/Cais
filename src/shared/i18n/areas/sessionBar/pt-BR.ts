@@ -36,7 +36,10 @@ export const ptBR = {
     transaction: 'Transação',
     autocommit: 'Auto-commit',
   },
-  modeFixedTitle: (p: { engine: string }) => `${p.engine} só lê nesta versão`,
+  modeFixedTitle: (p: { engine: string; mode: 'read-only' | 'transaction' | 'autocommit' }) =>
+    p.mode === 'read-only'
+      ? `${p.engine} só lê nesta versão`
+      : `${p.engine} só aceita o modo ${p.mode === 'transaction' ? 'Transação' : 'Auto-commit'}`,
   /** BigQuery: the switch that dry-runs the statement under the cursor after a pause in typing. */
   estimateToggle: 'Estimar ao digitar',
   estimateToggleTitle:

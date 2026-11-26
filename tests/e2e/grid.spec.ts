@@ -459,6 +459,23 @@ test('Gerar UPDATE da célula: one cell, a column of cells, with the value liter
   await page.keyboard.press('Escape');
 });
 
+test('no keystroke or click adds a cursor to the editor: Mod-Alt-ArrowDown keeps one range', async () => {
+  await setSql(page, 'SELECT 1;\nSELECT 2;\nSELECT 3;');
+  await page.keyboard.press('ControlOrMeta+Home');
+  await page.keyboard.press('ControlOrMeta+Alt+ArrowDown');
+  await page.keyboard.press('ControlOrMeta+Alt+ArrowDown');
+  await expect(page.locator('.cm-cursor-secondary')).toHaveCount(0);
+  // typing lands in one place only, and Cmd+Enter runs the one statement under the cursor
+  await page.keyboard.type('/*x*/');
+  await expect.poll(editorText).toBe('/*x*/SELECT 1;\nSELECT 2;\nSELECT 3;');
+  await page.keyboard.press('ControlOrMeta+Enter');
+  await expect(page.getByTestId('result-grid').locator('[role=gridcell]')).toHaveText('1');
+  // Mod-click adds no range either
+  await page.locator('.cm-line').nth(1).click();
+  await page.locator('.cm-line').nth(2).click({ modifiers: ['ControlOrMeta'] });
+  await expect(page.locator('.cm-cursor-secondary')).toHaveCount(0);
+});
+
 test('Gerar UPDATE da célula is not offered where the cell cannot be edited', async () => {
   await run('SELECT id, name, 1 + 1 AS two FROM grid_items ORDER BY id;');
   await expect(cell(0, 'two')).toBeVisible({ timeout: 20_000 });
@@ -651,6 +668,42 @@ test('Excluir linha: mark from the cell menu, the row gutter and the Delete key;
   await page.getByTestId('edit-discard').click();
   await expect(bar()).toHaveCount(0);
   await expect(page.locator('[data-deleted="true"]')).toHaveCount(0);
+});
+
+test('Excluir linha: Delete over column headers marks nothing; Gerar UPDATE da célula skips the marked rows', async () => {
+  await run('SELECT id, v FROM grid_del ORDER BY id;');
+  await expect(cell(4, 'v')).toBeVisible({ timeout: 20_000 });
+  await expect(bar()).toHaveCount(0);
+
+  // a click on a column header selects the whole column: Delete marks no row
+  await page.locator('[role=columnheader][data-hc="1"]').click();
+  await page.keyboard.press('Delete');
+  await expect(page.locator('[data-deleted="true"]')).toHaveCount(0);
+  await expect(bar()).toHaveCount(0);
+
+  // Cmd+A selects every row of every column: Delete marks them all
+  await cell(0, 'v').click();
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.press('Delete');
+  await expect(page.locator('[data-deleted="true"]')).toHaveCount(5);
+  await page.getByTestId('edit-discard').click();
+  await expect(bar()).toHaveCount(0);
+
+  // a marked row is left out of Gerar UPDATE da célula
+  await cell(1, 'v').click();
+  await page.keyboard.press('Delete');
+  await expect(page.locator('[data-deleted="true"]')).toHaveCount(1);
+  await cell(0, 'v').click();
+  await cell(2, 'v').click({ modifiers: ['Shift'] });
+  await cell(0, 'v').click({ button: 'right' });
+  await expect(page.getByRole('menuitem', { name: 'Gerar UPDATE de 2 células' })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: 'Gerar UPDATE de 3 células' })).toHaveCount(0);
+  await page.getByRole('menuitem', { name: 'Gerar UPDATE de 2 células' }).click();
+  await expect.poll(editorText).toContain('WHERE `id` = 1;');
+  await expect.poll(editorText).toContain('WHERE `id` = 3;');
+  expect(await editorText()).not.toContain('WHERE `id` = 2;');
+  await page.getByTestId('edit-discard').click();
+  await expect(bar()).toHaveCount(0);
 });
 
 test('Excluir linha: Gerar SQL puts the UPDATEs then the DELETEs in the editor, and runs nothing', async () => {

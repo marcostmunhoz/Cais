@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap } from '@codemirror/autocomplete';
-import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
+import { addCursorAbove, addCursorBelow, defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { sql, SQLDialect } from '@codemirror/lang-sql';
 import { bracketMatching, HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { Compartment, EditorSelection, EditorState, type Extension, RangeSetBuilder } from '@codemirror/state';
@@ -16,7 +16,7 @@ import {
   type ViewUpdate,
 } from '@codemirror/view';
 import { tags } from '@lezer/highlight';
-import { getDialect, statementAtCursor } from '@shared/dialects/registry';
+import { getDialect, multiSelectionBlock, statementAtCursor } from '@shared/dialects/registry';
 import { capabilitiesOf } from '@shared/engines';
 import { planAppend } from '@shared/grid';
 import type { Engine } from '@shared/model';
@@ -31,6 +31,9 @@ import { m } from '../lib/i18n';
 import { useStore } from '../lib/store';
 import { syntaxCheckFor } from '../lib/syntax';
 import { syntaxLint } from '../lib/syntax/lint';
+
+// no keystroke adds a cursor: only Gerar UPDATE da célula makes several ranges (addCursorAbove/Below are Mod-Alt-ArrowUp/Down)
+const editorKeymap = defaultKeymap.filter((b) => b.run !== addCursorAbove && b.run !== addCursorBelow);
 
 export const highlightStyle = HighlightStyle.define([
   { tag: [tags.keyword, tags.operatorKeyword, tags.modifier], color: 'var(--accent-text)', fontWeight: '500' },
@@ -135,7 +138,7 @@ export function Editor({ tabId, environmentId, initialSql, engine, schema, datab
         bracketMatching(),
         closeBrackets(),
         autocompletion({ icons: false, defaultKeymap: true }),
-        keymap.of([...closeBracketsKeymap, ...completionKeymap, ...historyKeymap, indentWithTab, ...defaultKeymap]),
+        keymap.of([...closeBracketsKeymap, ...completionKeymap, ...historyKeymap, indentWithTab, ...editorKeymap]),
         compartment.current.of(sqlExtension(dialect, current.current.schema, current.current.database)),
         syntaxHighlighting(highlightStyle),
         activeStatementPlugin(dialect),
@@ -161,14 +164,10 @@ export function Editor({ tabId, environmentId, initialSql, engine, schema, datab
       getSelection: () => {
         const { main, ranges } = view.state.selection;
         if (ranges.length > 1) {
-          // several ranges (Gerar UPDATE da célula): run the whole block from the first statement to the last
+          // several ranges: only the shape Gerar UPDATE da célula makes runs as a block; anything else runs the main range
           const doc = view.state.doc.toString();
-          const statements = getDialect(current.current.engine).splitStatements(doc);
-          const first = statementAtCursor(statements, ranges[0]!.from, doc);
-          const last = statementAtCursor(statements, ranges[ranges.length - 1]!.to, doc);
-          if (first !== -1 && last !== -1 && first <= last) {
-            return { cursor: main.head, selection: { from: statements[first]!.start, to: statements[last]!.end } };
-          }
+          const block = multiSelectionBlock(getDialect(current.current.engine).splitStatements(doc), ranges, doc);
+          if (block) return { cursor: main.head, selection: block };
         }
         return { cursor: main.head, ...(main.empty ? {} : { selection: { from: main.from, to: main.to } }) };
       },
@@ -210,7 +209,11 @@ export function Editor({ tabId, environmentId, initialSql, engine, schema, datab
 
   // "Estimar ao digitar" turned on, or the tab connected: estimate now, without waiting for a keystroke (off clears the marks)
   const estimateOn = useStore((st) => st.estimateAsYouType);
-  const connected = useStore((st) => st.sessions[tabId]?.status === 'idle');
+  // idle and running are both "connected": a run flips the status to running and back, and that is not a new connection
+  const connected = useStore((st) => {
+    const status = st.sessions[tabId]?.status;
+    return status === 'idle' || status === 'running';
+  });
   // (a new default dataset is another question for the same text, so it estimates again too)
   const tabDatabase = useStore((st) => st.sessions[tabId]?.database);
   useEffect(() => {

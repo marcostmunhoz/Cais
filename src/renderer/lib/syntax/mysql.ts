@@ -87,6 +87,31 @@ function unreadable(tokens: ScopeToken[]): boolean {
   return false;
 }
 
+const INSERT_PREFIX = new Set(['INTO', 'INSERT', 'REPLACE', 'IGNORE', 'LOW_PRIORITY', 'DELAYED', 'HIGH_PRIORITY']);
+
+/**
+ * An empty `()` the grammar rejects but MySQL accepts: the column list of `INSERT INTO t () VALUES ()` and the row of
+ * `VALUES ()` / `VALUES (), ()` (all defaults).
+ */
+function emptyInsertParens(tokens: ScopeToken[]): boolean {
+  const verb = tokens[0];
+  if (verb?.kind !== 'word' || (verb.upper !== 'INSERT' && verb.upper !== 'REPLACE')) return false;
+  let inValues = false;
+  for (let i = 0; i < tokens.length - 1; i++) {
+    const t = tokens[i]!;
+    if (t.kind === 'word' && (t.upper === 'VALUES' || t.upper === 'VALUE')) inValues = true;
+    if (t.kind !== 'punct' || t.text !== '(' || tokens[i + 1]!.kind !== 'punct' || tokens[i + 1]!.text !== ')') continue;
+    const prev = tokens[i - 1];
+    const before = tokens[i - 2];
+    if (!prev) continue;
+    if (prev.kind === 'word' && (prev.upper === 'VALUES' || prev.upper === 'VALUE' || prev.upper === 'ROW')) return true;
+    if (inValues && prev.kind === 'punct' && prev.text === ',') return true;
+    // the column list: the target table sits right before it
+    if (prev.kind !== 'punct' && before && ((before.kind === 'word' && INSERT_PREFIX.has(before.upper)) || (before.kind === 'punct' && before.text === '.'))) return true;
+  }
+  return false;
+}
+
 /** Whether the grammar is asked about this statement at all. */
 export function shouldCheck(text: string, tokens: ScopeToken[] = scopeTokens(text)): boolean {
   if (text.length > MAX_CHECKED_LENGTH) return false;
@@ -95,7 +120,7 @@ export function shouldCheck(text: string, tokens: ScopeToken[] = scopeTokens(tex
   // a statement that starts with "(" is a parenthesized query; a first word that is no verb of MySQL is a typo
   if (first.kind === 'word' ? OTHER_VERBS.has(first.upper) : first.text !== '(') return false;
   if (EXECUTABLE_COMMENT.test(text)) return false;
-  return !unreadable(tokens);
+  return !unreadable(tokens) && !emptyInsertParens(tokens);
 }
 
 let parser: MySQL | undefined;

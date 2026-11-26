@@ -108,6 +108,9 @@ export const VALID_MYSQL: string[] = [
   'WITH RECURSIVE x (n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM x WHERE n < 5) SELECT * FROM x',
   'WITH x AS (SELECT 1) UPDATE t SET a = 1 WHERE id IN (SELECT * FROM x)',
   // --- DML
+  'INSERT INTO t () VALUES ()',
+  'INSERT INTO t () VALUES (), ()',
+  'INSERT INTO t VALUES ()',
   'INSERT INTO t (a, b) VALUES (1, 2), (3, 4)',
   'INSERT INTO t VALUES (1, "x", NULL, DEFAULT)',
   'INSERT INTO t SET a = 1, b = 2',

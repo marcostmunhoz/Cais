@@ -80,6 +80,15 @@ export function isSingleCell(sel: Selection | null): boolean {
   return sel !== null && sel.r1 === sel.r2 && sel.c1 === sel.c2;
 }
 
+/**
+ * A selection of whole columns (what a click on column headers makes): every row of some columns, but not whole rows.
+ * A single cell is not one, whatever the size of the result.
+ */
+export function isColumnSelection(sel: Selection | null, rowCount: number, columnCount: number): boolean {
+  if (sel === null || isSingleCell(sel)) return false;
+  return sel.r1 === 0 && sel.r2 === rowCount - 1 && !(sel.c1 === 0 && sel.c2 === columnCount - 1);
+}
+
 function slice(columns: ColumnMeta[], rows: CellValue[][], sel: Selection | null) {
   if (!sel) return { cols: columns.map((_, i) => i), rows };
   const cols: number[] = [];

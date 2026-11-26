@@ -975,7 +975,7 @@ export function discardEdits(tabId: string): void {
   patchRun(tabId, { edits: undefined });
 }
 
-/** Tabs reading the schema again before Gerar UPDATE or Aplicar: a second click meanwhile does nothing. */
+/** Tabs reading the schema again before Gerar SQL or Aplicar: a second click meanwhile does nothing. */
 const preparingEdits = new Set<string>();
 
 const sameKey = (a: readonly KeyColumn[], b: readonly KeyColumn[]): boolean =>

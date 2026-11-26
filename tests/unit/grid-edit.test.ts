@@ -698,10 +698,14 @@ describe('insertability', () => {
     // part of a composite key is not the key
     expect(target([src('order_id', {}, 'items'), src('qty', {}, 'items')]).key).toBeNull();
     expect(target([src('order_id', {}, 'items'), src('line', {}, 'items'), src('qty', {}, 'items')]).key).toEqual([0, 1]);
+    // the whole key and nothing else: the variant would be all defaults, so it is not offered
+    expect(target([src('order_id', {}, 'items'), src('line', {}, 'items')]).key).toBeNull();
+    // a non-key column that cannot be written (generated) does not count
+    expect(target([src('id'), src('email', { generated: true })]).key).toBeNull();
     // the key columns anywhere in the result, and only the key is nothing to insert without it
     expect(target([src('qty', {}, 'items'), src('line', {}, 'items'), src('order_id', {}, 'items')]).key).toEqual([2, 1]);
-    // only the key: the variant without it is `() VALUES ()`, every column takes its default
-    expect(target([src('id')]).key).toEqual([0]);
+    // only the key: the variant without it would be all defaults, so it is not offered
+    expect(target([src('id')]).key).toBeNull();
     // the key of a table the grid cannot edit by (FLOAT, TIMESTAMP, NULL, repeated values) is still a key to leave out
     expect(target([src('v', {}, 'measures'), src('n', {}, 'measures')], [[1.5, 1], [1.5, 2]]).key).toEqual([0]);
     expect(target([src('sensor_id', {}, 'readings'), src('ts', {}, 'readings'), src('v', {}, 'readings')], [[1, '2026-01-01 00:00:00', '1.00']]).key).toEqual([0, 1]);
@@ -752,7 +756,11 @@ describe('Gerar INSERT: buildGridInsert', () => {
     expect(buildGridInsert(mysqlDialect, t, [row(0, [1, 'Ana', 'ANA', null])], false)).toEqual({
       sql: "INSERT INTO `app`.`people` (`name`, `avatar`) VALUES ('Ana', NULL)",
     });
-    const onlyKey = insertability(read([src('id')], []), schema, mysqlDialect.valueKind) as InsertTarget;
+    // a result with nothing but the key has no variant without it (it would be all defaults): no key to leave out
+    const keyOnly = insertability(read([src('id')], []), schema, mysqlDialect.valueKind) as InsertTarget;
+    expect(keyOnly.key).toBeNull();
+    // the builder itself still writes the all-defaults INSERT of a target that does name the key
+    const onlyKey: InsertTarget = { ...keyOnly, key: [0] };
     expect(buildGridInsert(mysqlDialect, onlyKey, [row(0, [1]), row(1, [2])], false)).toEqual({ sql: 'INSERT INTO `app`.`people` () VALUES\n  (),\n  ()' });
     expect(buildGridInsert(mysqlDialect, onlyKey, [row(0, [1])], false)).toEqual({ sql: 'INSERT INTO `app`.`people` () VALUES ()' });
     const noKey = { ...t, key: null };

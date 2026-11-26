@@ -168,6 +168,31 @@ describe('SessionManager.estimate', () => {
     release();
   });
 
+  it('a newer request that is itself skipped or refused still ends the one in flight', async () => {
+    for (const next of ['SELECT 1; SELECT 2', 'DROP TABLE x', '   ']) {
+      let release!: () => void;
+      session.hold = { promise: new Promise<void>((resolve) => (release = resolve)), resolve: () => release() };
+      const first = manager.estimate('t', 'SELECT 1');
+      await Promise.resolve();
+      await Promise.resolve();
+      const signal = session.signals[session.signals.length - 1]!;
+      await manager.estimate('t', next);
+      expect(signal.aborted, next).toBe(true);
+      expect(await first).toEqual({ state: 'skipped', reason: 'cancelled' });
+      release();
+    }
+    // the switch turned off: the next request is skipped as off, and the one in flight is still cancelled
+    let release!: () => void;
+    session.hold = { promise: new Promise<void>((resolve) => (release = resolve)), resolve: () => release() };
+    const first = manager.estimate('t', 'SELECT 1');
+    await Promise.resolve();
+    await Promise.resolve();
+    on = false;
+    expect(await manager.estimate('t', 'SELECT 1')).toEqual({ state: 'skipped', reason: 'off' });
+    expect(await first).toEqual({ state: 'skipped', reason: 'cancelled' });
+    release();
+  });
+
   it('a tab that is not connected, or does not exist, is skipped', async () => {
     await manager.disconnect('t');
     expect(await manager.estimate('t', 'SELECT 1')).toEqual({ state: 'skipped', reason: 'not-connected' });

@@ -8,6 +8,7 @@ interface Format {
   copyValueText: (value: CellValue) => string;
   isPartialBinary: (value: CellValue) => boolean;
   isSingleCell: (sel: Selection | null) => boolean;
+  isColumnSelection: (sel: Selection | null, rowCount: number, columnCount: number) => boolean;
   toMarkdown: (columns: ColumnMeta[], rows: CellValue[][], sel: Selection | null) => string;
   toDelimited: (columns: ColumnMeta[], rows: CellValue[][], sel: Selection | null, separator: '\t' | ',') => string;
 }
@@ -104,5 +105,19 @@ describe('Markdown table', () => {
   });
   it('no rows: only the header and the separator', () => {
     expect(f.toMarkdown(cols(['id', 'int']), [], null)).toBe('| id |\n| ---: |');
+  });
+});
+
+describe('isColumnSelection (the Delete key marks nothing over whole columns)', () => {
+  it('is every row of some columns, but not whole rows and not one cell', () => {
+    expect(f.isColumnSelection({ r1: 0, r2: 4, c1: 1, c2: 1 }, 5, 3)).toBe(true);
+    expect(f.isColumnSelection({ r1: 0, r2: 4, c1: 0, c2: 1 }, 5, 3)).toBe(true);
+    // Cmd+A, whole rows, a partial rectangle and a single cell keep marking the rows they cover
+    expect(f.isColumnSelection({ r1: 0, r2: 4, c1: 0, c2: 2 }, 5, 3)).toBe(false);
+    expect(f.isColumnSelection({ r1: 1, r2: 2, c1: 0, c2: 2 }, 5, 3)).toBe(false);
+    expect(f.isColumnSelection({ r1: 1, r2: 3, c1: 1, c2: 1 }, 5, 3)).toBe(false);
+    expect(f.isColumnSelection({ r1: 2, r2: 2, c1: 1, c2: 1 }, 5, 3)).toBe(false);
+    expect(f.isColumnSelection({ r1: 0, r2: 0, c1: 1, c2: 1 }, 1, 3)).toBe(false);
+    expect(f.isColumnSelection(null, 5, 3)).toBe(false);
   });
 });

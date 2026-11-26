@@ -149,7 +149,7 @@ export function gridEditability(
   // the key must be exactly the schema's key (a key that moved or shrank would make the WHERE match several
   // rows), and the server's type of each key column must be written the same way as the schema's (a key now
   // VARCHAR compared as a number matches '5', '05' and ' 5'). A key that grew by a column the query did not
-  // select does not show here: Gerar UPDATE and Aplicar read the schema again first.
+  // select does not show here: Gerar SQL and Aplicar read the schema again first.
   const pkNames = new Set(pk.map((k) => k.name.toLowerCase()));
   const stale =
     columns.some((c: ColumnMeta) => c.source && c.primaryKeyPart === true && !pkNames.has(c.source.column.toLowerCase())) ||
@@ -462,7 +462,7 @@ export interface InsertTarget {
   /**
    * Positions in `columns` of the primary key, for the variant without it. Null when that variant makes no sense or
    * cannot be known: the table has no key, the result lacks part of it, the server's flags disagree with the schema's
-   * key, or nothing but the key is selected.
+   * key, or the result holds no other column of the table (the INSERT would be all defaults).
    */
   key: number[] | null;
 }
@@ -524,8 +524,8 @@ export function insertability(
   const disagrees =
     columns.some((c) => c.source && c.primaryKeyPart === true && !pkNames.has(c.source.column.toLowerCase())) ||
     positions.some((p) => p !== -1 && columns[out[p]!.index]!.primaryKeyPart === false);
-  // a table that is only its key still has the variant: `INSERT INTO t () VALUES ()` takes every default
-  const key = pk.length === 0 || positions.includes(-1) || disagrees ? null : positions;
+  // the variant needs a column besides the key: without one the INSERT would be all defaults (`() VALUES ()`)
+  const key = pk.length === 0 || positions.includes(-1) || disagrees || out.length <= positions.length ? null : positions;
   return { insertable: true, database: source.database, table: source.table, columns: out, omitted, key };
 }
 
