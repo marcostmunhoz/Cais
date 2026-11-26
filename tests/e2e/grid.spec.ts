@@ -325,3 +325,83 @@ test('the cell editor opens in view from the keyboard and keeps its text while s
   await expect(bar()).toContainText('2 alterações em 2 linhas');
   await page.getByTestId('edit-discard').click();
 });
+
+test('Cmd/Ctrl+C on one cell copies the raw value: NULL, JSON as sent, a cut binary with a notice', async () => {
+  const clipboardText = () => app.evaluate(({ clipboard }) => clipboard.readText());
+  // what the Edit > Copy menu role (Cmd/Ctrl+C) does: copy on the window's focused element, here the grid
+  const copyShortcut = () =>
+    app.evaluate(({ BrowserWindow }) => {
+      (BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0])?.webContents.copy();
+    });
+  await run(`SELECT NULL AS n, CAST('{"a": 1}' AS JSON) AS j, CAST(REPEAT('a', 300) AS BINARY) AS b, 'x' AS t;`);
+  await expect(cell(0, 't')).toHaveText('x', { timeout: 20_000 });
+
+  await cell(0, 'n').click();
+  await copyShortcut();
+  await expect.poll(clipboardText).toBe('NULL');
+
+  // JSON is not quoted like a TSV field: it is the text the server sent
+  await cell(0, 'j').click();
+  await copyShortcut();
+  await expect.poll(clipboardText).toBe('{"a": 1}');
+  await expect(page.getByTestId('grid-hint')).toHaveCount(0);
+
+  // a binary the driver cut (256 of 300 bytes) is copied as shown, and the grid says it is partial
+  await cell(0, 'b').click();
+  await copyShortcut();
+  await expect.poll(clipboardText).toBe(`0x${'61'.repeat(256)}…`);
+  await expect(page.getByTestId('grid-hint')).toHaveText('Cópia parcial do binário: (300 bytes, mostrando os primeiros 256)');
+
+  // the notice goes away with the selection
+  await cell(0, 't').click();
+  await expect(page.getByTestId('grid-hint')).toHaveCount(0);
+
+  // the same cut binary through the cell menu: same text, same notice
+  await app.evaluate(({ clipboard }) => clipboard.writeText('antes'));
+  await cell(0, 'b').click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Copiar valor' }).click();
+  await expect.poll(clipboardText).toBe(`0x${'61'.repeat(256)}…`);
+  await expect(page.getByTestId('grid-hint')).toHaveText('Cópia parcial do binário: (300 bytes, mostrando os primeiros 256)');
+});
+
+test('copy uses pending edits, and the cell editor keeps its own text selection', async () => {
+  const clipboardText = () => app.evaluate(({ clipboard }) => clipboard.readText());
+  const copyShortcut = () =>
+    app.evaluate(({ BrowserWindow }) => {
+      (BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0])?.webContents.copy();
+    });
+  await run(READ);
+  await expect(cell(0, 'name')).toBeVisible({ timeout: 20_000 });
+  await expect(bar()).toHaveCount(0);
+
+  // copying inside the open cell editor copies the input's selection, not the cell's stored value
+  await cell(0, 'name').dblclick();
+  await expect(editor()).toBeVisible();
+  await editor().fill('abc def');
+  await editor().selectText();
+  await copyShortcut();
+  await expect.poll(clipboardText).toBe('abc def');
+  await editor().press('Escape');
+  await expect(editor()).toHaveCount(0);
+  await expect(bar()).toHaveCount(0);
+
+  // a pending edit is what Cmd/Ctrl+C and the menus copy
+  await editCell(0, 'name', 'Nome | novo');
+  await cell(0, 'name').click();
+  await copyShortcut();
+  await expect.poll(clipboardText).toBe('Nome | novo');
+  await cell(0, 'name').click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Copiar como tabela Markdown' }).click();
+  await expect.poll(clipboardText).toBe('| name |\n| --- |\n| Nome \\| novo |');
+
+  // a pending NULL copies as the word NULL
+  await cell(0, 'note').click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Definir como NULL' }).click();
+  await expect(cell(0, 'note')).toHaveText('NULL');
+  await cell(0, 'note').click();
+  await copyShortcut();
+  await expect.poll(clipboardText).toBe('NULL');
+
+  await page.getByTestId('edit-discard').click();
+  await expect(bar()).toHaveCount(0);
+});

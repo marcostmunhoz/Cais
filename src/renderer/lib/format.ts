@@ -45,6 +45,20 @@ export function cellText(value: CellValue): string {
   return String(value);
 }
 
+/** True when the driver cut a binary value (it sends the first 256 bytes and the full length). */
+export function isPartialBinary(value: CellValue): value is { kind: 'binary'; hex: string; length: number } {
+  return value !== null && typeof value === 'object' && value.hex.length / 2 < value.length;
+}
+
+/**
+ * What "copy value" puts on the clipboard for one cell: the value as the server sent it, with no quoting
+ * (JSON stays as it came, a multi-line text keeps its line breaks). NULL is the word `NULL`, so it differs from an
+ * empty string. A binary value is `0x...`, followed by `…` when the driver cut it.
+ */
+export function copyValueText(value: CellValue): string {
+  return value === null ? 'NULL' : cellText(value);
+}
+
 export function displayCell(value: CellValue): string {
   if (value === null) return 'NULL';
   return cellText(value);
@@ -59,6 +73,11 @@ export interface Selection {
   c1: number;
   r2: number;
   c2: number;
+}
+
+/** A selection of exactly one cell (a whole column of a one-row result counts too). */
+export function isSingleCell(sel: Selection | null): boolean {
+  return sel !== null && sel.r1 === sel.r2 && sel.c1 === sel.c2;
 }
 
 function slice(columns: ColumnMeta[], rows: CellValue[][], sel: Selection | null) {
@@ -78,6 +97,29 @@ export function toDelimited(
   const lines = [part.cols.map((c) => quoteField(columns[c]!.name, separator)).join(separator)];
   for (const row of part.rows) {
     lines.push(part.cols.map((c) => quoteField(cellText(row[c] ?? null), separator)).join(separator));
+  }
+  return lines.join('\n');
+}
+
+/** Cell text for a Markdown table: `\` and `|` escaped (in that order), line breaks as `<br>`, tabs as spaces. */
+function markdownCell(text: string): string {
+  return text.replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\r\n|\r|\n/g, '<br>').replace(/\t/g, ' ');
+}
+
+/**
+ * A GitHub-flavoured Markdown table of the selection (the whole result when nothing is selected). The header is the
+ * column names, numeric columns are right-aligned (`---:`), NULL is `NULL` and there is no padding or truncation.
+ * Every `|` that separates cells has a space before it, so a cell that ends in a backslash cannot be read as an escaped pipe.
+ */
+export function toMarkdown(columns: ColumnMeta[], rows: CellValue[][], sel: Selection | null): string {
+  const part = slice(columns, rows, sel);
+  const line = (cells: string[]): string => `| ${cells.join(' | ')} |`;
+  const lines = [
+    line(part.cols.map((c) => markdownCell(columns[c]!.name))),
+    line(part.cols.map((c) => (isNumericType(columns[c]!.type) ? '---:' : '---'))),
+  ];
+  for (const row of part.rows) {
+    lines.push(line(part.cols.map((c) => markdownCell(copyValueText(row[c] ?? null)))));
   }
   return lines.join('\n');
 }

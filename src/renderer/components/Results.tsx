@@ -17,12 +17,16 @@ import {
 } from '../lib/actions';
 import { m, render } from '../lib/i18n';
 import {
+  copyValueText,
   displayCell,
   formatDuration,
   isNumericType,
+  isPartialBinary,
+  isSingleCell,
   prettyJson,
   toDelimited,
   toJson,
+  toMarkdown,
   type Selection,
 } from '../lib/format';
 import { useStore } from '../lib/store';
@@ -567,12 +571,22 @@ export function Results({ tabId }: { tabId: string }) {
     };
     navigator.clipboard.writeText(text).catch(fallback);
   };
+  // "Copy value" (one cell): the raw value, no header. A binary the driver cut copies with its `…` and says so.
+  const copyValue = (): string => {
+    const value = (sel && shownRows[sel.r1]?.[sel.c1]) ?? null;
+    if (isPartialBinary(value)) {
+      setHint(`${m().results.copyPartial} ${m().results.bytesPartial({ length: value.length, shown: value.hex.length / 2 })}`);
+    }
+    return copyValueText(value);
+  };
   const copyEntries = (): MenuEntry[] =>
     columns
       ? [
+          ...(isSingleCell(sel) ? [{ label: m().results.copyValue, onSelect: () => write(copyValue()) }] : []),
           { label: m().results.copyTsv, onSelect: () => write(toDelimited(columns, shownRows, sel, '\t')) },
           { label: m().results.copyCsv, onSelect: () => write(toDelimited(columns, shownRows, sel, ',')) },
           { label: m().results.copyJson, onSelect: () => write(toJson(columns, shownRows, sel)) },
+          { label: m().results.copyMarkdown, onSelect: () => write(toMarkdown(columns, shownRows, sel)) },
         ]
       : [];
   const menuEntries = (cell?: Cell): MenuEntry[] => {
@@ -690,7 +704,7 @@ export function Results({ tabId }: { tabId: string }) {
               }}
               onCopy={(e) => {
                 e.preventDefault();
-                e.clipboardData.setData('text/plain', toDelimited(columns, shownRows, sel, '\t'));
+                e.clipboardData.setData('text/plain', isSingleCell(sel) ? copyValue() : toDelimited(columns, shownRows, sel, '\t'));
               }}
             />
           )}

@@ -118,12 +118,49 @@ test('dev: query shows rows in the grid; screenshots light and dark', async () =
   await page.locator('[role=gridcell][data-r="0"][data-c="3"]').click();
   await expect(page.getByTestId('cell-panel')).toContainText('Café Aurora Ltda');
 
+  const clipboardText = () => app.evaluate(({ clipboard }) => clipboard.readText());
+  // What the Edit > Copy menu role (Cmd/Ctrl+C) does: copy on the window's focused element, here the grid
+  const copyShortcut = () =>
+    app.evaluate(({ BrowserWindow }) => {
+      (BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0])?.webContents.copy();
+    });
+
   // Copiar as CSV copies the selection (one cell here) with its header
   await page.getByRole('button', { name: /Copiar/ }).click();
   await page.getByRole('menuitem', { name: 'Copiar como CSV' }).click();
-  await expect
-    .poll(() => app.evaluate(({ clipboard }) => clipboard.readText()))
-    .toBe('name\nCafé Aurora Ltda');
+  await expect.poll(clipboardText).toBe('name\nCafé Aurora Ltda');
+
+  // Cmd/Ctrl+C on one cell copies the raw value, with no header
+  await page.locator('[role=gridcell][data-r="0"][data-c="3"]').click();
+  await copyShortcut();
+  await expect.poll(clipboardText).toBe('Café Aurora Ltda');
+
+  // Copiar valor, from the Copy button and from the cell's context menu
+  await page.getByRole('button', { name: /Copiar/ }).click();
+  await page.getByRole('menuitem', { name: 'Copiar valor' }).click();
+  await expect.poll(clipboardText).toBe('Café Aurora Ltda');
+  await page.getByRole('button', { name: /Copiar/ }).click();
+  await page.getByRole('menuitem', { name: 'Copiar como tabela Markdown' }).click();
+  await expect.poll(clipboardText).toBe('| name |\n| --- |\n| Café Aurora Ltda |');
+  await page.locator('[role=gridcell][data-r="1"][data-c="3"]').click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Copiar valor' }).click();
+  await expect.poll(clipboardText).toBe(await page.locator('[role=gridcell][data-r="1"][data-c="3"]').innerText());
+
+  // A numeric column is right-aligned in the Markdown table
+  await page.locator('[role=gridcell][data-r="0"][data-c="0"]').click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Copiar como tabela Markdown' }).click();
+  await expect.poll(clipboardText).toMatch(/^\| id \|\n\| ---: \|\n\| \d+ \|$/);
+
+  // A range keeps the TSV with header on Cmd/Ctrl+C and has no "Copiar valor"
+  await page.locator('[role=gridcell][data-r="0"][data-c="0"]').click();
+  await page.locator('[role=gridcell][data-r="1"][data-c="1"]').click({ modifiers: ['Shift'] });
+  await copyShortcut();
+  await expect.poll(clipboardText).toMatch(/^id\tstatus\n\d+\t.+\n\d+\t.+$/);
+  await page.getByRole('button', { name: /Copiar/ }).click();
+  await expect(page.getByRole('menuitem', { name: 'Copiar valor' })).toHaveCount(0);
+  await page.getByRole('menuitem', { name: 'Copiar como tabela Markdown' }).click();
+  await expect.poll(clipboardText).toMatch(/^\| id \| status \|\n\| ---: \| --- \|\n\| \d+ \| .+ \|\n\| \d+ \| .+ \|$/);
+  await page.locator('[role=gridcell][data-r="0"][data-c="3"]').click();
 
   await setTheme('light');
   await page.screenshot({ path: join(shots, 'main-light.png') });

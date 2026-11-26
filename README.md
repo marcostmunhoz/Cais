@@ -12,7 +12,7 @@ Cais é um cliente SQL de desktop para MySQL e, só para leitura, BigQuery, feit
 - **Sessão por aba em três modos (MySQL):** Somente leitura, Transação e Auto-commit. Produção abre em Somente leitura, Auto-commit em produção pede confirmação, e fechar uma aba com transação aberta pergunta antes (com Rollback como padrão).
 - **Somente leitura de verdade**, em duas camadas: uma lista do que é permitido no app e, no MySQL, a sessão em `READ ONLY` no servidor, reafirmada antes de cada comando (no BigQuery, um dry run que só deixa passar `SELECT`).
 - **Editor SQL** (CodeMirror 6) com realce do MySQL ou do GoogleSQL e autocomplete de palavras-chave, bancos, tabelas, colunas e apelidos.
-- **Resultados em grade virtualizada**: até 1.000 linhas por comando, com "Buscar até 50.000", cancelamento pelo servidor (`KILL QUERY` no MySQL), painel com o valor completo da célula e cópia em TSV, CSV ou JSON.
+- **Resultados em grade virtualizada**: até 1.000 linhas por comando, com "Buscar até 50.000", cancelamento pelo servidor (`KILL QUERY` no MySQL), painel com o valor completo da célula e cópia do valor, em TSV, CSV, JSON ou tabela Markdown.
 - **Edição na grade**: altere células de um resultado de uma tabela com a chave primária inteira e gere o `UPDATE` equivalente ou aplique na própria aba, respeitando o modo da sessão.
 - **Estado da conexão em cada aba** (desconectado, conectando, conectado, executando, erro), com Conectar, Reconectar e Desconectar, e desconexão por inatividade depois de 30 minutos (nunca com transação aberta).
 - **Scripts salvos por projeto**, listados dentro de cada ambiente do projeto, com botão Salvar, Cmd+S e seletor por Cmd+O.

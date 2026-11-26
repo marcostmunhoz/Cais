@@ -23,9 +23,12 @@ export const ptBR = {
   bytesPartial: (p: { length: number; shown: number }) => `(${f.formatNumber(p.length)} bytes, mostrando os primeiros ${p.shown})`,
   cellValue: 'Valor da célula',
   value: 'Valor',
+  copyValue: 'Copiar valor',
   copyTsv: 'Copiar (TSV, com cabeçalho)',
   copyCsv: 'Copiar como CSV',
   copyJson: 'Copiar como JSON',
+  copyMarkdown: 'Copiar como tabela Markdown',
+  copyPartial: 'Cópia parcial do binário:',
   connecting: 'Conectando ao ambiente…',
   /** Same text main uses for the `no-statement` refusal, shown as a placeholder. */
   noStatement: 'Nenhum comando sob o cursor.',
