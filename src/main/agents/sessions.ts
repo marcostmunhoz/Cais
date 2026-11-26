@@ -130,7 +130,7 @@ function connectionFailure(error: unknown, environment: Environment): AgentError
   if (error instanceof AgentError) return error;
   if (error instanceof DriverError) {
     const code = error.info.code && /^[A-Za-z0-9_]+$/.test(error.info.code) ? error.info.code : undefined;
-    // the person reads it in the app locale, the agent in pt-BR: each with its own redaction placeholders
+    // the person reads it in the app locale, the agent in English: each with its own redaction placeholders
     const login = error.info.errno === 1045;
     const forPerson = login ? m().agentsUi.error.loginRefused : redactForAgent(error.message, environment, getLocale());
     const forAgent = login ? renderRef(ref('agentsUi.error.loginRefused'), AGENT_LOCALE) : redactForAgent(agentText(error), environment);
@@ -518,7 +518,7 @@ export class AgentSessions implements AgentExecutor {
   async runWrite(environment: Environment, args: RunArgs): Promise<WriteRun> {
     // the broker refuses first; this is the last door: an engine that has no transaction mode never opens a write
     if (!capabilitiesOf(environment.engine).modes.includes('transaction')) {
-      throw new AgentError('Este motor só lê nesta versão: escrita de agente não é aceita.', 'engine_read_only');
+      throw new AgentError('This engine is read-only in this version: agent writes are not accepted.', 'engine_read_only');
     }
     const epoch = this.epoch;
     const params = await this.params(environment, args.database);

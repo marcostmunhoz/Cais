@@ -43,13 +43,14 @@ describe('BigQuery errors', () => {
     expect(info.hint).toContain('roles/bigquery.dataViewer');
   });
 
-  it('a gcloud failure while renewing the token keeps its code and the reference agents read in pt-BR', () => {
+  it('a gcloud failure while renewing the token keeps its code and the reference agents read in English', () => {
     setLocale('en');
     const info = mapBigqueryError(CaisError.of(ref('mainMisc.gcloud.reauth', { account: 'a@b.c' }), 'gcloud-reauth'), { cancelled: false });
     expect(info.code).toBe('gcloud-reauth');
     expect(info.ref).toEqual(ref('mainMisc.gcloud.reauth', { account: 'a@b.c' }));
     expect(info.message).toMatch(/sign in again/);
-    expect(renderRef(info.ref!, AGENT_LOCALE)).toMatch(/precisa entrar de novo/);
+    expect(renderRef(info.ref!, AGENT_LOCALE)).toMatch(/sign in again/);
+    expect(renderRef(info.ref!, 'pt-BR')).toMatch(/precisa entrar de novo/);
   });
 
   it('what quotes the server text is marked, so an agent is not given it without the result being shared', () => {
@@ -94,11 +95,12 @@ describe('BigQuery errors', () => {
     expect(mapBigqueryError(new DriverError('m', inner), { cancelled: false })).toBe(inner);
   });
 
-  it('follows the app locale, and agents read pt-BR through the ref', () => {
+  it('follows the app locale, and agents read English through the ref', () => {
     setLocale('en');
     const info = api(403, 'accessDenied');
     expect(info.message).toContain('BigQuery denied access');
-    expect(renderRef(info.ref!, AGENT_LOCALE)).toContain('O BigQuery negou o acesso');
+    expect(renderRef(info.ref!, AGENT_LOCALE)).toContain('BigQuery denied access');
+    expect(renderRef(info.ref!, 'pt-BR')).toContain('O BigQuery negou o acesso');
     expect(mapBigqueryError(new BigqueryNetworkError(), { cancelled: false }).message).toContain('No response from bigquery.googleapis.com');
   });
 });

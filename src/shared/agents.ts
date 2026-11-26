@@ -91,9 +91,9 @@ export interface AgentRequestView {
   decidedAt?: number;
   /** Write in a free-reads-writes environment: the Cais commits by itself when nothing calls for the person. */
   autoCommit?: boolean;
-  /** Why a request that the environment's level would let run is waiting for the person (app locale; the agent gets pt-BR). */
+  /** Why a request that the environment's level would let run is waiting for the person (app locale; the agent gets English). */
   approvalReason?: string;
-  /** Why an autonomous write did not commit by itself and waits for the second decision (app locale; the agent gets pt-BR). */
+  /** Why an autonomous write did not commit by itself and waits for the second decision (app locale; the agent gets English). */
   commitReason?: string;
   /** Who made the second decision of a write (Commit/Rollback); 'policy' is the automatic commit. */
   secondDecidedBy?: 'user' | 'timeout' | 'shutdown' | 'policy';

@@ -6,7 +6,7 @@
  *   once per process (`setLocale`) by main (`src/main/i18n.ts`) and by the renderer (`src/renderer/lib/i18n.ts`);
  *   it stays pt-BR when nobody sets it (unit tests).
  * - `MessageRef` carries text that two audiences read: `renderRef(ref, locale)` renders it for the person in the
- *   app locale and for agents in `AGENT_LOCALE` (pt-BR, fixed).
+ *   app locale and for agents in `AGENT_LOCALE` (English, fixed).
  */
 import { createFormat, type Format, type Locale, type Shape } from './core';
 import { ptBR as commonPtBR } from './areas/common/pt-BR';
@@ -180,7 +180,7 @@ export function createI18n(locale: Locale): I18n {
 // --- message references ---
 
 /**
- * A message rendered later, possibly twice (person in the app locale, agent in pt-BR). Plain data, safe to send
+ * A message rendered later, possibly twice (person in the app locale, agent in English). Plain data, safe to send
  * over IPC or store: `key` is `'<area>.<path>.<entry>'`, `params` goes to the entry's function.
  */
 export interface MessageRef {

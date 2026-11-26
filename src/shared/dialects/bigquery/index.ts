@@ -18,10 +18,10 @@ const agentRules: AgentRules = {
   isValidDatabaseName: (name) => DATASET_NAME.test(name),
   isUnknownFunction: isUnknownUnqualifiedFunction,
   messages: {
-    systemSchemaWrite: 'Agentes não escrevem no INFORMATION_SCHEMA.',
-    systemSchemaRead: 'Agentes não leem esse esquema.',
+    systemSchemaWrite: 'Agents do not write to INFORMATION_SCHEMA.',
+    systemSchemaRead: 'Agents do not read this schema.',
     jobsMetadata:
-      'Agentes não leem INFORMATION_SCHEMA.JOBS* nem SESSIONS*: essas visões mostram o SQL de outras pessoas do projeto.',
+      'Agents do not read INFORMATION_SCHEMA.JOBS* or SESSIONS*: those views show the SQL of other people in the project.',
   },
 };
 

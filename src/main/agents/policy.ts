@@ -54,28 +54,28 @@ export interface DecideInput {
 }
 
 /**
- * Refusals sent to the agent (CLI) only, never shown to the person: fixed pt-BR whatever the app locale.
+ * Refusals sent to the agent (CLI) only, never shown to the person: fixed English whatever the app locale.
  * The trail keeps only the code.
  */
 export const MESSAGES = {
-  empty: 'Não há nenhum comando para executar.',
-  writes: 'Este SQL escreve. Peça com --write.',
-  ddl: 'Agentes não rodam DDL nem controlam transação.',
-  notAllowed: 'Este comando não é permitido para agentes.',
-  reason: 'Este pedido precisa de aprovação. Informe o motivo com --reason.',
-  reasonWrite: 'Escrita sempre leva motivo, que fica na trilha. Informe com --reason.',
-  queue: `Há ${MAX_PENDING} pedidos aguardando aprovação. Espere a pessoa decidir.`,
-  executableComment: 'Agentes não usam comentários executáveis (/*! … */ ou /*M! … */): o servidor pode rodar outra coisa do que a pessoa vê.',
+  empty: 'There is no statement to run.',
+  writes: 'This SQL writes. Ask with --write.',
+  ddl: 'Agents do not run DDL or control transactions.',
+  notAllowed: 'This statement is not allowed for agents.',
+  reason: 'This request needs approval. Give the reason with --reason.',
+  reasonWrite: 'A write always needs a reason, which goes in the Trail. Give it with --reason.',
+  queue: `There are ${MAX_PENDING} requests waiting for approval. Wait for the person to decide.`,
+  executableComment: 'Agents do not use executable comments (/*! … */ or /*M! … */): the server may run something other than what the person sees.',
   functionNotAllowed: (name: string): string =>
-    `A função ${name} não é permitida para agentes (lock nomeado, espera, arquivo do servidor ou estado do servidor).`,
+    `The function ${name} is not allowed for agents (named lock, wait, server file or server state).`,
   legacyDirective:
-    'Agentes não usam as diretivas #legacySQL e #standardSQL: elas mudam a linguagem em que o servidor lê o comando, e a pessoa revisa outra coisa.',
-  externalQuery: 'A função EXTERNAL_QUERY não é permitida para agentes: ela roda uma consulta em outro banco.',
+    'Agents do not use the #legacySQL and #standardSQL directives: they change the language the server reads the statement in, and the person reviews something else.',
+  externalQuery: 'The EXTERNAL_QUERY function is not allowed for agents: it runs a query on another database.',
   serverNotQuery: (kind?: string): string =>
     kind && /^[A-Z_]{1,40}$/.test(kind)
-      ? `O servidor leu este comando como ${kind}, não como consulta (SELECT): agentes só leem neste ambiente.`
-      : 'O servidor não disse que este comando é uma consulta (SELECT): nada roda sem isso.',
-  hint: 'Agentes não usam hints que mudam variáveis de sessão (SET_VAR, MAX_EXECUTION_TIME).',
+      ? `The server read this statement as ${kind}, not as a query (SELECT): agents only read in this environment.`
+      : 'The server did not say this statement is a query (SELECT): nothing runs without that.',
+  hint: 'Agents do not use hints that change session variables (SET_VAR, MAX_EXECUTION_TIME).',
 } as const;
 
 /** DDL, anything with an implicit commit, and transaction control: never for agents, in any mode. */

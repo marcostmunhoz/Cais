@@ -206,9 +206,9 @@ export class AgentServer {
     });
   }
 
-  // Replies to the CLI are agent-facing: their text is fixed pt-BR whatever the app locale.
+  // Replies to the CLI are agent-facing: their text is fixed English whatever the app locale.
   private tooLarge(socket: net.Socket): void {
-    const reply = { id: null, ok: false, protocol: AGENT_PROTOCOL, error: { code: 'message_too_large', message: 'A mensagem passa de 1 MB.' } };
+    const reply = { id: null, ok: false, protocol: AGENT_PROTOCOL, error: { code: 'message_too_large', message: 'The message is over 1 MB.' } };
     socket.end(JSON.stringify(reply) + '\n');
   }
 
@@ -219,12 +219,12 @@ export class AgentServer {
       try {
         raw = JSON.parse(line);
       } catch {
-        throw new AgentError('A mensagem não é um JSON válido.', 'invalid_json');
+        throw new AgentError('The message is not valid JSON.', 'invalid_json');
       }
       const env = envelope.parse(raw);
       id = env.id;
       const method = env.method as Method;
-      if (!Object.hasOwn(schemas, method)) throw new AgentError('Método desconhecido.', 'unknown_method');
+      if (!Object.hasOwn(schemas, method)) throw new AgentError('Unknown method.', 'unknown_method');
       const params = schemas[method].parse(env.params ?? {}) as Record<string, never>;
       const result = await this.dispatch(method, params, signal);
       return { id, ok: true, protocol: AGENT_PROTOCOL, result };
@@ -236,7 +236,7 @@ export class AgentServer {
           protocol: AGENT_PROTOCOL,
           error: {
             code: 'invalid_params',
-            message: 'Os parâmetros do pedido são inválidos.',
+            message: 'The request parameters are invalid.',
             fields: error.issues.map((i) => ({ path: i.path.join('.'), message: i.message })),
           },
         };
@@ -246,12 +246,12 @@ export class AgentServer {
           id,
           ok: false,
           protocol: AGENT_PROTOCOL,
-          // the agent reads fixed pt-BR whatever the app locale
+          // the agent reads fixed English whatever the app locale
           error: { code: error.code, message: agentText(error), ...(error.fields ? { fields: error.fields } : {}) },
         };
       }
       this.deps.log?.(`agent request failed: ${error instanceof Error ? error.message : String(error)}`);
-      return { id, ok: false, protocol: AGENT_PROTOCOL, error: { code: 'internal_error', message: 'Erro interno do Cais.' } };
+      return { id, ok: false, protocol: AGENT_PROTOCOL, error: { code: 'internal_error', message: 'Internal Cais error.' } };
     }
   }
 

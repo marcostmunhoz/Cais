@@ -192,7 +192,7 @@ describe('broker: script-save follows the agent write policy', () => {
     for (const sql of ['SELECT 1;\n\n\n\nSELECT 2;', 'SELECT 1;\n  \n\t\n \nSELECT 2;', 'SELECT 1;\r\n\r\n\r\n\r\nSELECT 2;', `SELECT 1;${'\n'.repeat(300)}DELETE FROM t WHERE id = 1;`]) {
       const e = await refused(h.broker.scriptSave({ project: 'api', name: `many${sql.length}`, sql }));
       expect(e.code, JSON.stringify(sql.slice(0, 30))).toBe('invalid_script');
-      expect(e.message).toContain('linhas em branco');
+      expect(e.message).toContain('too many blank lines');
     }
     expect(h.scripts.map((s) => s.name)).toEqual(['two', 'two-crlf']);
   });

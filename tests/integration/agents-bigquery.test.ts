@@ -180,7 +180,7 @@ describe('what waits for the person whatever the level says', () => {
     const res = await q({ env: 'api/bq', sql: 'SELECT sales.my_remote_fn(id) FROM orders', reason: 'conferir' });
     expect(res.status).toBe('pending_approval');
     expect(res.approval_reason).toContain('SALES.MY_REMOTE_FN');
-    expect(res.approval_reason).toContain('função remota');
+    expect(res.approval_reason).toContain('remote function');
     expect(fake.realQueries).toHaveLength(0);
     const done = await approveAndWait(res.request_id);
     expect(done.status).toBe('succeeded');
@@ -195,7 +195,7 @@ describe('what waits for the person whatever the level says', () => {
     ]) {
       const res = await q({ env: 'api/bq', sql, reason: 'testar' });
       expect(res.status, sql).toBe('pending_approval');
-      expect(res.approval_reason, sql).toContain('IA generativa');
+      expect(res.approval_reason, sql).toContain('generative AI');
     }
     expect(fake.realQueries).toHaveLength(0);
   });
@@ -311,7 +311,7 @@ describe('big reads', () => {
     fake.bytesFor = () => 3 * GIB;
     const res = await q({ env: 'api/low', sql: 'SELECT id FROM orders', reason: 'total' });
     expect(res.status).toBe('pending_approval');
-    expect(res.approval_reason).toContain('limite');
+    expect(res.approval_reason).toContain('limit');
     const done = await approveAndWait(res.request_id);
     expect(done.status).toBe('succeeded');
     // approved over the limit: the ceiling is the approved estimate, rounded up to the GiB
@@ -321,7 +321,7 @@ describe('big reads', () => {
   it('above a limit that is higher than 10 GiB the reason is the environment limit', async () => {
     fake.bytesFor = () => 150 * GIB;
     const res = await q({ env: 'api/bq', sql: 'SELECT id FROM orders', reason: 'total' });
-    expect(res.approval_reason).toContain('limite');
+    expect(res.approval_reason).toContain('limit');
   });
 
   it('a 15-minute grant does not cover a big read, and covers the small ones', async () => {
@@ -352,7 +352,7 @@ describe('big reads', () => {
     const done = await approveAndWait(res.request_id);
     expect(done.status).toBe('failed');
     expect(done.error.code).toBe('bytes_over_approved');
-    expect(done.error.message).toContain('Peça de novo');
+    expect(done.error.message).toContain('Ask again');
     expect(fake.realQueries).toHaveLength(0);
     expect(done.results[0].error.code).toBe('bytes_over_approved');
   });

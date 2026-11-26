@@ -108,7 +108,7 @@ export function commentFacts(text: string): CommentFacts {
  * - a non-ASCII name right after @ (user variable) or right before "(" (function), even quoted;
  * - "/*" inside a block comment: MySQL ends the comment at the first "*\/", the review highlighter nests.
  * Looked at under both string rules. The text goes to the agent that sent the SQL, so it is in `AGENT_LOCALE`
- * (pt-BR, fixed) unless another locale is asked for.
+ * (English, fixed) unless another locale is asked for.
  */
 export function agentCodeProblem(text: string, locale: Locale = AGENT_LOCALE): string | null {
   const msg = messagesFor(locale).dialect.agentCode;

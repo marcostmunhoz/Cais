@@ -12,7 +12,7 @@ import { columnMeta, toCell, type FieldLike } from './values';
 
 const SERVER_STATUS_IN_TRANS = 0x0001;
 const SERVER_STATUS_AUTOCOMMIT = 0x0002;
-// built where they are used, so the text follows the app locale; the ref lets agents read them in pt-BR
+// built where they are used, so the text follows the app locale; the ref lets agents read them in English
 const lostError = (): DbSessionError => ({ message: m().mainMisc.driver.lost, ref: ref('mainMisc.driver.lost'), fatal: true });
 const cancelledError = (): DbSessionError => ({
   message: m().mainMisc.driver.cancelled,

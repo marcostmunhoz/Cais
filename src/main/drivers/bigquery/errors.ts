@@ -44,7 +44,7 @@ function friendly(reference: MessageRef, base: DbSessionError, original: string,
 
 /**
  * Translates a BigQuery failure into a message of the catalogs (app locale, plus the reference agents render in
- * pt-BR), keeping BigQuery's own text as `detail`. The reason stays as the error code.
+ * English), keeping BigQuery's own text as `detail`. The reason stays as the error code.
  */
 export function mapBigqueryError(error: unknown, ctx: ErrorContext): DbSessionError {
   if (error instanceof DriverError) return error.info;
@@ -56,7 +56,7 @@ export function mapBigqueryError(error: unknown, ctx: ErrorContext): DbSessionEr
     return friendly(ref('mainMisc.driver.cancelled'), { message: m().mainMisc.driver.cancelled, code: 'CANCELLED' }, 'aborted');
   }
   if (error instanceof CaisError) {
-    // gcloud could not give a new token (reauth...): keep the code and the reference agents read in pt-BR
+    // gcloud could not give a new token (reauth...): keep the code and the reference agents read in English
     return { message: error.message, ...(error.code ? { code: error.code } : {}), ...(error.ref ? { ref: error.ref } : {}) };
   }
   if (!(error instanceof BigqueryApiError)) {

@@ -33,14 +33,14 @@ export function send(socketPath: string, method: string, params: Record<string, 
       try {
         msg = JSON.parse(buffer.slice(0, newline));
       } catch {
-        return done({ kind: 'error', code: 'bad_reply', message: 'O Cais respondeu algo que não é JSON.' });
+        return done({ kind: 'error', code: 'bad_reply', message: 'Cais replied with something that is not JSON.' });
       }
       if (msg.protocol !== PROTOCOL) return done({ kind: 'protocol' });
       if (msg.ok) return done({ kind: 'ok', result: msg.result ?? {} });
       done({
         kind: 'error',
         code: msg.error?.code ?? 'error',
-        message: msg.error?.message ?? 'Erro desconhecido.',
+        message: msg.error?.message ?? 'Unknown error.',
         ...(msg.error?.fields !== undefined ? { fields: msg.error.fields } : {}),
       });
     });

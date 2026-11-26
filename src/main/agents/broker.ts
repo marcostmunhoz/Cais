@@ -92,7 +92,7 @@ interface Rec {
   shareResult: boolean;
   /** Typed by the person: never translated. */
   rejectionReason?: string;
-  /** Written by the Cais (the environment changed): the person reads it in the app locale, the agent in pt-BR. */
+  /** Written by the Cais (the environment changed): the person reads it in the app locale, the agent in English. */
   rejectionRef?: MessageRef;
   rollbackReason?: RollbackReason;
   rollbackIncomplete?: boolean;
@@ -119,7 +119,7 @@ interface Rec {
   commitReason?: MessageRef;
 }
 
-// Text for the agent: AgentError built from a plain string is fixed pt-BR (only agents read it); text
+// Text for the agent: AgentError built from a plain string is fixed English (only agents read it); text
 // the person may also read is a MessageRef (app locale for the person, AGENT_LOCALE for the agent).
 
 const DEFAULT_WAIT_S = 600;
@@ -133,7 +133,7 @@ const fold = (text: string): string => text.normalize('NFC').replace(/[A-Z]/g, (
 /** Names (database, table) that go into a trail label or a modal are cut here; the dialect refuses a longer --database before. */
 const MAX_LABEL_NAME = 64;
 
-/** SQL from an agent that cannot be shown honestly to the person: refused before classification (agent-facing, pt-BR). */
+/** SQL from an agent that cannot be shown honestly to the person: refused before classification (agent-facing, English). */
 function agentSqlProblem(sql: string, dialect: Dialect): { code: string; message: string } | null {
   const hidden = hiddenTextProblem(sql, AGENT_LOCALE);
   if (hidden) return { code: 'hidden_text', message: hidden };
@@ -232,8 +232,8 @@ export class AgentBroker {
     const lower = fold(ref.trim());
     const matches = envs.filter((e) => fold(this.slugOf(e)) === lower);
     if (matches.length === 1) return matches[0]!;
-    if (matches.length > 1) throw new AgentError('Mais de um ambiente com esse nome. Use o id.', 'env_ambiguous');
-    throw new AgentError('Ambiente não encontrado. Veja a lista com "cais llm envs".', 'env_not_found');
+    if (matches.length > 1) throw new AgentError('More than one environment has that name. Use the id.', 'env_ambiguous');
+    throw new AgentError('Environment not found. See the list with "cais llm envs".', 'env_not_found');
   }
 
   envs(): { environments: Record<string, unknown>[] } {
@@ -259,7 +259,7 @@ export class AgentBroker {
     const client = clean(p.client ?? 'agente', 60) || 'agente';
     // a name the engine could not have: nothing is read for it
     if (p.database !== undefined && badDatabase(p.database, this.deps.getDialect(env.engine))) {
-      throw new AgentError('Nome de banco inválido.', 'invalid_database');
+      throw new AgentError('Invalid database name.', 'invalid_database');
     }
     // what the agent typed goes to the trail cleaned (no bidi, no line breaks) and short
     const db = p.database ? clean(p.database, MAX_LABEL_NAME) : undefined;
@@ -272,7 +272,7 @@ export class AgentBroker {
       }) !== false;
     // metadata only, but still nothing of an agent runs off the trail
     if (!this.trailOk() || !audit('running')) {
-      throw new AgentError('A trilha do Cais não pôde ser gravada: nada de agente roda enquanto isso.', 'trail_unavailable');
+      throw new AgentError('The Cais Trail could not be written: nothing from an agent runs meanwhile.', 'trail_unavailable');
     }
     let tree: SchemaTree;
     // columns an engine reads on demand (BigQuery): the tree without a scope has none, so --table asks per dataset
@@ -295,7 +295,7 @@ export class AgentBroker {
     }
     audit('succeeded');
     const dbs = tree.databases.filter((d) => !p.database || d.name.toLowerCase() === p.database.toLowerCase());
-    if (p.database && dbs.length === 0) throw new AgentError('Banco não encontrado neste ambiente.', 'not_found');
+    if (p.database && dbs.length === 0) throw new AgentError('Database not found in this environment.', 'not_found');
     const shape = (t: SchemaTree['databases'][number]['tables'][number], columns: boolean) => ({
       name: t.name,
       type: t.type,
@@ -311,18 +311,18 @@ export class AgentBroker {
             .map((t) => shape(t, true)),
         }))
         .filter((d) => d.tables.length > 0);
-      if (found.length === 0) throw new AgentError('Tabela não encontrada.', 'not_found');
+      if (found.length === 0) throw new AgentError('Table not found.', 'not_found');
       return {
         environment: this.slugOf(env),
         databases: found,
-        ...(beyondCap ? { note: `A tabela existe em mais de ${MAX_SCOPED_SCHEMAS} bancos: só vêm os primeiros. Use --database para um banco específico.` } : {}),
+        ...(beyondCap ? { note: `The table exists in more than ${MAX_SCOPED_SCHEMAS} databases: only the first ones come back. Use --database for a specific database.` } : {}),
       };
     }
     const withColumns = !!p.database;
     return {
       environment: this.slugOf(env),
       databases: dbs.map((d) => ({ name: d.name, tables: d.tables.map((t) => shape(t, withColumns)) })),
-      ...(withColumns ? {} : { note: 'Sem --database só vêm os nomes das tabelas. Use --database ou --table para ver as colunas.' }),
+      ...(withColumns ? {} : { note: 'Without --database only the table names come back. Use --database or --table to see the columns.' }),
     };
   }
 
@@ -333,7 +333,7 @@ export class AgentBroker {
     let env = this.resolveEnv(p.env);
     const client = clean(p.client ?? 'agente', 60) || 'agente';
     const sql = p.sql;
-    if (Buffer.byteLength(sql, 'utf8') > MAX_SQL_BYTES) throw new AgentError('O SQL passa de 100 KB.', 'sql_too_large');
+    if (Buffer.byteLength(sql, 'utf8') > MAX_SQL_BYTES) throw new AgentError('The SQL is over 100 KB.', 'sql_too_large');
     const mode: AgentMode = p.write ? 'write' : 'read';
     const reason = p.reason?.trim() ? clean(p.reason, 500) : undefined;
     const database = p.database?.trim() ? p.database.trim() : undefined;
@@ -348,11 +348,11 @@ export class AgentBroker {
     };
     // an engine that cannot write (BigQuery in this version) takes no write from an agent, whatever the text says
     if (p.write && !capabilitiesOf(env.engine).modes.includes('transaction')) {
-      refuse('engine_read_only', 'O BigQuery só lê nesta versão: escrita de agente (--write) não é aceita neste ambiente.');
+      refuse('engine_read_only', 'BigQuery is read-only in this version: agent writes (--write) are not accepted in this environment.');
     }
     const textProblem = agentSqlProblem(sql, dialect);
     if (textProblem) refuse(textProblem.code, textProblem.message);
-    if (database !== undefined && badDatabase(database, dialect)) refuse('invalid_database', 'Nome de banco inválido.');
+    if (database !== undefined && badDatabase(database, dialect)) refuse('invalid_database', 'Invalid database name.');
 
     const statements: ClassifiedStatement[] = dialect
       .splitStatements(sql)
@@ -524,7 +524,7 @@ export class AgentBroker {
   async status(p: { id: string; wait?: boolean; timeoutS?: number; signal?: AbortSignal }): Promise<Record<string, unknown>> {
     this.assertEnabled();
     const rec = this.records.get(p.id);
-    if (!rec) throw new AgentError('Pedido não encontrado. Ele pode ter saído da memória do Cais.', 'not_found');
+    if (!rec) throw new AgentError('Request not found. It may no longer be in Cais memory.', 'not_found');
     let timedOut = false;
     if (p.wait && !isFinalStatus(rec.status)) {
       const ok = await this.waitFor(rec, isFinalStatus, clamp(p.timeoutS ?? DEFAULT_WAIT_S, 1, 3600) * 1000, p.signal);
@@ -555,7 +555,7 @@ export class AgentBroker {
   private projectByRef(ref: string): Project {
     const projects = this.deps.catalog.projects();
     const found = projects.find((p) => p.id === ref) ?? projects.find((p) => p.name.toLowerCase() === ref.trim().toLowerCase());
-    if (!found) throw new AgentError('Projeto não encontrado.', 'project_not_found');
+    if (!found) throw new AgentError('Project not found.', 'project_not_found');
     return found;
   }
 
@@ -586,13 +586,13 @@ export class AgentBroker {
   script(id: string): Record<string, unknown> {
     this.assertEnabled();
     const found = this.deps.scripts.get(id);
-    if (!found) throw new AgentError('Script não encontrado.', 'not_found');
+    if (!found) throw new AgentError('Script not found.', 'not_found');
     return this.scriptView(found, true);
   }
 
   async scriptSave(p: { project: string; name: string; sql: string; database?: string; client?: string }): Promise<Record<string, unknown>> {
     this.assertEnabled();
-    if (Buffer.byteLength(p.sql, 'utf8') > MAX_SQL_BYTES) throw new AgentError('O SQL passa de 100 KB.', 'sql_too_large');
+    if (Buffer.byteLength(p.sql, 'utf8') > MAX_SQL_BYTES) throw new AgentError('The SQL is over 100 KB.', 'sql_too_large');
     const project = this.projectByRef(p.project);
     const audit = (state: string, errorCode?: string): void => {
       this.deps.audit.append({
@@ -617,7 +617,7 @@ export class AgentBroker {
       const textProblem = agentSqlProblem(p.sql, dialect);
       if (textProblem) refuseScript(textProblem.message, textProblem.code);
       if (scriptDatabase !== undefined && badDatabase(scriptDatabase, dialect)) {
-        verdictProblem ??= { code: 'invalid_database', message: 'Nome de banco inválido.' };
+        verdictProblem ??= { code: 'invalid_database', message: 'Invalid database name.' };
         continue;
       }
       const statements = dialect.splitStatements(p.sql).map((s) => ({ text: s.text, c: dialect.classify(s.text), ids: dialect.identifiers(s.text) }));
@@ -630,7 +630,7 @@ export class AgentBroker {
     }
     if (!accepted && verdictProblem) refuseScript(verdictProblem.message, verdictProblem.code);
     if (/\n[ \t]*\n[ \t]*\n[ \t]*\n/.test(p.sql.replace(/\r\n/g, '\n'))) {
-      refuseScript('O script tem linhas em branco demais em sequência. Use no máximo duas.', 'blank_lines');
+      refuseScript('The script has too many blank lines in a row. Use at most two.', 'blank_lines');
     }
     try {
       const saved = await this.deps.scripts.save(
@@ -643,7 +643,7 @@ export class AgentBroker {
     } catch (error) {
       if (error instanceof CaisError) {
         audit('refused', error.code ?? 'invalid');
-        // the store wrote it in the app locale: the agent gets its pt-BR ref when it has one
+        // the store wrote it in the app locale: the agent gets its AGENT_LOCALE ref when it has one
         throw new AgentError(error.message, error.code === 'duplicate-name' ? 'duplicate_name' : 'invalid_script', undefined, refOf(error));
       }
       throw error;
@@ -1190,7 +1190,7 @@ export class AgentBroker {
 
   /**
    * What the agent gets. Result data only when the person allowed it, and only once the outcome is settled.
-   * Every text is in AGENT_LOCALE (pt-BR, fixed), whatever the app locale.
+   * Every text is in AGENT_LOCALE (English, fixed), whatever the app locale.
    */
   private response(rec: Rec, timedOut?: boolean): Record<string, unknown> {
     const out: Record<string, unknown> = {
@@ -1278,11 +1278,11 @@ const shareableError = (e: { message: string; code?: string }): { message: strin
 
 /**
  * Server errors can quote row values ("Duplicate entry 'x'"): without the person's yes, only the code travels.
- * Agent-facing: fixed pt-BR.
+ * Agent-facing: fixed English.
  */
 function withheldError(e: { message: string; code?: string; serverText?: boolean }): { message: string; code?: string } {
   if (e.code?.startsWith('ER_') || e.serverText) {
-    return { message: 'O servidor recusou o comando. Os detalhes foram omitidos.', ...(e.code ? { code: e.code } : {}) };
+    return { message: 'The server refused the statement. The details were left out.', ...(e.code ? { code: e.code } : {}) };
   }
   const { serverText: _quoted, ...own } = e;
   return own;

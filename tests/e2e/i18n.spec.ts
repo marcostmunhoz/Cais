@@ -5,7 +5,7 @@ import { expect, test, type ElectronApplication, type Page } from '@playwright/t
 import { launch, root, seedUserData, setSql, setTheme, shortTempDir, shots } from './helpers';
 
 // The app in English (CAIS_LOCALE=en, test hook of the unpackaged app). The person reads English
-// everywhere (menus, sidebar, bars, dialogs, the agent modal); the agent keeps reading pt-BR through the real CLI.
+// everywhere (menus, sidebar, bars, dialogs, the agent modal); the agent reads English whatever the app locale, through the real CLI.
 
 const cliFile = join(root, 'out', 'cli', 'cais.mjs');
 
@@ -139,7 +139,7 @@ test('the Registry and the Trail open with English headings', async () => {
   await expect(trail).toHaveCount(0);
 });
 
-test('an agent read that needs approval: the modal is English, the CLI stays pt-BR; screenshot', async () => {
+test('an agent read that needs approval: the modal is English, the CLI stays English; screenshot', async () => {
   await page.getByTestId('agents-entry').click();
   const panel = dialog('Agents');
   await expect(panel).toContainText('Agent access');
@@ -148,10 +148,10 @@ test('an agent read that needs approval: the modal is English, the CLI stays pt-
   await panel.getByRole('button', { name: 'Close' }).first().click();
   await expect(page.getByTestId('agents-status')).toContainText('Agents on');
 
-  // a policy refusal: the CLI's text is pt-BR
+  // a policy refusal: the CLI's text is English
   const noReason = await cli(['llm', 'query', 'api/pro', '--sql', 'SELECT 1']);
   expect([noReason.code, noReason.json.code]).toEqual([2, 'reason_required']);
-  expect(noReason.json.error).toBe('Este pedido precisa de aprovação. Informe o motivo com --reason.');
+  expect(noReason.json.error).toBe('This request needs approval. Give the reason with --reason.');
 
   const run = cli(['llm', 'query', 'api/pro', '--sql', 'SELECT id, owner FROM agent_items ORDER BY id', '--reason', 'Check today’s incident', '--wait', '--client', 'Claude Code']);
   const modal = dialog('Agent asks to read');
@@ -172,12 +172,12 @@ test('an agent read that needs approval: the modal is English, the CLI stays pt-
   expect(out.json.results[0].rows[0]).toEqual([1, 'ana@exemplo.com']);
 });
 
-test('an error from main code reaches the agent in pt-BR; the default client name reads in English', async () => {
+test('an error from main code reaches the agent in English; the default client name reads in English', async () => {
   const first = await cli(['llm', 'script-save', '--project', 'api', '--name', 'Cards by status', '--sql', 'SELECT status, COUNT(*) FROM cards GROUP BY 1']);
   expect(first.code).toBe(0);
   const again = await cli(['llm', 'script-save', '--project', 'api', '--name', 'cards by status', '--sql', 'SELECT 2']);
   expect([again.code, again.json.code]).toEqual([2, 'duplicate_name']);
-  expect(again.json.error).toBe('Já existe um script com esse nome em api.');
+  expect(again.json.error).toBe('A script with this name already exists in api.');
   await page.getByTestId('env-dev').getByRole('button', { name: /Expand databases|Collapse databases/ }).first().waitFor();
   if (!(await page.getByTestId('scripts-dev').isVisible())) await page.getByTestId('env-dev').getByRole('button', { name: 'Expand databases' }).click();
   await expect(page.getByTestId('scripts-count-dev')).toHaveText('1');

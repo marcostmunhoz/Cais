@@ -101,7 +101,7 @@ describe('limits for agents', () => {
     expect(Date.now() - t0).toBeLessThan(5000);
     await clock.advance(READ_HARD_CUT_MS);
     const out = await slow;
-    expect(out).toMatchObject({ status: 'failed', error: { code: 'agent_timeout', message: 'Tempo limite para agentes esgotado.' } });
+    expect(out).toMatchObject({ status: 'failed', error: { code: 'agent_timeout', message: 'Time limit for agents reached.' } });
     await sleep(300);
     const [rows] = await root.query("SELECT COUNT(*) n FROM information_schema.PROCESSLIST WHERE INFO LIKE 'SELECT COUNT(*) FROM information_schema.COLLATIONS a,%'");
     expect(Number((rows as any)[0].n)).toBe(0);

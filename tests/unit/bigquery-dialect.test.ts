@@ -537,10 +537,10 @@ describe('agentCodeProblem', () => {
     expect(p('SELECT 1 \u{1F600}')).toContain('⟨U+1F600⟩');
   });
   it('refuses a non-ASCII function name and a quoted parameter', () => {
-    expect(p('SELECT `fünc`(1)')).toContain('função');
-    expect(p('SELECT @`é`')).toContain('parâmetro');
-    expect(p("SELECT @'x'")).toContain('parâmetro');
-    expect(p("SELECT ?'x'")).toContain('parâmetro');
+    expect(p('SELECT `fünc`(1)')).toContain('Function name');
+    expect(p('SELECT @`é`')).toContain('Parameter name');
+    expect(p("SELECT @'x'")).toContain('Parameter name');
+    expect(p("SELECT ?'x'")).toContain('Parameter name');
     expect(p('SELECT * FROM `é`(1) ')).not.toBeNull();
     expect(p('SELECT * FROM `é`')).toBeNull();
   });
@@ -557,7 +557,7 @@ describe('agentCodeProblem', () => {
   });
   it('refuses strings of three quotes', () => {
     for (const sql of ["SELECT '''a'''", 'SELECT """a"""', "SELECT r'''a'''", "SELECT b'''a'''", "SELECT ''''''"]) {
-      expect(p(sql), sql).toContain('três aspas');
+      expect(p(sql), sql).toContain('Triple-quoted');
     }
     expect(p("SELECT '', ''")).toBeNull();
     expect(p("SELECT 'a'")).toBeNull();
@@ -571,12 +571,12 @@ describe('agentCodeProblem', () => {
   it('lets raw strings through only when every reading ends them in the same place', () => {
     expect(p("SELECT r'abc'")).toBeNull();
     expect(p('SELECT r"a b"')).toBeNull();
-    expect(p("SELECT r'\\d'")).toContain('crua');
-    expect(p("SELECT r'\\''")).toContain('crua');
-    expect(p("SELECT rb'a\\\\'")).toContain('crua');
+    expect(p("SELECT r'\\d'")).toContain('Raw string');
+    expect(p("SELECT r'\\''")).toContain('Raw string');
+    expect(p("SELECT rb'a\\\\'")).toContain('Raw string');
   });
   it('refuses a backslash between backticks', () => {
-    expect(p('SELECT `a\\`b`')).toContain('crases');
+    expect(p('SELECT `a\\`b`')).toContain('Backtick-quoted');
     expect(p('SELECT `ab`')).toBeNull();
   });
   it('refuses x glued to a quote (the highlighter reads a hex number)', () => {
@@ -590,9 +590,9 @@ describe('agentCodeProblem', () => {
     expect(p(sql)).toBeNull();
     expect(lex(sql).filter((t) => t.kind === 'string')).toHaveLength(4);
   });
-  it('speaks pt-BR unless asked otherwise', () => {
-    expect(agentCodeProblem("SELECT '''a'''")).toMatch(/três aspas/);
-    expect(agentCodeProblem("SELECT '''a'''", 'en')).toMatch(/Triple-quoted/);
+  it('speaks English unless asked otherwise', () => {
+    expect(agentCodeProblem("SELECT '''a'''")).toMatch(/Triple-quoted/);
+    expect(agentCodeProblem("SELECT '''a'''", 'pt-BR')).toMatch(/três aspas/);
   });
 });
 

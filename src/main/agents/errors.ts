@@ -3,8 +3,8 @@ import { AGENT_LOCALE, render, renderRef, type MessageRef } from '@shared/i18n';
 /**
  * An error that reaches the agent: a stable code and a message that is safe to show.
  * - Built from a MessageRef: `message` is in the app locale (the person may see it: modal, panel, toast) and `ref`
- *   is what the agent gets, rendered in AGENT_LOCALE (pt-BR, fixed).
- * - Built from a string: the text is fixed pt-BR for the agent (errors only agents ever see), unless an explicit
+ *   is what the agent gets, rendered in AGENT_LOCALE (English, fixed).
+ * - Built from a string: the text is fixed English for the agent (errors only agents ever see), unless an explicit
  *   `ref` says what the agent gets.
  */
 export class AgentError extends Error {

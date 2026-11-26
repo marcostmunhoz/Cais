@@ -31,10 +31,10 @@ describe('cais llm: argument parsing', () => {
   it('takes the SQL from --file or from stdin (-), exactly one source', () => {
     expect(parse('query', 'api/dev', '--file', 'q.sql').command).toMatchObject({ sql: { kind: 'file', path: 'q.sql' } });
     expect(parse('query', 'api/dev', '-').command).toMatchObject({ sql: { kind: 'stdin' } });
-    expect(() => parse('query', 'api/dev')).toThrow('exatamente uma opção');
-    expect(() => parse('query', 'api/dev', '--sql', 'a', '--file', 'b')).toThrow('exatamente uma opção');
-    expect(() => parse('query', 'api/dev', '--sql', 'a', '-')).toThrow('exatamente uma opção');
-    expect(() => parse('query', 'api/dev', '--sql', '  ')).toThrow('vazio');
+    expect(() => parse('query', 'api/dev')).toThrow('exactly one option');
+    expect(() => parse('query', 'api/dev', '--sql', 'a', '--file', 'b')).toThrow('exactly one option');
+    expect(() => parse('query', 'api/dev', '--sql', 'a', '-')).toThrow('exactly one option');
+    expect(() => parse('query', 'api/dev', '--sql', '  ')).toThrow('empty');
   });
 
   it('parses the other commands', () => {
@@ -71,7 +71,7 @@ describe('cais llm: argument parsing', () => {
 
   it('has no command to approve, commit, toggle access, edit or delete', () => {
     for (const sub of ['approve', 'reject', 'commit', 'rollback', 'enable', 'script-edit', 'script-delete', 'script-update']) {
-      expect(() => parse(sub, 'x'), sub).toThrow('Comando desconhecido');
+      expect(() => parse(sub, 'x'), sub).toThrow('Unknown command');
     }
   });
 });
@@ -136,9 +136,9 @@ describe('cais llm: finding the endpoint', () => {
 });
 
 describe('cais llm guide', () => {
-  it('explains the flow in pt-BR, with the rules that matter', () => {
-    expect(GUIDE).toContain('Você não executa, você pede');
-    for (const word of ['--reason', '--wait', 'awaiting', 'Rollback', 'result_withheld', 'cais llm envs', '5  tempo']) expect(GUIDE).toContain(word.replace('awaiting', 'Commit'));
+  it('explains the flow in English, with the rules that matter', () => {
+    expect(GUIDE).toContain('You do not execute, you ask');
+    for (const word of ['--reason', '--wait', 'awaiting', 'Rollback', 'result_withheld', 'cais llm envs', '5  wait timed out']) expect(GUIDE).toContain(word.replace('awaiting', 'Commit'));
     expect(GUIDE).not.toMatch(/!/);
     // the BigQuery section: read only, the estimate, the approval above 10 GiB and the codes
     for (const word of ['BigQuery', 'engine_read_only', '10 GiB', 'bytes_over_approved', 'bytes_billed', 'EXTERNAL_QUERY', 'system_schema', 'ML.*, AI.*']) {
@@ -147,7 +147,7 @@ describe('cais llm guide', () => {
   });
 
   it('tells who decided and that a closed pipe keeps the exit code', () => {
-    for (const word of ['"decided_by": "person"', '"policy"', '"auto_commit": true', 'false (a pessoa deu o Commit)', '| head']) expect(GUIDE).toContain(word);
+    for (const word of ['"decided_by": "person"', '"policy"', '"auto_commit": true', 'false (the person clicked Commit)', '| head']) expect(GUIDE).toContain(word);
   });
 });
 

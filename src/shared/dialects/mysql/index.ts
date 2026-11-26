@@ -18,8 +18,8 @@ const agentRules: AgentRules = {
   writeVerbs: ['INSERT', 'REPLACE', 'UPDATE', 'DELETE'],
   isValidDatabaseName: (name) => name.length <= MAX_DATABASE_NAME && hiddenTextProblem(name) === null && !/[\r\n`]/.test(name),
   messages: {
-    systemSchemaWrite: 'Agentes não escrevem nos esquemas do sistema (mysql, performance_schema, sys, information_schema).',
-    systemSchemaRead: 'Agentes não leem o esquema mysql (contas e hashes de senha).',
+    systemSchemaWrite: 'Agents do not write to the system schemas (mysql, performance_schema, sys, information_schema).',
+    systemSchemaRead: 'Agents do not read the mysql schema (accounts and password hashes).',
   },
 };
 

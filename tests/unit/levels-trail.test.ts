@@ -102,7 +102,7 @@ describe('broker: autonomous writes', () => {
     const h = free();
     const res = (await h.broker.query({ env: 'api/dev', sql: 'UPDATE cards SET blocked = 1', write: true, reason: 'r' })) as any;
     expect(res.status).toBe('pending_approval');
-    expect(res.approval_reason).toContain('alerta');
+    expect(res.approval_reason).toContain('has an alert');
     expect(h.executor.writes).toHaveLength(0);
     expect(h.broker.snapshot().pending[0]!.approvalReason).toContain('alerta');
     expect(h.broker.snapshot().pending[0]!.autoCommit).toBeUndefined();
@@ -135,7 +135,7 @@ describe('broker: autonomous writes', () => {
     h.executor.writeOutcome = { results: [result({ kind: 'write', verb: 'UPDATE', affectedRows: 600 }), result({ kind: 'write', verb: 'DELETE', affectedRows: 401 })], open: true };
     const res = (await h.broker.query({ env: 'api/dev', sql: 'UPDATE cards SET a = 1 WHERE id > 0; DELETE FROM cards WHERE id < 0', write: true, reason: 'r' })) as any;
     expect(res.status).toBe('awaiting_commit');
-    expect(res.commit_reason).toContain('1.001');
+    expect(res.commit_reason).toContain('1,001');
     expect(res.decided_by).toBe('policy');
     expect(res).not.toHaveProperty('auto_commit');
     expect(h.executor.commits).toBe(0);
@@ -151,7 +151,7 @@ describe('broker: autonomous writes', () => {
     h.executor.writeOutcome = { results: [result({ kind: 'write', verb: 'INSERT', affectedRows: 1, warnings: 1 })], open: true };
     const res = (await h.broker.query({ env: 'api/dev', sql: "INSERT INTO cards (id) VALUES (1)", write: true, reason: 'r' })) as any;
     expect(res.status).toBe('awaiting_commit');
-    expect(res.commit_reason).toContain('aviso');
+    expect(res.commit_reason).toContain('warning');
   });
 
   it('a failed write rolls back as before and does not commit', async () => {
@@ -204,7 +204,7 @@ describe('broker: autonomous writes', () => {
     };
     const res = (await h.broker.query({ env: 'api/dev', sql: 'UPDATE cards SET a = 1 WHERE id = 1', write: true, reason: 'r' })) as any;
     expect(res.status).toBe('awaiting_commit');
-    expect(res.commit_reason).toContain('mudou');
+    expect(res.commit_reason).toContain('changed');
     expect(h.executor.commits).toBe(0);
   });
 
@@ -233,7 +233,7 @@ describe('broker: autonomous writes', () => {
     await h.broker.commit(res.request_id);
     const done = (await h.broker.status({ id: res.request_id })) as any;
     expect(done).toMatchObject({ status: 'committed', decided_by: 'policy', auto_commit: false });
-    expect(done.commit_reason).toContain('1.001');
+    expect(done.commit_reason).toContain('1,001');
     // the trail keeps its own format: autoCommit still means "eligible", secondDecidedBy says who committed
     expect(h.audit.at(-1)).toMatchObject({ state: 'committed', decidedBy: 'policy', secondDecidedBy: 'user', autoCommit: true });
   });
@@ -241,14 +241,14 @@ describe('broker: autonomous writes', () => {
   it('what the Cais cannot count or bound goes to the person: triggers, cascading FKs, views, stored functions, other verbs, partial metadata', async () => {
     const cases: { tree: any; sql: string; reason: RegExp }[] = [
       { tree: { foreignKeysComplete: true, databases: [{ name: 'app', tables: [{ name: 'cards', type: 'table', engine: 'InnoDB', columns: [], triggers: ['DELETE FROM app.logs'] }] }] }, sql: 'UPDATE cards SET a = 1 WHERE id = 1', reason: /trigger/ },
-      { tree: { foreignKeysComplete: true, databases: [{ name: 'app', tables: [{ name: 'cards', type: 'table', engine: 'InnoDB', columns: [], cascadedBy: ['app.items'] }] }] }, sql: 'DELETE FROM cards WHERE id = 1', reason: /cascata/ },
+      { tree: { foreignKeysComplete: true, databases: [{ name: 'app', tables: [{ name: 'cards', type: 'table', engine: 'InnoDB', columns: [], cascadedBy: ['app.items'] }] }] }, sql: 'DELETE FROM cards WHERE id = 1', reason: /cascading/ },
       { tree: { foreignKeysComplete: true, databases: [{ name: 'app', tables: [{ name: 'v_cards', type: 'view', columns: [], uses: ['app.cards'] }, { name: 'cards', type: 'table', engine: 'InnoDB', columns: [] }] }] }, sql: 'UPDATE v_cards SET a = 1 WHERE id = 1', reason: /view/ },
-      { tree: { foreignKeysComplete: true, databases: [{ name: 'app', tables: [{ name: 'cards', type: 'table', engine: 'InnoDB', columns: [] }], routines: [{ name: 'purge', body: 'DELETE FROM cards' }] }] }, sql: 'UPDATE cards SET a = app.purge() WHERE id = 1', reason: /função purge/i },
-      { tree: { foreignKeysComplete: true, databases: [{ name: 'app', tables: [{ name: 'cards', type: 'table', engine: 'InnoDB', columns: [] }], routines: [{ name: 'purge', body: 'DELETE FROM cards' }] }] }, sql: 'SELECT purge()', reason: /só INSERT, REPLACE, UPDATE e DELETE/ },
-      { tree: { foreignKeysComplete: true, databases: [{ name: 'app', tables: [{ name: 'cards', type: 'table', engine: 'InnoDB', columns: [] }] }] }, sql: 'SET @x = 1; UPDATE cards SET a = @x WHERE id = 1', reason: /só INSERT/ },
-      { tree: { foreignKeysComplete: true, databases: [{ name: 'app', partial: true, tables: [{ name: 'cards', type: 'table', engine: 'InnoDB', columns: [] }] }] }, sql: 'UPDATE cards SET a = 1 WHERE id = 1', reason: /metadados/ },
-      { tree: { foreignKeysComplete: false, databases: [{ name: 'app', tables: [{ name: 'cards', type: 'table', engine: 'InnoDB', columns: [] }] }] }, sql: 'DELETE FROM cards WHERE id = 1', reason: /chaves estrangeiras/ },
-      { tree: { databases: [{ name: 'app', tables: [{ name: 'cards', type: 'table', engine: 'InnoDB', columns: [] }] }] }, sql: "INSERT INTO cards (id) VALUES (1) ON DUPLICATE KEY UPDATE id = 2", reason: /chaves estrangeiras/ },
+      { tree: { foreignKeysComplete: true, databases: [{ name: 'app', tables: [{ name: 'cards', type: 'table', engine: 'InnoDB', columns: [] }], routines: [{ name: 'purge', body: 'DELETE FROM cards' }] }] }, sql: 'UPDATE cards SET a = app.purge() WHERE id = 1', reason: /database function purge/i },
+      { tree: { foreignKeysComplete: true, databases: [{ name: 'app', tables: [{ name: 'cards', type: 'table', engine: 'InnoDB', columns: [] }], routines: [{ name: 'purge', body: 'DELETE FROM cards' }] }] }, sql: 'SELECT purge()', reason: /only INSERT, REPLACE, UPDATE and DELETE/ },
+      { tree: { foreignKeysComplete: true, databases: [{ name: 'app', tables: [{ name: 'cards', type: 'table', engine: 'InnoDB', columns: [] }] }] }, sql: 'SET @x = 1; UPDATE cards SET a = @x WHERE id = 1', reason: /only INSERT/ },
+      { tree: { foreignKeysComplete: true, databases: [{ name: 'app', partial: true, tables: [{ name: 'cards', type: 'table', engine: 'InnoDB', columns: [] }] }] }, sql: 'UPDATE cards SET a = 1 WHERE id = 1', reason: /metadata/ },
+      { tree: { foreignKeysComplete: false, databases: [{ name: 'app', tables: [{ name: 'cards', type: 'table', engine: 'InnoDB', columns: [] }] }] }, sql: 'DELETE FROM cards WHERE id = 1', reason: /cannot see every foreign key/ },
+      { tree: { databases: [{ name: 'app', tables: [{ name: 'cards', type: 'table', engine: 'InnoDB', columns: [] }] }] }, sql: "INSERT INTO cards (id) VALUES (1) ON DUPLICATE KEY UPDATE id = 2", reason: /cannot see every foreign key/ },
       { tree: { foreignKeysComplete: true, databases: [{ name: 'app', triggersVisible: false, tables: [{ name: 'cards', type: 'table', engine: 'InnoDB', columns: [] }] }] }, sql: 'UPDATE cards SET a = 1 WHERE id = 1', reason: /TRIGGER/ },
     ];
     for (const c of cases) {
@@ -295,7 +295,7 @@ describe('broker: autonomous writes', () => {
     expect(first.status).toBe('awaiting_commit');
     const second = (await h.broker.query({ env: 'api/dev', sql: 'UPDATE cards SET a = 2 WHERE id = 1', write: true, reason: 'r' })) as any;
     expect(second.status).toBe('pending_approval');
-    expect(second.approval_reason).toContain('Já há uma escrita');
+    expect(second.approval_reason).toContain('write is already open');
   });
 
   it('automatic commits stop at 5.000 rows per environment in 15 minutes: a loop of small deletes reaches the person', async () => {
@@ -306,7 +306,7 @@ describe('broker: autonomous writes', () => {
       const r = (await h.broker.query({ env: 'api/dev', sql: `DELETE FROM cards WHERE id > ${i}`, write: true, reason: 'r' })) as any;
       statuses.push(r.status);
       if (r.status === 'awaiting_commit') {
-        expect(r.commit_reason).toContain('15 minutos');
+        expect(r.commit_reason).toContain('15 minutes');
         await h.broker.rollback(r.request_id);
       }
     }

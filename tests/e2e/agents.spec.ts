@@ -76,7 +76,7 @@ test('access starts off: no socket, the CLI exits 4 and says what to do', async 
   expect(existsSync(join(userData, 'agent-endpoint.json'))).toBe(false);
   const out = await cli(['llm', 'envs']);
   expect(out.code).toBe(4);
-  expect(out.json.error).toBe('Peça para a pessoa abrir o Cais e ligar o acesso de agentes.');
+  expect(out.json.error).toBe('Ask the person to open Cais and turn on agent access.');
   // the output closed early: still exit 4, and no stack trace
   const closed = await cli(['llm', 'envs'], {}, { closeStdout: true });
   expect([closed.code, closed.stderr]).toEqual([4, '']);
@@ -424,7 +424,7 @@ test('"Leitura e escrita liberadas" in dev: with an alert the write waits for th
 
   // the test account has no PROCESS: an UPDATE cannot rule out a hidden cascading foreign key and waits
   const upd = await cli(['llm', 'query', 'api/dev', '--write', '--sql', "UPDATE agent_items SET status = 'auto' WHERE id = 3", '--reason', 'teste do nível', '--client', 'Claude Code']);
-  expect(upd.json.approval_reason).toContain('chaves estrangeiras');
+  expect(upd.json.approval_reason).toContain('cannot see every foreign key');
   await modal('Agente pede para escrever').getByRole('button', { name: 'Recusar' }).click();
   // a plain INSERT never cascades: it commits by itself
   const out = await cli(['llm', 'query', 'api/dev', '--write', '--sql', "INSERT INTO agent_items VALUES (4, 'auto', 'teste')", '--reason', 'teste do nível', '--client', 'Claude Code']);

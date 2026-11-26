@@ -93,16 +93,16 @@ describe('what counts as a native function', () => {
 
 describe('redactForAgent on BigQuery', () => {
   const t = { gcpProject: 'my-secret-project-1' };
-  it('removes the project id and every e-mail, in the person locale with its own placeholders', () => {
+  it('removes the project id and every e-mail, in English for agents and in the person locale with its own placeholders', () => {
     const text = 'Access Denied: Project my-secret-project-1: User maria@empresa.com cannot run in projects/my-secret-project-1/jobs';
-    expect(redactForAgent(text, t)).toBe('Access Denied: Project <projeto>: User <conta> cannot run in projects/<projeto>/jobs');
-    expect(redactForAgent(text, t, 'en')).toBe('Access Denied: Project <project>: User <account> cannot run in projects/<project>/jobs');
+    expect(redactForAgent(text, t)).toBe('Access Denied: Project <project>: User <account> cannot run in projects/<project>/jobs');
+    expect(redactForAgent(text, t, 'pt-BR')).toBe('Access Denied: Project <projeto>: User <conta> cannot run in projects/<projeto>/jobs');
   });
   it('a service account carries the project in its domain: the whole address goes', () => {
-    expect(redactForAgent('as sa-1@my-secret-project-1.iam.gserviceaccount.com failed', t)).toBe('as <conta> failed');
+    expect(redactForAgent('as sa-1@my-secret-project-1.iam.gserviceaccount.com failed', t)).toBe('as <account> failed');
   });
   it('a domain-scoped project goes whole and by its short name', () => {
-    expect(redactForAgent('Not found: acme.com:my-proj-123 and my-proj-123', { gcpProject: 'acme.com:my-proj-123' })).toBe('Not found: <projeto> and <projeto>');
+    expect(redactForAgent('Not found: acme.com:my-proj-123 and my-proj-123', { gcpProject: 'acme.com:my-proj-123' })).toBe('Not found: <project> and <project>');
   });
   it('leaves other text alone', () => {
     expect(redactForAgent('Table sales.orders not found', t)).toBe('Table sales.orders not found');
@@ -195,11 +195,11 @@ describe('the broker with a dry run', () => {
     expect((await q({ env: 'api/bq', sql: 'SELECT * FROM ds.v' })).status).toBe('succeeded');
   });
 
-  it('the approval reason is a reference: pt-BR for the agent, the app locale for the person', async () => {
+  it('the approval reason is a reference: English for the agent, the app locale for the person', async () => {
     const { q, executor, broker } = bqBroker();
     executor.prepared = [select({ bytesEstimated: 30 * GIB })];
     const out = await q({ env: 'api/bq', sql: 'SELECT 1', reason: 'x' });
-    expect(out.approval_reason).toBe('Esta leitura deve ler 30 GiB, acima de 10 GiB: ela espera a sua aprovação, qualquer que seja o nível do ambiente.');
+    expect(out.approval_reason).toBe("This read should scan 30 GiB, above 10 GiB: it waits for your approval, whatever the environment's level.");
     expect(broker.snapshot().pending[0]!.statements[0]).toMatchObject({ bytesEstimated: 30 * GIB });
   });
 
@@ -210,7 +210,7 @@ describe('the broker with a dry run', () => {
     executor.prepared = [select({ bytesEstimated: 3 * GIB })];
     const out = await q({ env: 'api/bq', sql: 'SELECT 1', reason: 'x' });
     expect(out.status).toBe('pending_approval');
-    expect(out.approval_reason).toContain('limite de 2 GiB');
+    expect(out.approval_reason).toContain('limit of 2 GiB');
   });
 
   it('no limit on the environment: 10 GiB still holds', async () => {
@@ -323,7 +323,7 @@ describe('chained calls and OBJ.* (the review must see which function runs)', ()
       'SELECT (x).a.my_udf() FROM t',
       'SELECT a[0].my_udf() FROM t',
     ]) {
-      expect(bq.agentCodeProblem!(sql), sql).toMatch(/encadeada/);
+      expect(bq.agentCodeProblem!(sql), sql).toMatch(/Chained call/);
     }
   });
 

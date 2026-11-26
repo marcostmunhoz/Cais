@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { parseArgs, UsageError, MAX_SQL_BYTES, type Command, type SqlSource } from './args';
 import { send, type Reply } from './client';
-import { discoverEndpoint, UNAVAILABLE_MESSAGE } from './endpoint';
+import { discoverEndpoint, PROTOCOL_MISMATCH_MESSAGE, UNAVAILABLE_MESSAGE } from './endpoint';
 import { EXIT, exitForError, exitForResult } from './exit';
 import { GUIDE } from './guide';
 import { finalExitCode, guardPipe, writeTo } from './output';
@@ -26,7 +26,7 @@ function readStdin(): Promise<string> {
     process.stdin.setEncoding('utf8');
     process.stdin.on('data', (chunk: string) => {
       data += chunk;
-      if (data.length > MAX_SQL_BYTES * 2) reject(new UsageError('O SQL passa de 100 KB.', 'sql_too_large'));
+      if (data.length > MAX_SQL_BYTES * 2) reject(new UsageError('The SQL is over 100 KB.', 'sql_too_large'));
     });
     process.stdin.on('end', () => resolve(data));
     process.stdin.on('error', reject);
@@ -41,11 +41,11 @@ async function loadSql(source: SqlSource): Promise<string> {
     try {
       sql = readFileSync(source.path, 'utf8');
     } catch {
-      throw new UsageError(`Não foi possível ler o arquivo ${source.path}.`, 'file_unreadable');
+      throw new UsageError(`Could not read the file ${source.path}.`, 'file_unreadable');
     }
   }
-  if (!sql.trim()) throw new UsageError('O SQL está vazio.');
-  if (Buffer.byteLength(sql, 'utf8') > MAX_SQL_BYTES) throw new UsageError('O SQL passa de 100 KB.', 'sql_too_large');
+  if (!sql.trim()) throw new UsageError('The SQL is empty.');
+  if (Buffer.byteLength(sql, 'utf8') > MAX_SQL_BYTES) throw new UsageError('The SQL is over 100 KB.', 'sql_too_large');
   return sql;
 }
 
@@ -137,21 +137,21 @@ async function main(argv: string[]): Promise<number> {
 
   const found = discoverEndpoint({ env: process.env, platform: process.platform, home: homedir(), readFile: readIfExists, pidAlive });
   if ('protocolMismatch' in found) {
-    return fail('Esta versão do comando cais não conversa com este Cais. Atualize o app e reinstale o comando.', 'protocol_mismatch', EXIT.usage);
+    return fail(PROTOCOL_MISMATCH_MESSAGE, 'protocol_mismatch', EXIT.usage);
   }
   if ('unavailable' in found) return fail(UNAVAILABLE_MESSAGE, 'cais_unavailable', EXIT.unavailable);
 
   // a server that does not answer hello within 10 s counts as unavailable (the real request may then wait as long as it needs)
   const hello = await send(found.socket, 'hello', {}, 10_000);
   if (hello.kind === 'unavailable') return fail(UNAVAILABLE_MESSAGE, 'cais_unavailable', EXIT.unavailable);
-  if (hello.kind === 'protocol') return fail('Esta versão do comando cais não conversa com este Cais. Atualize o app e reinstale o comando.', 'protocol_mismatch', EXIT.usage);
+  if (hello.kind === 'protocol') return fail(PROTOCOL_MISMATCH_MESSAGE, 'protocol_mismatch', EXIT.usage);
 
   const reply: Reply = await send(found.socket, request.method, request.params);
   switch (reply.kind) {
     case 'unavailable':
       return fail(UNAVAILABLE_MESSAGE, 'cais_unavailable', EXIT.unavailable);
     case 'protocol':
-      return fail('Esta versão do comando cais não conversa com este Cais. Atualize o app e reinstale o comando.', 'protocol_mismatch', EXIT.usage);
+      return fail(PROTOCOL_MISMATCH_MESSAGE, 'protocol_mismatch', EXIT.usage);
     case 'error':
       return fail(reply.message, reply.code, exitForError(reply.code), reply.fields);
     case 'ok':

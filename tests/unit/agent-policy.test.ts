@@ -38,7 +38,7 @@ describe('decide(): the policy table', () => {
     for (const sql of ['INSERT INTO t VALUES (1)', 'UPDATE t SET a = 1', 'DELETE FROM t', 'SELECT * FROM t FOR UPDATE', "SELECT 1 INTO OUTFILE '/tmp/x'"]) {
       expect(d(sql, { reason: 'x' })).toEqual({ action: 'refuse', code: 'writes_in_read', message: MESSAGES.writes });
     }
-    expect(MESSAGES.writes).toBe('Este SQL escreve. Peça com --write.');
+    expect(MESSAGES.writes).toBe('This SQL writes. Ask with --write.');
   });
 
   it('DDL, implicit commits and transaction control are refused in both modes', () => {
@@ -52,7 +52,7 @@ describe('decide(): the policy table', () => {
         expect(d(sql, { mode, reason: 'x' }), `${mode}: ${sql}`).toEqual({ action: 'refuse', code: 'ddl_or_transaction', message: MESSAGES.ddl });
       }
     }
-    expect(MESSAGES.ddl).toBe('Agentes não rodam DDL nem controlam transação.');
+    expect(MESSAGES.ddl).toBe('Agents do not run DDL or control transactions.');
   });
 
   it('one forbidden command anywhere in a batch refuses the whole batch', () => {
@@ -135,8 +135,8 @@ describe('decide(): the rules come from the dialect', () => {
     expect(r.secretSchemas).toEqual(['mysql']);
     expect(r.deniedFunctions).toEqual(['GET_LOCK', 'RELEASE_LOCK', 'RELEASE_ALL_LOCKS', 'SLEEP', 'BENCHMARK', 'LOAD_FILE']);
     expect(r.writeVerbs).toEqual(['INSERT', 'REPLACE', 'UPDATE', 'DELETE']);
-    expect(r.messages.systemSchemaWrite).toBe('Agentes não escrevem nos esquemas do sistema (mysql, performance_schema, sys, information_schema).');
-    expect(r.messages.systemSchemaRead).toBe('Agentes não leem o esquema mysql (contas e hashes de senha).');
+    expect(r.messages.systemSchemaWrite).toBe('Agents do not write to the system schemas (mysql, performance_schema, sys, information_schema).');
+    expect(r.messages.systemSchemaRead).toBe('Agents do not read the mysql schema (accounts and password hashes).');
   });
   it('isValidDatabaseName: up to 64 characters, no backtick, newline or hidden text', () => {
     const ok = dialect.agentRules.isValidDatabaseName;

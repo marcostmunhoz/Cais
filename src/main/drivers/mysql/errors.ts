@@ -22,7 +22,7 @@ interface RawError {
 
 /**
  * Translates mysql2 errors into friendly messages in the app locale, keeping the original code and message
- * (the server's own text is never translated). A friendly message carries its `ref`, so agents get it in pt-BR.
+ * (the server's own text is never translated). A friendly message carries its `ref`, so agents get it in English.
  */
 export function mapMysqlError(error: unknown, ctx: ErrorContext): DbSessionError {
   const raw = (error ?? {}) as RawError;

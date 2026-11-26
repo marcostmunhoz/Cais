@@ -210,14 +210,15 @@ describe('script helpers', () => {
 describe('ScriptStore messages in English', () => {
   afterEach(() => setLocale('pt-BR'));
 
-  it('shows the person English and keeps a ref that renders in pt-BR for agents', async () => {
+  it('shows the person English and keeps a ref that renders in English for agents', async () => {
     const { scripts, catalog, api, web } = await seeded();
     await scripts.save({ projectId: api.id, name: 'faturas', sql: 'a' });
     setLocale('en');
     const taken = (await scripts.save({ projectId: api.id, name: 'Faturas', sql: 'b' }, 'agent').catch((e: unknown) => e)) as CaisError;
     expect(taken.message).toBe('A script with this name already exists in api.');
     expect(taken.code).toBe('duplicate-name');
-    expect(renderRef(taken.ref!, AGENT_LOCALE)).toBe('Já existe um script com esse nome em api.');
+    expect(renderRef(taken.ref!, AGENT_LOCALE)).toBe('A script with this name already exists in api.');
+    expect(renderRef(taken.ref!, 'pt-BR')).toBe('Já existe um script com esse nome em api.');
     await expect(scripts.save({ projectId: api.id, name: ' ', sql: 'b' })).rejects.toThrow('Enter the script name.');
     await expect(scripts.save({ projectId: api.id, name: 'x'.repeat(121), sql: 'b' })).rejects.toThrow('The name can have up to 120 characters.');
     await expect(scripts.delete('nope')).rejects.toThrow('Script not found.');

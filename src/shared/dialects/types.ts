@@ -96,7 +96,7 @@ export interface InsertSpec {
 
 /**
  * What agents may and may not touch, as the engine names it. `decide()` (main/agents/policy.ts) and the broker
- * read these and know no engine's names. The refusal messages go to agents only (fixed pt-BR).
+ * read these and know no engine's names. The refusal messages go to agents only (fixed English).
  */
 export interface AgentRules {
   /** Lower-case names of schemas/databases agents never write to. */

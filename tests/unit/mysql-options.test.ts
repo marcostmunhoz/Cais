@@ -75,12 +75,13 @@ describe('mapMysqlError in English', () => {
   afterEach(() => setLocale('pt-BR'));
   const ctx = { iam: false, host: '10.0.0.5', port: 3306, cancelled: false };
 
-  it('friendly messages follow the app locale, the server text never changes, the ref renders in pt-BR', () => {
+  it('friendly messages follow the app locale, the server text never changes, the ref renders in English for agents', () => {
     setLocale('en');
     const e = mapMysqlError({ code: 'ECONNREFUSED', message: 'connect ECONNREFUSED' }, ctx);
     expect(e.message).toBe('No response from 10.0.0.5:3306. Is the VPN on?');
     expect(e.detail).toBe('connect ECONNREFUSED');
-    expect(renderRef(e.ref!, AGENT_LOCALE)).toBe('Sem resposta de 10.0.0.5:3306. A VPN está ligada?');
+    expect(renderRef(e.ref!, AGENT_LOCALE)).toBe('No response from 10.0.0.5:3306. Is the VPN on?');
+    expect(renderRef(e.ref!, 'pt-BR')).toBe('Sem resposta de 10.0.0.5:3306. A VPN está ligada?');
     expect(mapMysqlError({ errno: 1317, message: 'interrupted' }, { ...ctx, cancelled: true }).message).toBe('Query cancelled.');
     expect(mapMysqlError({ errno: 1045, message: 'Access denied' }, ctx).message).toBe('User or password refused.');
     const raw = mapMysqlError({ code: 'ER_PARSE_ERROR', errno: 1064, sqlMessage: 'You have an error in your SQL syntax' }, ctx);

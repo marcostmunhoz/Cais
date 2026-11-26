@@ -3,7 +3,7 @@ import { render, type MessageRef } from '@shared/i18n';
 /**
  * Error with a message that is safe and meant to be shown to the person, in the app locale.
  * `ref`, when present, is the same message as a reference: code that answers agents renders it with
- * `renderRef(err.ref, AGENT_LOCALE)` (agents always read pt-BR), and falls back to `message` without it.
+ * `renderRef(err.ref, AGENT_LOCALE)` (agents always read English), and falls back to `message` without it.
  */
 export class CaisError extends Error {
   constructor(
